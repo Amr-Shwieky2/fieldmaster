@@ -1,0 +1,24 @@
+node_modules/
+dist/
+build/
+.turbo/
+.next/
+.expo/
+coverage/
+.env
+.env.local
+*.log
+.DS_Store
+apps/api/generated/
+apps/mobile/ios/Pods/
+.pnpm-store/
+
+# Terraform (infrastructure/terraform/**) -- local provider plugins and any
+# state/plan files. .terraform.lock.hcl is intentionally NOT ignored (it
+# should be committed so `terraform init` is reproducible).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example

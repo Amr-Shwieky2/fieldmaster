@@ -1,0 +1,1195 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Enums (string values are shared with packages/shared-types)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum OrgRole {
+  OWNER
+  FIELD_MANAGER
+  WORKER
+}
+
+enum AccountStatus {
+  INVITED
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  REJECTED
+  ARCHIVED
+}
+
+enum CompensationType {
+  DAILY
+  HOURLY
+}
+
+enum ShiftType {
+  STANDARD
+  DAY_TURAN
+  NIGHT_TURAN
+  EMERGENCY_CALLOUT
+}
+
+enum ShiftStatus {
+  DRAFT
+  PUBLISHED
+  OPEN
+  ACTIVE
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  CLOSED
+  CANCELLED
+}
+
+enum CheckInMethod {
+  GEOFENCED
+  FLEXI_CHECK
+}
+
+enum ClockEventType {
+  CLOCK_IN
+  CLOCK_OUT
+}
+
+enum EventOrigin {
+  ONLINE
+  OFFLINE
+}
+
+enum TimeEntryStatus {
+  ACTIVE
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  CORRECTION_REQUESTED
+}
+
+enum LocationValidationStatus {
+  PASSED
+  FLAGGED
+  BLOCKED
+  UNAVAILABLE
+}
+
+enum CorrectionReason {
+  FORGOTTEN_CLOCK_IN
+  FORGOTTEN_CLOCK_OUT
+  DEVICE_FAILURE
+  BROKEN_PHONE
+  NO_CONNECTIVITY
+  SYSTEM_ERROR
+  MANAGER_INSTRUCTION
+  OTHER
+}
+
+enum TuranType {
+  DAY_TURAN
+  NIGHT_TURAN
+}
+
+enum TuranStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  MISSED
+}
+
+enum EmergencyAuthorizationSource {
+  NIGHT_TURAN_ASSIGNMENT
+  MANUAL_MANAGER_AUTHORIZATION
+}
+
+enum TemporaryPointStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum PayrollPeriodStatus {
+  OPEN
+  CALCULATING
+  REVIEW
+  FINALIZED
+  REOPENED
+}
+
+enum PayrollAdjustmentType {
+  FORGOTTEN_STAMP_PENALTY
+  FORGOTTEN_STAMP_REVERSAL
+  MANUAL_DEDUCTION
+  MANUAL_BONUS
+}
+
+enum PayrollAdjustmentSource {
+  SYSTEM
+  MANUAL
+}
+
+enum ApprovalAction {
+  APPROVE
+  REJECT
+  REQUEST_CORRECTION
+}
+
+enum TaskCategory {
+  CONSTRUCTION
+  TRAFFIC_CONTROL
+  TRAFFIC_SIGN
+  TRAFFIC_LIGHT_INSTALLATION
+  TRAFFIC_LIGHT_REPAIR
+  INSPECTION
+  MAINTENANCE
+  EMERGENCY_REPAIR
+  OTHER
+}
+
+enum NotificationType {
+  WORKER_CLOCKED_IN
+  WORKER_CLOCKED_OUT
+  OVERTIME_THRESHOLD_CROSSED
+  EMERGENCY_SHIFT_STARTED
+  EMERGENCY_SHIFT_ENDED
+  SHIFT_AWAITING_APPROVAL
+  SHIFT_APPROVED
+  SHIFT_REJECTED
+  ONBOARDING_SUBMITTED
+  WORKER_APPROVED
+  TURAN_ASSIGNMENT_CREATED
+  TURAN_ASSIGNMENT_CHANGED
+  TEMPORARY_CHECK_IN_POINT_OPENED
+  PAYROLL_FINALIZED
+  OFFLINE_EVENT_SYNCED
+  OFFLINE_EVENT_REJECTED
+  SUSPICIOUS_LOCATION_DETECTED
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Organizations, users, membership, RBAC
+// ─────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id         String    @id @db.Uuid
+  name       String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  settings               OrganizationSettings?
+  memberships            OrganizationMembership[]
+  onboardingInvitations  OnboardingInvitation[]
+  projects               Project[]
+  sites                  Site[]
+  geofences              Geofence[]
+  shifts                 Shift[]
+  turanAssignments       TuranAssignment[]
+  emergencyCallouts      EmergencyCallout[]
+  timeEntries            TimeEntry[]
+  forgottenStamps        ForgottenStampInfraction[]
+  payrollPeriods         PayrollPeriod[]
+  auditLogs              AuditLog[]
+  notifications          Notification[]
+  temporaryCheckInPoints TemporaryCheckInPoint[]
+  offlineSyncBatches     OfflineSyncBatch[]
+
+  @@map("organizations")
+}
+
+model OrganizationSettings {
+  id             String       @id @db.Uuid
+  organizationId String       @unique @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  timezone                     String  @default("Asia/Jerusalem")
+  currency                     String  @default("ILS")
+  autoDeductUnpaidBreaks       Boolean @default(false) @map("auto_deduct_unpaid_breaks")
+  standardDayMinutes           Int     @default(540) @map("standard_day_minutes")
+  deviceTimeDeviationSeconds   Int     @default(120) @map("device_time_deviation_seconds")
+  onboardingInvitationTtlHours Int     @default(72) @map("onboarding_invitation_ttl_hours")
+  defaultLanguage              String  @default("en") @map("default_language")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("organization_settings")
+}
+
+model User {
+  id                String        @id @db.Uuid
+  phoneNumber       String        @unique @map("phone_number")
+  fullLegalName     String        @map("full_legal_name")
+  preferredName     String?       @map("preferred_name")
+  preferredLanguage String        @default("en") @map("preferred_language")
+  status            AccountStatus @default(ACTIVE)
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  archivedAt        DateTime?     @map("archived_at")
+
+  memberships          OrganizationMembership[]
+  devices              UserDevice[]
+  devicePublicKeys     DevicePublicKey[]
+  refreshTokenFamilies RefreshTokenFamily[]
+  notifications        Notification[]
+  auditLogsAsActor     AuditLog[]               @relation("AuditActor")
+
+  @@map("users")
+}
+
+model OrganizationMembership {
+  id              String        @id @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  userId          String        @map("user_id") @db.Uuid
+  role            OrgRole
+  isTimeTrackable Boolean       @default(false) @map("is_time_trackable")
+  status          AccountStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  archivedAt      DateTime?     @map("archived_at")
+
+  organization  Organization   @relation(fields: [organizationId], references: [id])
+  user          User           @relation(fields: [userId], references: [id])
+  workerProfile WorkerProfile?
+
+  @@unique([organizationId, userId])
+  @@index([organizationId, role, status])
+  @@map("organization_memberships")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Worker profile, sensitive data, compensation
+// ─────────────────────────────────────────────────────────────────────────
+
+model WorkerProfile {
+  id             String @id @db.Uuid
+  membershipId   String @unique @map("membership_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+
+  governmentIdType     String?   @map("government_id_type")
+  profilePhotoUrl      String?   @map("profile_photo_url")
+  consentAcceptedAt    DateTime? @map("consent_accepted_at")
+  privacyNoticeVersion String?   @map("privacy_notice_version")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  membership                     OrganizationMembership          @relation(fields: [membershipId], references: [id])
+  bankAccount                    EncryptedBankAccount?
+  identityDocuments              IdentityDocument[]
+  compensationProfiles           CompensationProfile[]
+  shiftAssignments               ShiftAssignment[]
+  temporarySupervisorAssignments TemporarySupervisorAssignment[]
+  timeEntries                    TimeEntry[]
+  emergencyCallouts              EmergencyCallout[]
+  forgottenStamps                ForgottenStampInfraction[]
+  payrollItems                   PayrollItem[]
+  turanAssignments               TuranAssignment[]               @relation("TuranAssignee")
+  turanBackupFor                 TuranAssignment[]               @relation("TuranBackup")
+  offlineSyncBatches             OfflineSyncBatch[]
+
+  @@index([organizationId])
+  @@map("worker_profiles")
+}
+
+/// Envelope-encrypted at the application layer (AES-256-GCM; local dev key
+/// or AWS KMS in production -- see EncryptionService). Never exposed to
+/// Field Managers or Temporary Supervisors.
+model EncryptedBankAccount {
+  id              String        @id @db.Uuid
+  workerProfileId String        @unique @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+
+  ciphertext      Bytes  @map("ciphertext")
+  iv              Bytes  @map("iv")
+  authTag         Bytes  @map("auth_tag")
+  encryptionKeyId String @map("encryption_key_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("encrypted_bank_accounts")
+}
+
+model IdentityDocument {
+  id              String        @id @db.Uuid
+  workerProfileId String        @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+
+  documentType    String @map("document_type")
+  ciphertext      Bytes  @map("ciphertext")
+  iv              Bytes  @map("iv")
+  authTag         Bytes  @map("auth_tag")
+  encryptionKeyId String @map("encryption_key_id")
+  fileStorageKey  String @map("file_storage_key")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([workerProfileId])
+  @@map("identity_documents")
+}
+
+model CompensationProfile {
+  id              String        @id @db.Uuid
+  workerProfileId String        @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+
+  compensationType         CompensationType @map("compensation_type")
+  dailyBaseRateAgorot      Int?             @map("daily_base_rate_agorot")
+  baseHourlyRateAgorot     Int?             @map("base_hourly_rate_agorot")
+  overtimeHourlyRateAgorot Int              @map("overtime_hourly_rate_agorot")
+
+  effectiveStartDate DateTime  @map("effective_start_date") @db.Date
+  effectiveEndDate   DateTime? @map("effective_end_date") @db.Date
+
+  changeReason String @map("change_reason")
+  createdBy    String @map("created_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([workerProfileId, effectiveStartDate])
+  @@map("compensation_profiles")
+}
+
+model OnboardingInvitation {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  tokenHash            String    @unique @map("token_hash")
+  prefilledPhoneNumber String?   @map("prefilled_phone_number")
+  expiresAt            DateTime  @map("expires_at")
+  usedAt               DateTime? @map("used_at")
+  revokedAt            DateTime? @map("revoked_at")
+  createdBy            String    @map("created_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId])
+  @@map("onboarding_invitations")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Auth / devices
+// ─────────────────────────────────────────────────────────────────────────
+
+model UserDevice {
+  id             String @id @db.Uuid
+  userId         String @map("user_id") @db.Uuid
+  user           User   @relation(fields: [userId], references: [id])
+  /// Client-supplied device/install identifier (not guaranteed to be a UUID).
+  clientDeviceId String @map("client_device_id")
+
+  platform         String
+  appVersion       String?   @map("app_version")
+  osVersion        String?   @map("os_version")
+  pushToken        String?   @map("push_token")
+  lastActiveAt     DateTime? @map("last_active_at")
+  attestationState String    @default("UNAVAILABLE") @map("attestation_state")
+  riskState        String    @default("NORMAL") @map("risk_state")
+  revokedAt        DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  refreshTokenFamilies RefreshTokenFamily[]
+
+  @@unique([userId, clientDeviceId])
+  @@index([userId])
+  @@map("user_devices")
+}
+
+model RefreshTokenFamily {
+  id       String     @id @db.Uuid
+  userId   String     @map("user_id") @db.Uuid
+  user     User       @relation(fields: [userId], references: [id])
+  deviceId String     @map("device_id") @db.Uuid
+  device   UserDevice @relation(fields: [deviceId], references: [id])
+
+  currentTokenHash String    @map("current_token_hash")
+  revokedAt        DateTime? @map("revoked_at")
+  revokedReason    String?   @map("revoked_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("refresh_token_families")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Offline attendance sync (spec section 20)
+//
+// A device generates an Ed25519 keypair on first launch (private key held
+// in Keychain/Keystore via expo-secure-store, public key registered here).
+// Every clock event captured while offline is signed with that private key
+// before being queued locally; the signature is verified against the
+// registered public key at sync time so a compromised/rooted device cannot
+// forge attendance evidence after the fact, even though the raw event sat
+// unsynced on the device for an unknown length of time.
+// ─────────────────────────────────────────────────────────────────────────
+
+enum OfflineSyncEventStatus {
+  PENDING
+  VERIFIED
+  FLAGGED
+  REJECTED
+  DUPLICATE
+}
+
+model DevicePublicKey {
+  id       String @id @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  user     User   @relation(fields: [userId], references: [id])
+  /// Matches UserDevice.clientDeviceId / ClockEvent.deviceId (client-supplied, not a FK).
+  deviceId String @map("device_id")
+
+  publicKey    String    @map("public_key") // base64-encoded 32-byte Ed25519 public key
+  algorithm    String    @default("Ed25519")
+  registeredAt DateTime  @default(now()) @map("registered_at")
+  revokedAt    DateTime? @map("revoked_at")
+
+  @@unique([userId, deviceId])
+  @@index([deviceId])
+  @@map("device_public_keys")
+}
+
+model OfflineSyncBatch {
+  id              String        @id @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  workerProfileId String        @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+
+  deviceId       String   @map("device_id")
+  idempotencyKey String?  @map("idempotency_key")
+  eventCount     Int      @map("event_count")
+  submittedAt    DateTime @default(now()) @map("submitted_at")
+
+  events OfflineSyncEvent[]
+
+  @@index([organizationId, workerProfileId])
+  @@map("offline_sync_batches")
+}
+
+model OfflineSyncEvent {
+  id      String           @id @db.Uuid
+  batchId String           @map("batch_id") @db.Uuid
+  batch   OfflineSyncBatch @relation(fields: [batchId], references: [id])
+
+  clientEventId   String         @map("client_event_id")
+  eventType       ClockEventType @map("event_type")
+  deviceTimestamp DateTime       @map("device_timestamp")
+
+  status                 OfflineSyncEventStatus @default(PENDING)
+  signatureValid         Boolean                @default(false) @map("signature_valid")
+  rejectionReason        String?                @map("rejection_reason")
+  offlineEventAgeSeconds Int?                   @map("offline_event_age_seconds")
+  resultTimeEntryId      String?                @map("result_time_entry_id") @db.Uuid
+  resultClockEventId     String?                @map("result_clock_event_id") @db.Uuid
+
+  payload Json
+
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@unique([batchId, clientEventId])
+  @@index([clientEventId])
+  @@map("offline_sync_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Projects, sites, geofences
+// ─────────────────────────────────────────────────────────────────────────
+
+model Project {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  name         String
+  client       String?
+  projectCode  String    @map("project_code")
+  description  String?
+  startDate    DateTime? @map("start_date") @db.Date
+  endDate      DateTime? @map("end_date") @db.Date
+  status       String    @default("ACTIVE")
+  budgetAgorot Int?      @map("budget_agorot")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  sites  Site[]
+  shifts Shift[]
+
+  @@unique([organizationId, projectCode])
+  @@index([organizationId, status])
+  @@map("projects")
+}
+
+model Site {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  projectId      String       @map("project_id") @db.Uuid
+  project        Project      @relation(fields: [projectId], references: [id])
+
+  name                        String
+  address                     String?
+  latitude                    Float
+  longitude                   Float
+  defaultGeofenceRadiusMeters Int     @default(100) @map("default_geofence_radius_meters")
+  active                      Boolean @default(true)
+  instructions                String?
+  emergencyContact            String? @map("emergency_contact")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  geofences Geofence[]
+  shifts    Shift[]
+
+  @@index([organizationId, active])
+  @@map("sites")
+}
+
+model Geofence {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  siteId         String       @map("site_id") @db.Uuid
+  site           Site         @relation(fields: [siteId], references: [id])
+
+  centerLatitude    Float     @map("center_latitude")
+  centerLongitude   Float     @map("center_longitude")
+  radiusMeters      Int       @map("radius_meters")
+  minAccuracyMeters Int       @default(50) @map("min_accuracy_meters")
+  activeFrom        DateTime  @default(now()) @map("active_from")
+  activeTo          DateTime? @map("active_to")
+  version           Int       @default(1)
+  createdBy         String    @map("created_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shifts Shift[]
+
+  @@index([siteId])
+  @@map("geofences")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Shifts and assignments
+// ─────────────────────────────────────────────────────────────────────────
+
+model Shift {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  projectId      String?      @map("project_id") @db.Uuid
+  project        Project?     @relation(fields: [projectId], references: [id])
+  siteId         String?      @map("site_id") @db.Uuid
+  site           Site?        @relation(fields: [siteId], references: [id])
+  geofenceId     String?      @map("geofence_id") @db.Uuid
+  geofence       Geofence?    @relation(fields: [geofenceId], references: [id])
+
+  shiftType      ShiftType     @map("shift_type")
+  title          String
+  description    String?
+  scheduledStart DateTime      @map("scheduled_start")
+  scheduledEnd   DateTime      @map("scheduled_end")
+  timezone       String        @default("Asia/Jerusalem")
+  checkInMethod  CheckInMethod @default(GEOFENCED) @map("check_in_method")
+  graceMinutes   Int           @default(10) @map("grace_minutes")
+  businessDate   String        @map("business_date") // YYYY-MM-DD in org timezone, derived from scheduledStart
+
+  managerId String      @map("manager_id") @db.Uuid
+  status    ShiftStatus @default(DRAFT)
+
+  flaggedLongRunning Boolean @default(false) @map("flagged_long_running")
+
+  createdBy   String    @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  closedAt    DateTime? @map("closed_at")
+  closedBy    String?   @map("closed_by") @db.Uuid
+  cancelledAt DateTime? @map("cancelled_at")
+
+  assignments            ShiftAssignment[]
+  temporarySupervisors   TemporarySupervisorAssignment[]
+  temporaryCheckInPoints TemporaryCheckInPoint[]
+  timeEntries            TimeEntry[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, businessDate])
+  @@map("shifts")
+}
+
+model ShiftAssignment {
+  id              String        @id @db.Uuid
+  shiftId         String        @map("shift_id") @db.Uuid
+  shift           Shift         @relation(fields: [shiftId], references: [id])
+  workerProfileId String        @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+
+  assignedBy String    @map("assigned_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+  removedAt  DateTime? @map("removed_at")
+
+  @@unique([shiftId, workerProfileId])
+  @@index([workerProfileId])
+  @@map("shift_assignments")
+}
+
+model TemporarySupervisorAssignment {
+  id              String        @id @db.Uuid
+  shiftId         String        @map("shift_id") @db.Uuid
+  shift           Shift         @relation(fields: [shiftId], references: [id])
+  workerProfileId String        @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+
+  activatedAt DateTime  @map("activated_at")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  revokedBy   String?   @map("revoked_by") @db.Uuid
+  assignedBy  String    @map("assigned_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([shiftId])
+  @@index([workerProfileId])
+  @@map("temporary_supervisor_assignments")
+}
+
+model TemporaryCheckInPoint {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  shiftId        String       @map("shift_id") @db.Uuid
+  shift          Shift        @relation(fields: [shiftId], references: [id])
+
+  name         String
+  latitude     Float
+  longitude    Float
+  radiusMeters Int                  @map("radius_meters")
+  status       TemporaryPointStatus @default(ACTIVE)
+
+  createdBy           String    @map("created_by") @db.Uuid
+  managerAuthorizedBy String    @map("manager_authorized_by") @db.Uuid
+  expiresAt           DateTime  @map("expires_at")
+  revokedAt           DateTime? @map("revoked_at")
+  revokedBy           String?   @map("revoked_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([shiftId, status])
+  @@map("temporary_check_in_points")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Turan and emergency call-outs
+// ─────────────────────────────────────────────────────────────────────────
+
+model TuranAssignment {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  turanType TuranType   @map("turan_type")
+  status    TuranStatus @default(SCHEDULED)
+  startAt   DateTime    @map("start_at")
+  endAt     DateTime    @map("end_at")
+  notes     String?
+
+  assignedWorkerProfileId String         @map("assigned_worker_profile_id") @db.Uuid
+  assignedWorker          WorkerProfile  @relation("TuranAssignee", fields: [assignedWorkerProfileId], references: [id])
+  backupWorkerProfileId   String?        @map("backup_worker_profile_id") @db.Uuid
+  backupWorker            WorkerProfile? @relation("TuranBackup", fields: [backupWorkerProfileId], references: [id])
+
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  emergencyCallouts EmergencyCallout[]
+
+  @@index([organizationId, turanType, startAt])
+  @@index([assignedWorkerProfileId, startAt])
+  @@map("turan_assignments")
+}
+
+model EmergencyCallout {
+  id                String           @id @db.Uuid
+  organizationId    String           @map("organization_id") @db.Uuid
+  organization      Organization     @relation(fields: [organizationId], references: [id])
+  turanAssignmentId String?          @map("turan_assignment_id") @db.Uuid
+  turanAssignment   TuranAssignment? @relation(fields: [turanAssignmentId], references: [id])
+  workerProfileId   String           @map("worker_profile_id") @db.Uuid
+  worker            WorkerProfile    @relation(fields: [workerProfileId], references: [id])
+  timeEntryId       String?          @unique @map("time_entry_id") @db.Uuid
+  timeEntry         TimeEntry?       @relation(fields: [timeEntryId], references: [id])
+
+  authorizationSource EmergencyAuthorizationSource @map("authorization_source")
+  authorizedBy        String?                      @map("authorized_by") @db.Uuid
+
+  actualStartClick DateTime  @map("actual_start_click")
+  compensatedStart DateTime  @map("compensated_start")
+  actualEndClick   DateTime? @map("actual_end_click")
+  compensatedEnd   DateTime? @map("compensated_end")
+
+  actualWorkedMinutes        Int? @map("actual_worked_minutes")
+  retroactiveMinutes         Int  @default(60) @map("retroactive_minutes")
+  returnBufferMinutes        Int? @map("return_buffer_minutes")
+  compensatedDurationMinutes Int? @map("compensated_duration_minutes")
+
+  startLatitude  Float  @map("start_latitude")
+  startLongitude Float  @map("start_longitude")
+  endLatitude    Float? @map("end_latitude")
+  endLongitude   Float? @map("end_longitude")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([workerProfileId])
+  @@map("emergency_callouts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Time entries, clock events, summaries, approvals, corrections
+// ─────────────────────────────────────────────────────────────────────────
+
+model TimeEntry {
+  id              String        @id @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  workerProfileId String        @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+  shiftId         String        @map("shift_id") @db.Uuid
+  shift           Shift         @relation(fields: [shiftId], references: [id])
+
+  status       TimeEntryStatus @default(ACTIVE)
+  businessDate String          @map("business_date")
+
+  clockInAt  DateTime? @map("clock_in_at")
+  clockOutAt DateTime? @map("clock_out_at")
+
+  checkInMethod       CheckInMethod @map("check_in_method")
+  flexiCheckEnabledBy String?       @map("flexi_check_enabled_by") @db.Uuid
+  flexiCheckReason    String?       @map("flexi_check_reason")
+
+  rawDurationMinutes      Int? @map("raw_duration_minutes")
+  unpaidBreakMinutes      Int  @default(0) @map("unpaid_break_minutes")
+  approvedRegularMinutes  Int? @map("approved_regular_minutes")
+  approvedOvertimeMinutes Int? @map("approved_overtime_minutes")
+
+  fullDayCredit       Boolean   @default(false) @map("full_day_credit")
+  fullDayCreditReason String?   @map("full_day_credit_reason")
+  fullDayCreditBy     String?   @map("full_day_credit_by") @db.Uuid
+  fullDayCreditAt     DateTime? @map("full_day_credit_at")
+
+  isEmergency Boolean @default(false) @map("is_emergency")
+
+  approvedBy     String?   @map("approved_by") @db.Uuid
+  approvedAt     DateTime? @map("approved_at")
+  rejectedReason String?   @map("rejected_reason")
+
+  payrollItemId String? @map("payroll_item_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  clockEvents               ClockEvent[]
+  unpaidBreaks              UnpaidBreak[]
+  dailySummary              DailySummary?
+  approvals                 AttendanceApproval[]
+  corrections               ManualTimeCorrection[]
+  forgottenStampInfractions ForgottenStampInfraction[]
+  emergencyCallout          EmergencyCallout?
+
+  @@index([organizationId, status])
+  @@index([workerProfileId, businessDate])
+  @@map("time_entries")
+}
+
+model ClockEvent {
+  id          String    @id @db.Uuid
+  timeEntryId String    @map("time_entry_id") @db.Uuid
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id])
+
+  eventType      ClockEventType @map("event_type")
+  origin         EventOrigin    @default(ONLINE)
+  idempotencyKey String         @map("idempotency_key")
+  deviceId       String?        @map("device_id")
+  clientEventId  String         @map("client_event_id")
+
+  deviceTimestamp            DateTime @map("device_timestamp")
+  serverReceivedAt           DateTime @default(now()) @map("server_received_at")
+  deviceTimeDeviationSeconds Int      @map("device_time_deviation_seconds")
+
+  latitude              Float
+  longitude             Float
+  accuracyMeters        Float   @map("accuracy_meters")
+  altitude              Float?
+  locationProvider      String? @map("location_provider")
+  mockLocationSuspected Boolean @default(false) @map("mock_location_suspected")
+
+  distanceFromSiteMeters   Float?                   @map("distance_from_site_meters")
+  locationValidationStatus LocationValidationStatus @default(UNAVAILABLE) @map("location_validation_status")
+
+  appVersion         String?           @map("app_version")
+  isManualCorrection Boolean           @default(false) @map("is_manual_correction")
+  correctedBy        String?           @map("corrected_by") @db.Uuid
+  correctionReason   CorrectionReason? @map("correction_reason")
+  correctionNote     String?           @map("correction_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([deviceId, clientEventId])
+  @@index([timeEntryId])
+  @@map("clock_events")
+}
+
+model UnpaidBreak {
+  id          String    @id @db.Uuid
+  timeEntryId String    @map("time_entry_id") @db.Uuid
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id])
+
+  startAt         DateTime  @map("start_at")
+  endAt           DateTime? @map("end_at")
+  durationMinutes Int?      @map("duration_minutes")
+  source          String    @default("MANAGER") @map("source")
+  createdBy       String    @map("created_by") @db.Uuid
+  approved        Boolean   @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([timeEntryId])
+  @@map("unpaid_breaks")
+}
+
+model DailySummary {
+  id          String    @id @db.Uuid
+  timeEntryId String    @unique @map("time_entry_id") @db.Uuid
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id])
+
+  text                String?
+  voiceNoteUrl        String?      @map("voice_note_url")
+  transcription       String?
+  taskCategory        TaskCategory @map("task_category")
+  materialsUsed       String?      @map("materials_used")
+  problemsEncountered String?      @map("problems_encountered")
+  followUpRequired    Boolean      @default(false) @map("follow_up_required")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("daily_summaries")
+}
+
+model AttendanceApproval {
+  id          String    @id @db.Uuid
+  timeEntryId String    @map("time_entry_id") @db.Uuid
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id])
+
+  action  ApprovalAction
+  actedBy String         @map("acted_by") @db.Uuid
+  notes   String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([timeEntryId])
+  @@map("attendance_approvals")
+}
+
+model ManualTimeCorrection {
+  id          String    @id @db.Uuid
+  timeEntryId String    @map("time_entry_id") @db.Uuid
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id])
+
+  field    String
+  oldValue String?
+  newValue String?
+  reason   CorrectionReason
+  note     String?
+
+  editedBy      String  @map("edited_by") @db.Uuid
+  requestIp     String? @map("request_ip")
+  userAgent     String? @map("user_agent")
+  correlationId String? @map("correlation_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  forgottenStampInfraction ForgottenStampInfraction?
+
+  @@index([timeEntryId])
+  @@map("manual_time_corrections")
+}
+
+model ForgottenStampInfraction {
+  id              String               @id @db.Uuid
+  organizationId  String               @map("organization_id") @db.Uuid
+  organization    Organization         @relation(fields: [organizationId], references: [id])
+  workerProfileId String               @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile        @relation(fields: [workerProfileId], references: [id])
+  timeEntryId     String               @map("time_entry_id") @db.Uuid
+  timeEntry       TimeEntry            @relation(fields: [timeEntryId], references: [id])
+  correctionId    String               @unique @map("correction_id") @db.Uuid
+  correction      ManualTimeCorrection @relation(fields: [correctionId], references: [id])
+
+  businessMonth         String @map("business_month") // YYYY-MM in org timezone
+  monthlySequenceNumber Int    @map("monthly_sequence_number")
+  deductionAgorot       Int    @map("deduction_agorot")
+
+  reversedAt           DateTime? @map("reversed_at")
+  reversedBy           String?   @map("reversed_by") @db.Uuid
+  reversalReason       String?   @map("reversal_reason")
+  reversalAdjustmentId String?   @map("reversal_adjustment_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  payrollAdjustments PayrollAdjustment[]
+
+  @@index([workerProfileId, businessMonth])
+  @@map("forgotten_stamp_infractions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Payroll
+// ─────────────────────────────────────────────────────────────────────────
+
+model PayrollPeriod {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  yearMonth String              @map("year_month") // YYYY-MM
+  status    PayrollPeriodStatus @default(OPEN)
+  version   Int                 @default(1)
+
+  finalizedAt  DateTime? @map("finalized_at")
+  finalizedBy  String?   @map("finalized_by") @db.Uuid
+  reopenedAt   DateTime? @map("reopened_at")
+  reopenedBy   String?   @map("reopened_by") @db.Uuid
+  reopenReason String?   @map("reopen_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  items     PayrollItem[]
+  snapshots PayrollCalculationSnapshot[]
+
+  @@unique([organizationId, yearMonth, version])
+  @@index([organizationId, yearMonth])
+  @@map("payroll_periods")
+}
+
+model PayrollItem {
+  id              String        @id @db.Uuid
+  payrollPeriodId String        @map("payroll_period_id") @db.Uuid
+  payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id])
+  workerProfileId String        @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+
+  standardDaysCredited        Int @default(0) @map("standard_days_credited")
+  regularMinutes              Int @default(0) @map("regular_minutes")
+  overtimeMinutes             Int @default(0) @map("overtime_minutes")
+  emergencyRetroactiveMinutes Int @default(0) @map("emergency_retroactive_minutes")
+  emergencyReturnMinutes      Int @default(0) @map("emergency_return_minutes")
+
+  grossBaseAgorot           Int @default(0) @map("gross_base_agorot")
+  overtimeAgorot            Int @default(0) @map("overtime_agorot")
+  positiveAdjustmentsAgorot Int @default(0) @map("positive_adjustments_agorot")
+  deductionsAgorot          Int @default(0) @map("deductions_agorot")
+  netPayableAgorot          Int @default(0) @map("net_payable_agorot")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  adjustments PayrollAdjustment[]
+
+  @@unique([payrollPeriodId, workerProfileId])
+  @@index([workerProfileId])
+  @@map("payroll_items")
+}
+
+/// Adjustments (e.g. forgotten-stamp penalties) can occur any time during an
+/// open month, before that month's PayrollItem exists. `payrollItemId`
+/// starts null and is filled in by PayrollCalculationService the first time
+/// the period is calculated, by matching organizationId + workerProfileId +
+/// businessMonth. This lets the two-strike rule create a deduction the
+/// instant the third infraction happens, without waiting for month-end.
+model PayrollAdjustment {
+  id              String       @id @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  workerProfileId String       @map("worker_profile_id") @db.Uuid
+  businessMonth   String       @map("business_month") // YYYY-MM in org timezone
+  payrollItemId   String?      @map("payroll_item_id") @db.Uuid
+  payrollItem     PayrollItem? @relation(fields: [payrollItemId], references: [id])
+
+  type         PayrollAdjustmentType
+  source       PayrollAdjustmentSource
+  amountAgorot Int                     @map("amount_agorot") // positive = credit, negative = deduction
+
+  reason              String?
+  relatedInfractionId String?                   @map("related_infraction_id") @db.Uuid
+  relatedInfraction   ForgottenStampInfraction? @relation(fields: [relatedInfractionId], references: [id])
+  reversalOfId        String?                   @map("reversal_of_id") @db.Uuid
+
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([payrollItemId])
+  @@index([organizationId, workerProfileId, businessMonth])
+  @@map("payroll_adjustments")
+}
+
+model PayrollCalculationSnapshot {
+  id              String        @id @db.Uuid
+  payrollPeriodId String        @map("payroll_period_id") @db.Uuid
+  payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id])
+
+  version      Int
+  inputsJson   Json     @map("inputs_json")
+  resultJson   Json     @map("result_json")
+  calculatedBy String   @map("calculated_by") @db.Uuid
+  calculatedAt DateTime @default(now()) @map("calculated_at")
+
+  @@index([payrollPeriodId])
+  @@map("payroll_calculation_snapshots")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Audit log, notifications, idempotency
+// ─────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  actorUserId    String?      @map("actor_user_id") @db.Uuid
+  actor          User?        @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  action     String
+  entityType String  @map("entity_type")
+  entityId   String  @map("entity_id")
+  field      String?
+  oldValue   String?
+  newValue   String?
+  reason     String?
+  note       String?
+
+  requestIp     String? @map("request_ip")
+  userAgent     String? @map("user_agent")
+  correlationId String  @map("correlation_id")
+
+  previousHash String @map("previous_hash")
+  currentHash  String @map("current_hash")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, entityType, entityId])
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id              String       @id @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  recipientUserId String       @map("recipient_user_id") @db.Uuid
+  recipient       User         @relation(fields: [recipientUserId], references: [id])
+
+  type     NotificationType
+  title    String
+  body     String
+  dataJson Json?            @map("data_json")
+  readAt   DateTime?        @map("read_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  deliveries NotificationDelivery[]
+
+  @@index([organizationId, recipientUserId, readAt])
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id             String       @id @db.Uuid
+  notificationId String       @map("notification_id") @db.Uuid
+  notification   Notification @relation(fields: [notificationId], references: [id])
+
+  channel     String
+  status      String    @default("PENDING")
+  attemptedAt DateTime? @map("attempted_at")
+  deliveredAt DateTime? @map("delivered_at")
+  error       String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([notificationId])
+  @@map("notification_deliveries")
+}
+
+model OtpChallenge {
+  id          String    @id @db.Uuid
+  phoneNumber String    @map("phone_number")
+  provider    String    @default("CONSOLE")
+  codeHash    String?   @map("code_hash")
+  providerRef String?   @map("provider_ref")
+  attempts    Int       @default(0)
+  expiresAt   DateTime  @map("expires_at")
+  consumedAt  DateTime? @map("consumed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([phoneNumber, createdAt])
+  @@map("otp_challenges")
+}
+
+model IdempotencyRecord {
+  id               String @id @db.Uuid
+  key              String
+  route            String
+  requestHash      String @map("request_hash")
+  responseStatus   Int?   @map("response_status")
+  responseBodyJson Json?  @map("response_body_json")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([key, route])
+  @@map("idempotency_records")
+}
+
+/// A generated, tamper-evident PDF (spec section 25). The PDF bytes live in
+/// S3/MinIO under storageKey; this row is the audit trail of who generated
+/// what, from which filters, and its SHA-256 hash.
+model GeneratedReport {
+  id             String @id @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+
+  reportType             String  @map("report_type")
+  requestedByUserId      String  @map("requested_by_user_id") @db.Uuid
+  subjectWorkerProfileId String? @map("subject_worker_profile_id") @db.Uuid
+  filtersJson            Json    @map("filters_json")
+  includesFinancials     Boolean @default(false) @map("includes_financials")
+
+  templateVersion String @map("template_version")
+  sha256Hash      String @map("sha256_hash")
+  storageKey      String @map("storage_key")
+
+  generatedAt DateTime @default(now()) @map("generated_at")
+
+  @@index([organizationId, subjectWorkerProfileId])
+  @@map("generated_reports")
+}

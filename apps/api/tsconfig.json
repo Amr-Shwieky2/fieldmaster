@@ -1,0 +1,13 @@
+{
+  "extends": "@fieldmaster/typescript-config/nestjs.json",
+  "compilerOptions": {
+    "baseUrl": "./",
+    "outDir": "./dist",
+    "rootDir": "./",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "prisma/seed.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

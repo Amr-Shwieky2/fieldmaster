@@ -1,0 +1,24 @@
+{
+  "name": "@fieldmaster/shared-validation",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fieldmaster/shared-types": "workspace:*",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@fieldmaster/typescript-config": "workspace:*",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

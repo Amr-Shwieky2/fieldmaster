@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "FieldMaster",
+    "slug": "fieldmaster-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "fieldmaster",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.fieldmaster.mobile",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "FieldMaster needs your location to verify you're at the job site when you clock in or out.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "FieldMaster needs your location to verify you're at the job site when you clock in or out."
+      }
+    },
+    "android": {
+      "package": "com.fieldmaster.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "FieldMaster needs your location to verify you're at the job site when you clock in or out."
+        }
+      ]
+    ]
+  }
+}

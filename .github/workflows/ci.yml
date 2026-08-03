@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9.15.0"
+
+jobs:
+  lint-typecheck-build:
+    name: Lint, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit + component tests (shared-validation, API, admin-web)
+        run: pnpm test
+
+  migration-and-integration-tests:
+    name: Migration validation + integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: ghcr.io/baosystems/postgis:17-3.5
+        env:
+          POSTGRES_USER: fieldmaster
+          POSTGRES_PASSWORD: fieldmaster_dev_password
+          POSTGRES_DB: fieldmaster_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fieldmaster -d fieldmaster_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: "postgresql://fieldmaster:fieldmaster_dev_password@localhost:5432/fieldmaster_test?schema=public"
+      REDIS_URL: "redis://localhost:6379"
+      JWT_ACCESS_SECRET: "ci-access-secret"
+      JWT_ACCESS_TTL: "15m"
+      JWT_REFRESH_SECRET: "ci-refresh-secret"
+      JWT_REFRESH_TTL: "30d"
+      LOCAL_ENCRYPTION_KEY_BASE64: "3flOAwkmbM8Wbu+jPivo+sMVLbSkA8+as2wLULpw16c="
+      FIELDMASTER_TEST_OTP: "000000"
+      OTP_TTL_SECONDS: "300"
+      OTP_MAX_ATTEMPTS: "5"
+      DEVICE_TIME_DEVIATION_SECONDS: "120"
+      CORS_ORIGINS: ""
+      NODE_ENV: "test"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages (shared-types, shared-validation)
+        run: pnpm --filter @fieldmaster/shared-types build && pnpm --filter @fieldmaster/shared-validation build
+
+      - name: Generate Prisma client
+        run: pnpm --filter @fieldmaster/api db:generate
+
+      # This is the migration-validation step: `migrate deploy` exits
+      # non-zero on any invalid or out-of-order migration, which fails the job.
+      - name: Validate and apply database migrations
+        run: pnpm --filter @fieldmaster/api db:migrate
+
+      - name: Install Playwright Chromium (for PDF report generation tests)
+        run: pnpm --filter @fieldmaster/api exec playwright install --with-deps chromium
+
+      - name: Run integration/e2e tests
+        run: pnpm test:e2e
+
+  docker-build:
+    name: Build API Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -f apps/api/Dockerfile -t fieldmaster-api:ci .
+
+  security-scan:
+    name: Dependency security scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm audit (high severity)
+        run: pnpm audit --audit-level high
