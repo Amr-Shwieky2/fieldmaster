@@ -24,6 +24,18 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+
+      # --- Deployment environment & test login ---
+      # Production keeps dev login OFF. The API refuses to start if
+      # APP_ENV=production is combined with DEV_LOGIN_ENABLED=true.
+      # For a TEST deployment (no real data!) change these two values to
+      # APP_ENV=staging and DEV_LOGIN_ENABLED=true: every phone number then
+      # accepts code 123456 and the login screens offer one-click quick
+      # login as any seeded user (see docs/seed-accounts.md).
+      - key: APP_ENV
+        value: production
+      - key: DEV_LOGIN_ENABLED
+        value: "false"
       - key: API_PREFIX
         value: api/v1
 

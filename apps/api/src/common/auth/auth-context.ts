@@ -9,6 +9,8 @@ export interface AccessTokenPayload {
   isTimeTrackable: boolean;
   workerProfileId: string | null;
   deviceId?: string;
+  /** How the session started; absent on tokens issued before this claim existed (treated as OTP). */
+  loginMethod?: string;
 }
 
 export interface AuthenticatedUser extends AccessTokenPayload {}

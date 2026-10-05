@@ -523,7 +523,9 @@ async function main() {
   });
 
   console.log("\nSeed complete.\n");
-  console.log("Development login phone numbers (OTP is printed to the API console):");
+  console.log("Development login phone numbers (full list: docs/seed-accounts.md).");
+  console.log("With DEV_LOGIN_ENABLED=true every number accepts code 123456 and the login screens offer one-click quick login;");
+  console.log("otherwise the OTP is printed to the API console.");
   console.log(`  Owner 1:         ${owner1User.phoneNumber} (${owner1User.fullLegalName})`);
   console.log(`  Owner 2:         ${owner2User.phoneNumber} (${owner2User.fullLegalName})`);
   console.log(`  Field Manager 1: ${fm1User.phoneNumber} (${fm1User.fullLegalName})`);

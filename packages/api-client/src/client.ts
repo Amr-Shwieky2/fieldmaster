@@ -2,6 +2,7 @@ import type {
   ApiError,
   AuditLogEntry,
   AuthSession,
+  DevLoginUser,
   FinancialDashboard,
   Geofence,
   GeneratedReport,
@@ -89,6 +90,24 @@ export class FieldMasterClient {
 
   verifyOtp(input: { phoneNumber: string; code: string; deviceId: string; platform: "WEB" | "IOS" | "ANDROID"; organizationId?: string }) {
     return this.request<AuthSession>("POST", "/auth/otp/verify", input);
+  }
+
+  // ── Dev login (test mode only; the API answers 404 when it is off) ──
+  /**
+   * Active members available for one-click login. Resolves to null when the
+   * API is not in dev login mode (404), so callers can simply hide the test
+   * options.
+   */
+  async listDevLoginUsers(): Promise<DevLoginUser[] | null> {
+    try {
+      return await this.request<DevLoginUser[]>("GET", "/auth/dev/users");
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 404) return null;
+      throw error;
+    }
+  }
+  devLogin(input: { membershipId: string; deviceId?: string; platform?: "WEB" | "IOS" | "ANDROID" }) {
+    return this.request<AuthSession>("POST", "/auth/dev/login", input);
   }
 
   // ── Workers ─────────────────────────────────────────────────────────

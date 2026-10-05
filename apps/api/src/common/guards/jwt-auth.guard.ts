@@ -1,10 +1,12 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { JwtService } from "@nestjs/jwt";
 import { AccountStatus } from "@fieldmaster/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 import type { AccessTokenPayload, AuthenticatedRequest } from "../auth/auth-context";
+import { APP_ENVIRONMENT, type AppEnvironment } from "../config/app-environment";
+import { TEST_MODE_SESSION_ENDED_MESSAGE, isTestModeLoginMethod } from "../auth/login-method";
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -12,6 +14,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly reflector: Reflector,
     private readonly prisma: PrismaService,
+    @Inject(APP_ENVIRONMENT) private readonly appEnvironment: AppEnvironment,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -32,6 +35,12 @@ export class JwtAuthGuard implements CanActivate {
       });
     } catch {
       throw new UnauthorizedException("Invalid or expired access token.");
+    }
+
+    // Test-mode sessions (quick login / fixed code 123456) end immediately
+    // when dev login is turned off, not only when the access token expires.
+    if (isTestModeLoginMethod(payload.loginMethod) && !this.appEnvironment.devLoginEnabled) {
+      throw new UnauthorizedException(TEST_MODE_SESSION_ENDED_MESSAGE);
     }
 
     // Re-check membership + user status on every request so a suspension or

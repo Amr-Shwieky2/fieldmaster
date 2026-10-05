@@ -4,6 +4,7 @@ import { ConfigModule } from "@nestjs/config";
 import { EventEmitterModule } from "@nestjs/event-emitter";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./common/prisma/prisma.module";
+import { AppConfigModule } from "./common/config/app-config.module";
 import { CommonModule } from "./common/common.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { CorrelationIdMiddleware } from "./common/middleware/correlation-id.middleware";
@@ -29,6 +30,7 @@ import { HealthModule } from "./modules/health/health.module";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    AppConfigModule,
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     PrismaModule,

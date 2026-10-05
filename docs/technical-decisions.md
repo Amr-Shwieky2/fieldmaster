@@ -394,3 +394,83 @@ fail outright or run under slow QEMU emulation. `docker-compose.yml` uses
 `ghcr.io/baosystems/postgis`, a maintained multi-arch (amd64 + arm64) build
 of the same PostGIS version, so the stack runs natively on both
 architectures.
+
+## Test login (Step 1): APP_ENV + DEV_LOGIN_ENABLED instead of overloading NODE_ENV
+
+Manual testing previously meant copying the random OTP from the API console.
+Step 1 added a development login mode without removing the real OTP flow:
+
+- **Separate `APP_ENV` from `NODE_ENV`.** `NODE_ENV` says how the code was
+  built; a staging deployment on Render or ECS runs a production build
+  (`NODE_ENV=production`). `APP_ENV` (`development` | `staging` |
+  `production`) says what kind of deployment it is. When `APP_ENV` is unset it
+  follows `NODE_ENV`, so existing deployments keep behaving as production.
+- **One resolver, validated at boot.** `resolveAppEnvironment()`
+  (`apps/api/src/common/config/app-environment.ts`) parses `APP_ENV`,
+  `DEV_LOGIN_ENABLED` and the optional `OTP_PROVIDER`. It throws on unknown
+  values and on `APP_ENV=production` + `DEV_LOGIN_ENABLED=true`. `main.ts`
+  calls it before creating the Nest app and exits with a clear message.
+  `AppConfigModule` also calls it, so a test app built from `AppModule`
+  can't boot in that state either. Both are covered by tests, including one
+  that spawns the real entrypoint.
+- **Fixed code via a provider, not a special case in the controller.**
+  `DevFixedCodeOtpProvider` issues `123456` and verification goes through the
+  same local-hash path as the console provider. `ConsoleOtpProvider` and
+  `TwilioVerifyProvider` are unchanged. A challenge created by the fixed-code
+  provider is only redeemable while dev login is on, so a challenge left over
+  from a dev-mode run can't be used after restarting with dev login off.
+- **Quick login shares the OTP session code path.** OTP verification and
+  `POST /auth/dev/login` both call `AuthService.startSession()` (device upsert,
+  refresh-token family, access token). Dev login records a `DEV_LOGIN` event in
+  the hash-chained audit log. Permissions are untouched: an e2e test discovers
+  every route guarded by a financial permission from Nest's route metadata
+  and asserts that a dev-login Field Manager gets 403 on all of them.
+- **404 when off, and the UI asks the API.** `DevLoginEnabledGuard` answers
+  exactly like an unknown route (`Cannot GET /api/v1/auth/dev/users`). The web
+  and mobile login screens call that endpoint and show the banner, the
+  quick-login list and the `123456` hint only when it returns 200. There is no
+  separate frontend flag that could drift from the API's real state.
+- **Test-mode sessions end when dev login is turned off.** Each
+  refresh-token family records how the session started (`origin`: `OTP` |
+  `DEV_LOGIN` | `DEV_FIXED_OTP`) and every access token carries the same
+  `loginMethod` claim. With dev login off, `JwtAuthGuard`, the notifications
+  WebSocket gateway and the SSE stream reject test-mode access tokens, and
+  `refresh()` revokes test-mode families (`DEV_LOGIN_DISABLED`). Without this,
+  flipping a test deployment to production would have left quick-login
+  sessions valid for up to 30 days. Data or members created during a test
+  window can't be detected automatically, so the deployment docs require a
+  wiped database and rotated JWT secrets before real use. The adversarial
+  review of this step found this.
+- **In dev login mode the OTP provider is always the fixed-code one.**
+  `OTP_PROVIDER=console`/`twilio` combined with `DEV_LOGIN_ENABLED=true` is a
+  boot error. Otherwise the login screens would promise `123456` while a real
+  provider rejected it.
+- **The admin web clears the React Query cache on every login and logout.**
+  Query keys are not per user. Quick-switching from an Owner to a Field Manager
+  would otherwise briefly show the Field Manager the Owner's cached responses,
+  such as worker compensation the API never sends to Field Managers.
+- **Terraform and Render ship with dev login off.** The ECS task definitions
+  now set `APP_ENV` explicitly. They previously set only `NODE_ENV=staging`/`dev`,
+  which would have been read as `development`. A Render test deployment can
+  be switched to `staging` + `true` by hand. The docs warn that anyone who can
+  reach such a deployment can sign in as any member.
+
+## Admin web: read the session after mount (hydration fix)
+
+Found during Step 1 verification: every authenticated admin-web page logged
+"Hydration failed because the server rendered HTML didn't match the client".
+`AuthProvider` initialised its state from `localStorage` during render, which
+is `null` on the server and the stored session in the browser. The session is
+now loaded in `useEffect` and exposed with `isReady`. Redirect guards wait for
+`isReady`; otherwise they would redirect a logged-in user to `/login` during
+the first client render. Regression test:
+`apps/admin-web/src/lib/__tests__/auth-context.test.tsx`.
+
+## Turborepo strict env mode: dev servers get PORT / NEXT_PUBLIC_API_URL / APP_ENV / DEV_LOGIN_ENABLED
+
+Turborepo 2 runs tasks in strict env mode: shell variables not declared in
+`turbo.json` never reach the task. This made it impossible to run
+`pnpm dev` on another port when 3000 was taken (it was, by an unrelated app,
+on the verification machine). The `dev` task now declares
+`passThroughEnv: [PORT, NEXT_PUBLIC_API_URL, CORS_ORIGINS, APP_ENV, DEV_LOGIN_ENABLED]`.
+It's pass-through rather than hashed `env` because `dev` isn't cached anyway.

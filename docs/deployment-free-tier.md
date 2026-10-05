@@ -54,6 +54,46 @@ I need, it's marked **→ send me this**.
 5. Save — Render redeploys automatically. Once live, the API is at `https://fieldmaster-api.onrender.com` (confirm the exact URL on the service's page — Render appends a random suffix only if that name is already taken by someone else).
    → **send me the exact URL** if it differs from the above
 
+### Test deployment vs. real use: `APP_ENV` and `DEV_LOGIN_ENABLED`
+
+`render.yaml` ships with production-safe values: `APP_ENV=production` and
+`DEV_LOGIN_ENABLED=false`. Real SMS login (Twilio) is then the only way in.
+
+For a **test deployment with no real data**, you can switch on the test login
+in the service's **Environment** tab:
+
+- `APP_ENV` → `staging`
+- `DEV_LOGIN_ENABLED` → `true`
+
+Every phone number then accepts the code `123456`, and the web and mobile login
+screens show a "TEST MODE — login without SMS" banner with one-click login as
+any member (see `docs/seed-accounts.md`). Twilio isn't needed in that mode.
+The hosted database starts empty, so run the seed against it once for the test
+accounts to exist:
+
+```bash
+DATABASE_URL="<Supabase connection string>" pnpm --filter @fieldmaster/api db:seed
+```
+
+**Anyone who can reach the URL can then sign in as any member**, including an
+Owner, and can change data while signed in (for example add themselves as a
+member). So follow these rules:
+
+1. **Don't turn a test deployment into the real one by flipping the flags.**
+   Use a separate Render service and database for real crews. If you must
+   reuse them, before any real worker or pay data goes in:
+   - set `DEV_LOGIN_ENABLED=false` and `APP_ENV=production`;
+   - wipe the database (re-run the seed or create a fresh Supabase project) so
+     no member or data added during the test window survives;
+   - generate new `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` values in Render's
+     Environment tab.
+2. What the API does on its own: as soon as dev login is off, every session
+   that started through quick login or the fixed code `123456` stops working.
+   Its access tokens are rejected and its refresh token is revoked on next use,
+   so nobody stays signed in from the test window. Real OTP sessions are
+   unaffected. The API also refuses to start if it ever sees
+   `APP_ENV=production` with `DEV_LOGIN_ENABLED=true`.
+
 **Free-tier behavior to expect**: the service sleeps after 15 minutes with no traffic; the next request takes ~30-60 seconds to wake it up. Fine for a small crew's daily use, not instant.
 
 ## 5. Vercel (admin web dashboard) — I can do this part

@@ -1,4 +1,4 @@
-import { Logger } from "@nestjs/common";
+import { Inject, Logger } from "@nestjs/common";
 import { OnEvent } from "@nestjs/event-emitter";
 import { JwtService } from "@nestjs/jwt";
 import {
@@ -10,6 +10,8 @@ import {
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
 import type { AccessTokenPayload } from "../../common/auth/auth-context";
+import { APP_ENVIRONMENT, type AppEnvironment } from "../../common/config/app-environment";
+import { isTestModeLoginMethod } from "../../common/auth/login-method";
 import { NOTIFICATION_CREATED_EVENT, type NotificationCreatedEvent } from "./notifications.service";
 
 /**
@@ -26,7 +28,10 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 
   private readonly logger = new Logger(NotificationsGateway.name);
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    @Inject(APP_ENVIRONMENT) private readonly appEnvironment: AppEnvironment,
+  ) {}
 
   async handleConnection(@ConnectedSocket() client: Socket) {
     const token = client.handshake.auth?.token ?? (client.handshake.query?.token as string | undefined);
@@ -36,6 +41,10 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
     }
     try {
       const payload = await this.jwtService.verifyAsync<AccessTokenPayload>(token, { secret: process.env.JWT_ACCESS_SECRET });
+      if (isTestModeLoginMethod(payload.loginMethod) && !this.appEnvironment.devLoginEnabled) {
+        client.disconnect(true);
+        return;
+      }
       await client.join(`user:${payload.sub}`);
     } catch {
       client.disconnect(true);

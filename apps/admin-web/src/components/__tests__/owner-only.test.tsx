@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OrgRole } from "@fieldmaster/shared-types";
 import { OwnerOnly } from "../owner-only";
 import { AuthProvider } from "../../lib/auth-context";
@@ -10,6 +12,11 @@ const replaceMock = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
 }));
+
+// AuthProvider clears the React Query cache on login/logout, so it needs a QueryClient above it.
+function render(ui: ReactElement) {
+  return rtlRender(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
+}
 
 function seedSession(role: OrgRole) {
   const session: StoredSession = {

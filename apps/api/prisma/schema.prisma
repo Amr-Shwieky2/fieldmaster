@@ -419,6 +419,8 @@ model RefreshTokenFamily {
   currentTokenHash String    @map("current_token_hash")
   revokedAt        DateTime? @map("revoked_at")
   revokedReason    String?   @map("revoked_reason")
+  /// How the session started: OTP | DEV_LOGIN | DEV_FIXED_OTP (see src/common/auth/login-method.ts).
+  origin           String    @default("OTP")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

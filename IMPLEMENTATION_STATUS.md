@@ -1,5 +1,103 @@
 # FieldMaster — Implementation Status
 
+## Step 1 of 10 — verification + test login (2026-10-05)
+
+### Part A: does the existing project run?
+
+| Command | Result |
+|---|---|
+| `docker compose up -d` | ✅ Postgres+PostGIS, Redis, MinIO healthy |
+| `pnpm install` | ✅ |
+| `pnpm db:migrate` | ✅ (8 migrations, none pending; this step adds 1 more) |
+| `pnpm db:seed` | ✅ 16 accounts, demo data |
+| `pnpm lint` | ✅ |
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 54 unit tests before this step |
+| `pnpm test:e2e` | ✅ 21 e2e tests before this step |
+| `pnpm build` | ✅ |
+| `pnpm dev` | ❌ → ✅ see below |
+
+**Exercised live:** logged in through the real OTP flow as a seeded Owner,
+Field Manager and Worker. 36 API checks across the three roles all returned
+the expected status (200 for allowed routes, 403 for payroll and audit log
+as Field Manager or Worker, workers list and own shifts for the Worker), and
+no compensation data leaked to the Field Manager. All 10 admin-web pages
+rendered real data for the Owner (dashboard, workers, sites, shifts, Turan,
+attendance, payroll list and period detail, reports, notifications, audit
+log).
+
+**Found broken and fixed:**
+
+1. **`pnpm dev` could not start the API.** Port 3000 was taken by an
+   unrelated app on the machine (`EADDRINUSE`), and Turborepo's strict env mode
+   dropped `PORT`/`NEXT_PUBLIC_API_URL` from the shell, so the port couldn't
+   even be overridden. Fixed: `turbo.json`'s `dev` task now passes
+   `PORT`, `NEXT_PUBLIC_API_URL`, `CORS_ORIGINS`, `APP_ENV` and `DEV_LOGIN_ENABLED`
+   through, so `PORT=3010 NEXT_PUBLIC_API_URL=http://localhost:3010/api/v1 pnpm dev`
+   works (documented in README and `docs/troubleshooting.md`).
+2. **React hydration error on every authenticated admin-web page load.**
+   `AuthProvider` read `localStorage` during render, so the server HTML
+   (loading state) never matched the client's first render (full shell).
+   Fixed: the session is read after mount and exposed with an `isReady` flag
+   that the redirect guards wait for. Regression test added.
+3. Found while doing Part B: `DEVICE_TIME_DEVIATION_SECONDS` was read by the
+   API but missing from `.env.example` (now documented), and the Terraform ECS
+   task set `NODE_ENV=staging`/`dev`, which the new `APP_ENV` logic would have
+   read as "development" (now sets `APP_ENV` and `DEV_LOGIN_ENABLED=false`
+   explicitly; `terraform validate` passes for dev/staging/production).
+
+### Part B: test login without SMS
+
+- **API.** `APP_ENV` (development | staging | production) and
+  `DEV_LOGIN_ENABLED` are validated at boot. Production + enabled exits with
+  "FieldMaster API configuration error…" (checked with the built `dist`
+  server and in an automated test that spawns `src/main.ts`).
+  `DevFixedCodeOtpProvider` makes every seeded number accept `123456`; the
+  console and Twilio providers are unchanged and can be pinned with
+  `OTP_PROVIDER`. `GET /api/v1/auth/dev/users` and
+  `POST /api/v1/auth/dev/login` return the same session as OTP verification
+  (same code path: device registration, refresh-token family, rotation) and
+  write a `DEV_LOGIN` audit event. Both return 404 when dev login is off.
+- **Admin web.** The login page shows a "TEST MODE — login without SMS" banner,
+  a "Quick test login" list grouped into Owners / Field Managers / Workers, and
+  the `code: 123456` hint, but only when the API says dev mode is on. A Worker
+  signing in on the web gets a "use the mobile app" notice instead of a page
+  full of 403s.
+- **Mobile.** The login screen has the same banner, quick-login list and hint.
+  Verified through the Expo web target: worker quick login opens the worker's
+  own shifts, and phone + `123456` works.
+- **Hardening from an adversarial review** (4 reviewers, every finding checked
+  by 2 skeptics; 17 findings, 4 confirmed and fixed):
+  - Sessions started through quick login or the fixed code now end as soon as
+    dev login is turned off, instead of staying valid for up to 30 days. Each
+    session records its origin; the guard, the WebSocket gateway and the SSE
+    stream reject test-mode tokens, and refresh revokes the session.
+  - In dev login mode the OTP provider must be the fixed-code one, so the
+    `123456` hint is always true.
+  - The admin web clears its query cache on every login and logout. After a
+    quick switch from Owner to Field Manager, the Field Manager briefly saw the
+    Owner's cached worker compensation.
+  - The "403 on every financial route" test now matches an exact,
+    hand-maintained route list and explicitly covers the service-layer guarded
+    `GET /workers/:id/compensation-profiles`.
+- **Docs:** `docs/seed-accounts.md` (all 16 seed users + both ways to log in),
+  README, `docs/deployment.md`, `docs/deployment-free-tier.md` (staging + true
+  for a test deployment, with the rules for going live), `render.yaml`
+  (production keeps `APP_ENV=production`, `DEV_LOGIN_ENABLED=false`).
+
+### Final run after this step
+
+`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 72 (35 shared-validation +
+21 API + 16 admin-web) · `pnpm test:e2e` ✅ 35 (the 21 existing + 14 dev-login) ·
+`pnpm build` ✅ · mobile `tsc` ✅. 107 automated tests in total.
+
+Not done in this step: on-device testing on a physical phone through Expo Go.
+The checklist is in the step report. The parked Arabic/RTL work from the
+earlier plan is on branch `wip/phase1-arabic-rtl` and has not been verified.
+
+---
+
+
 This tracks real status against the full FieldMaster specification. The
 delivered slice is the **backend API, a full-featured Next.js admin web
 app, a working Expo (React Native) mobile worker app with offline
@@ -63,6 +161,7 @@ the same org; a Field Manager gets `403` on every financial route).
 ## 7. Authentication and sessions — ✅
 
 - ✅ Phone + OTP login; **dev adapter prints the code to the API log**; **production adapter calls the real Twilio Verify REST API** (untested against a live account — no credentials in this environment)
+- ✅ **Test login (Step 1)**: `APP_ENV` (development/staging/production) + `DEV_LOGIN_ENABLED`. In dev login mode every phone accepts the fixed code `123456` (`DevFixedCodeOtpProvider`; console/Twilio providers unchanged, selectable via `OTP_PROVIDER`), and `GET /api/v1/auth/dev/users` + `POST /api/v1/auth/dev/login` give one-click login with the same session as OTP (device registration, refresh rotation) plus a `DEV_LOGIN` audit event. 404 when off; `APP_ENV=production` + `DEV_LOGIN_ENABLED=true` refuses to boot. Web and mobile login screens show a "TEST MODE — login without SMS" banner + quick-login list only when the API says dev mode is on. 25 API tests (11 unit + 14 e2e) plus 7 admin-web tests — see `docs/seed-accounts.md`
 - ✅ Short-lived JWT access token + opaque rotating refresh token; refresh-token **reuse triggers full session-family revocation** (tested)
 - ✅ Device registration (`UserDevice`), Owner-triggered device revocation (`AuthService.revokeDevice`)
 - ✅ Account status gating: `SUSPENDED`/`ARCHIVED` users are rejected at login (tested) and mid-session (guard re-checks every request)
