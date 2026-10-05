@@ -89,6 +89,39 @@ lsof -i :3000 -sTCP:LISTEN
 kill <pid>
 ```
 
+If port 3000 belongs to a **different application** you want to keep running
+(check the process's working directory with `lsof -p <pid> | grep cwd`), run
+FieldMaster on another port instead. `turbo.json` passes these variables
+through to the dev servers (Turborepo's strict env mode would otherwise drop
+them):
+
+```bash
+PORT=3010 NEXT_PUBLIC_API_URL=http://localhost:3010/api/v1 pnpm dev
+```
+
+The mobile app then needs `EXPO_PUBLIC_API_URL=http://<host>:3010/api/v1`.
+
+## Admin web console: "Hydration failed because the server rendered HTML didn't match the client"
+
+Fixed in Step 1 (verification pass). `AuthProvider` used to read the session
+from `localStorage` during its first render. On the server there's no
+`localStorage`, so the server rendered the loading state while the browser's
+first render showed the full app shell, which caused a mismatch on every
+authenticated page load. The session is now read in a `useEffect` after mount
+and exposed with an `isReady` flag. Redirect guards (`(app)/layout.tsx`, the
+root page) wait for `isReady` before deciding the user is logged out. If you
+add a new auth-dependent redirect, gate it on `isReady` too. The regression test
+is `apps/admin-web/src/lib/__tests__/auth-context.test.tsx`.
+
+## Login screens don't show the "TEST MODE" quick login
+
+The web and mobile login screens only show the test options when
+`GET /api/v1/auth/dev/users` answers 200. Check that the API runs with
+`DEV_LOGIN_ENABLED=true` and `APP_ENV=development` (or `staging`) in
+`apps/api/.env`. Watch mode only restarts on source changes, so restart
+`pnpm dev` after editing `.env`. `curl http://localhost:3000/api/v1/auth/dev/users`
+should return a JSON list, not a 404.
+
 ## Vitest component tests: `Cannot read properties of undefined (reading 'clear')` on `window.localStorage`
 
 Node 22+ ships an experimental global `localStorage` that throws/warns

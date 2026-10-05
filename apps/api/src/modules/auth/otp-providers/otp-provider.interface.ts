@@ -6,7 +6,7 @@ export interface OtpRequestResult {
 }
 
 export interface OtpProvider {
-  readonly name: "CONSOLE" | "TWILIO";
+  readonly name: "CONSOLE" | "TWILIO" | "DEV_FIXED";
   request(phoneNumber: string): Promise<OtpRequestResult>;
   verify(phoneNumber: string, code: string, providerRef: string | null): Promise<boolean>;
 }

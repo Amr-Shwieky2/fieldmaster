@@ -135,6 +135,15 @@ By default the mobile app points at `http://localhost:3000/api/v1`
 its origin (`http://localhost:8081` by default) to `CORS_ORIGINS` in
 `apps/api/.env` — already included in `.env.example`.
 
+> **Port 3000 already in use?** If another app on your machine already
+> listens on 3000, `pnpm dev` fails with `EADDRINUSE`. Run FieldMaster on
+> another port instead (Turborepo passes these variables through to the
+> dev servers):
+>
+> ```bash
+> PORT=3010 NEXT_PUBLIC_API_URL=http://localhost:3010/api/v1 pnpm dev
+> ```
+
 > **Port note:** if you already have a native (non-Docker) Postgres running
 > on 5432, this repo's Compose file maps the container to **5433** instead,
 > to avoid silently talking to the wrong database. See
@@ -185,13 +194,12 @@ DATABASE_URL="postgresql://fieldmaster:fieldmaster_dev_password@localhost:5433/f
 pnpm test:e2e
 ```
 
-## Seed / development accounts
+## Seed / development accounts and logging in
 
-After `pnpm db:seed`, sign in with any of these phone numbers — either
-through the admin web app at `http://localhost:3001/login`, or directly via
-`POST /api/v1/auth/otp/request` then `POST /api/v1/auth/otp/verify`. Either
-way, the OTP code is printed to the **API's** console log (dev adapter),
-not shown in the browser:
+`pnpm db:seed` creates 16 fictional accounts: 2 Owners, 2 Field Managers and
+12 Workers. The full list with phone numbers and what each account is useful
+for testing is in [`docs/seed-accounts.md`](docs/seed-accounts.md). The main
+ones:
 
 | Role | Phone | Name |
 |---|---|---|
@@ -199,12 +207,38 @@ not shown in the browser:
 | Owner | `+972500000002` | Amit Owner-Katz |
 | Field Manager | `+972500000011` | Yossi Manager-Ben David |
 | Field Manager | `+972500000012` | Noa Manager-Peretz |
-| Worker | `+972500010002` | Moshe Traffic |
+| Worker | `+972500010001` | Eli Ramzani |
 | Worker (has a forgotten-stamp deduction) | `+972500010010` | Nir Barrier |
+
+There are two ways to log in:
+
+1. **Test login (development/staging only).** With `APP_ENV=development` (or
+   `staging`) and `DEV_LOGIN_ENABLED=true` in `apps/api/.env`, which are the
+   defaults in `.env.example`, the web login page and the mobile login screen
+   show a **"TEST MODE — login without SMS"** banner and a **Quick test
+   login** list grouped by role. One click signs you in. The normal phone form
+   also accepts the fixed code **`123456`** for every seeded number.
+2. **Real OTP (always available).** With `DEV_LOGIN_ENABLED=false`, the test
+   options disappear and `/api/v1/auth/dev/*` returns 404. Locally the code is
+   then random and printed in the **API's console log**; with Twilio
+   credentials it is sent by SMS.
+
+`APP_ENV=production` with `DEV_LOGIN_ENABLED=true` is refused at startup. Never
+enable dev login on a deployment that holds real data.
 
 > If accounts end up in an unexpected state from manual testing/exploring
 > the API directly, re-run `pnpm db:seed` — it wipes and repopulates
 > everything from scratch every time.
+
+### Testing on a phone with Expo Go
+
+1. Find your computer's LAN IP (macOS: `ipconfig getifaddr en0`).
+2. Start the stack with `pnpm dev` and make sure the API is reachable from the
+   phone (same Wi-Fi; allow incoming connections for Node if macOS asks).
+3. In another terminal run
+   `EXPO_PUBLIC_API_URL=http://<LAN-IP>:3000/api/v1 pnpm --filter @fieldmaster/mobile start`
+   and scan the QR code with Expo Go (Android) or the Camera app (iOS).
+4. The login screen shows the test-mode banner and the quick-login list.
 
 ## Testing summary
 
@@ -213,9 +247,9 @@ not shown in the browser:
   timing, forgotten-stamp two-strike sequencing, geofence distance,
   Asia/Jerusalem month/day boundaries across DST transitions, and
   offline-event canonicalization + genuine Ed25519 sign/verify round-trips
-- 10 unit tests inside the API (RBAC permission matrix, mock-location/
-  device-time validation)
-- 21 integration/e2e tests against a live Postgres+PostGIS database:
+- 21 unit tests inside the API (RBAC permission matrix, mock-location/
+  device-time validation, and the `APP_ENV`/`DEV_LOGIN_ENABLED` boot rules)
+- 35 integration/e2e tests against a live Postgres+PostGIS database:
   OTP login, refresh-token rotation and theft detection, 2-owner-limit
   enforcement, suspended-account lockout, financial isolation (Field
   Manager 403s and DTO stripping), geofence rejection with distance
@@ -224,12 +258,18 @@ not shown in the browser:
   of `DEVICE_FAILURE` corrections, Flexi-Check, payroll
   calculate→finalize→block-edit→reopen, and 5 offline-sync tests (signed
   round trip, invalid-signature rejection, unregistered-device rejection,
-  duplicate detection, revoked-key rejection)
-- 9 admin-web tests (Vitest + React Testing Library): format-function unit
-  tests plus 3 tests proving the `OwnerOnly` financial-isolation wrapper
-  never renders its children for a Field Manager/Worker session
+  duplicate detection, revoked-key rejection), and 14 dev-login tests
+  (enabled/disabled/staging, fixed code, same session as OTP, `DEV_LOGIN`
+  audit event, 403 on every financial route for a dev-login Field Manager,
+  test-mode sessions ending when dev login is turned off, boot refusal for
+  production + enabled)
+- 16 admin-web tests (Vitest + React Testing Library): format-function unit
+  tests, 3 tests proving the `OwnerOnly` financial-isolation wrapper never
+  renders its children for a Field Manager/Worker session, hydration-safety
+  and cache-clearing tests for `AuthProvider`, and 3 login-page tests (test
+  options hidden on 404, shown in dev mode, one-click login)
 
-Run `pnpm test && pnpm test:e2e` to reproduce all of the above (75 tests total: 35 + 10 + 21 + 9).
+Run `pnpm test && pnpm test:e2e` to reproduce all of the above (107 tests total: 35 + 21 + 35 + 16).
 
 ## Deployment
 

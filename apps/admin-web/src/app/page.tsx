@@ -6,11 +6,11 @@ import { useAuth } from "@/lib/auth-context";
 
 export default function RootPage() {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isReady } = useAuth();
 
   useEffect(() => {
-    router.replace(isAuthenticated ? "/dashboard" : "/login");
-  }, [isAuthenticated, router]);
+    if (isReady) router.replace(isAuthenticated ? "/dashboard" : "/login");
+  }, [isReady, isAuthenticated, router]);
 
   return null;
 }

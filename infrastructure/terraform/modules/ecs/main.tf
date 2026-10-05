@@ -228,6 +228,11 @@ resource "aws_ecs_task_definition" "api" {
     environment = [
       { name = "NODE_ENV", value = var.environment },
       { name = "PORT", value = "3000" },
+      # APP_ENV drives the dev-login safety check (see apps/api/src/common/config/app-environment.ts).
+      # Dev login stays off on every AWS environment; the API refuses to boot with
+      # APP_ENV=production and DEV_LOGIN_ENABLED=true.
+      { name = "APP_ENV", value = var.environment == "dev" ? "development" : var.environment },
+      { name = "DEV_LOGIN_ENABLED", value = "false" },
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = "${var.db_credentials_secret_arn}:url::" },

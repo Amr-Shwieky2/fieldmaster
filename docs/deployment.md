@@ -8,6 +8,7 @@ pnpm install
 pnpm db:migrate
 pnpm db:seed
 pnpm dev                  # API on :3000, admin-web on :3001
+# Port 3000 taken by another app? PORT=3010 NEXT_PUBLIC_API_URL=http://localhost:3010/api/v1 pnpm dev
 ```
 
 See the root `README.md` for the full command list and seeded login
@@ -99,6 +100,24 @@ Postgres+Redis service containers), Docker image build, and a best-effort
 dependency security scan (`continue-on-error: true`). YAML-validated; not
 yet run against a live GitHub Actions runner in this environment (no CI
 credentials/remote configured here).
+
+## Environments and the test login
+
+The API reads `APP_ENV` (`development` | `staging` | `production`) and
+`DEV_LOGIN_ENABLED` (`true` | `false`):
+
+| Deployment | `APP_ENV` | `DEV_LOGIN_ENABLED` | Login |
+|---|---|---|---|
+| Local development | `development` | `true` (from `.env.example`) | Fixed code `123456` + one-click quick login, or real OTP |
+| Test deployment (no real data) | `staging` | `true` | Same as local |
+| Production / real crews | `production` | `false` | Real OTP only (Twilio SMS); `/api/v1/auth/dev/*` returns 404 |
+
+`APP_ENV=production` together with `DEV_LOGIN_ENABLED=true` is rejected at
+startup: the process exits with `FieldMaster API configuration error`.
+`render.yaml` and the Terraform ECS task definitions ship with dev login off
+(`APP_ENV=production`/`staging`/`development` mapped from the Terraform
+environment, `DEV_LOGIN_ENABLED=false`). See `docs/deployment-free-tier.md`
+for switching a Render test deployment to `staging` + `true`.
 
 ## Required production credentials (not needed for local dev)
 

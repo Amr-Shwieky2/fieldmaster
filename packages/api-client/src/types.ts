@@ -29,6 +29,18 @@ export interface AuthSession {
   role: OrgRole;
 }
 
+/** A member offered for one-click login while the API runs in dev login (test) mode. */
+export interface DevLoginUser {
+  membershipId: string;
+  userId: string;
+  fullLegalName: string;
+  preferredName: string | null;
+  phoneNumber: string;
+  role: OrgRole;
+  organizationId: string;
+  organizationName: string;
+}
+
 export interface Worker {
   id: string;
   organizationId: string;

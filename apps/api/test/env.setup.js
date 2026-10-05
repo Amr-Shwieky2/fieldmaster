@@ -13,3 +13,7 @@ process.env.OTP_MAX_ATTEMPTS ||= "5";
 process.env.DEVICE_TIME_DEVIATION_SECONDS ||= "120";
 process.env.CORS_ORIGINS ||= "";
 process.env.NODE_ENV ||= "test";
+// Dev login is OFF by default in tests; test/dev-login.e2e-spec.ts turns it on
+// (and back off) explicitly for the cases that need it.
+process.env.APP_ENV ||= "development";
+process.env.DEV_LOGIN_ENABLED ||= "false";

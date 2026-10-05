@@ -2,10 +2,34 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev"],
+      "port": 3001
+    },
+    {
+      "name": "dev-alt-port",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["PORT=3010", "NEXT_PUBLIC_API_URL=http://localhost:3010/api/v1", "pnpm", "dev"],
+      "port": 3001
+    },
+    {
+      "name": "dev-alt-port-devlogin-off",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["PORT=3010", "NEXT_PUBLIC_API_URL=http://localhost:3010/api/v1", "DEV_LOGIN_ENABLED=false", "pnpm", "dev"],
+      "port": 3001
+    },
+    {
       "name": "admin-web",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@fieldmaster/admin-web", "dev"],
       "port": 3001
+    },
+    {
+      "name": "mobile-web-api-3010",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["EXPO_PUBLIC_API_URL=http://localhost:3010/api/v1", "pnpm", "--filter", "@fieldmaster/mobile", "web"],
+      "port": 8081
     },
     {
       "name": "mobile-web",

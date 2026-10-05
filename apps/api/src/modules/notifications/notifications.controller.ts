@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Patch, Query, Sse, UnauthorizedException } from "@nestjs/common";
+import { Controller, Get, Inject, Param, Patch, Query, Sse, UnauthorizedException } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { JwtService } from "@nestjs/jwt";
 import { EventEmitter2 } from "@nestjs/event-emitter";
@@ -7,6 +7,8 @@ import { filter, map } from "rxjs/operators";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Public } from "../../common/decorators/public.decorator";
 import type { AuthenticatedUser, AccessTokenPayload } from "../../common/auth/auth-context";
+import { APP_ENVIRONMENT, type AppEnvironment } from "../../common/config/app-environment";
+import { TEST_MODE_SESSION_ENDED_MESSAGE, isTestModeLoginMethod } from "../../common/auth/login-method";
 import { NotificationsService, NOTIFICATION_CREATED_EVENT, type NotificationCreatedEvent } from "./notifications.service";
 
 @ApiBearerAuth()
@@ -17,6 +19,7 @@ export class NotificationsController {
     private readonly notificationsService: NotificationsService,
     private readonly jwtService: JwtService,
     private readonly eventEmitter: EventEmitter2,
+    @Inject(APP_ENVIRONMENT) private readonly appEnvironment: AppEnvironment,
   ) {}
 
   @Get()
@@ -39,13 +42,16 @@ export class NotificationsController {
   @Public()
   @Sse("stream")
   stream(@Query("token") token: string): Observable<{ data: unknown }> {
-    let userId: string;
+    let payload: AccessTokenPayload;
     try {
-      const payload = this.jwtService.verify<AccessTokenPayload>(token, { secret: process.env.JWT_ACCESS_SECRET });
-      userId = payload.sub;
+      payload = this.jwtService.verify<AccessTokenPayload>(token, { secret: process.env.JWT_ACCESS_SECRET });
     } catch {
       throw new UnauthorizedException("Invalid or expired token.");
     }
+    if (isTestModeLoginMethod(payload.loginMethod) && !this.appEnvironment.devLoginEnabled) {
+      throw new UnauthorizedException(TEST_MODE_SESSION_ENDED_MESSAGE);
+    }
+    const userId = payload.sub;
 
     return fromEvent(this.eventEmitter, NOTIFICATION_CREATED_EVENT).pipe(
       filter((event): event is NotificationCreatedEvent => (event as NotificationCreatedEvent).recipientUserId === userId),
