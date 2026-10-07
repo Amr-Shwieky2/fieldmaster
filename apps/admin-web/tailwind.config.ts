@@ -1,9 +1,14 @@
 import type { Config } from "tailwindcss";
+import defaultTheme from "tailwindcss/defaultTheme";
 
 export default {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        // IBM Plex Sans Arabic (next/font, see src/app/layout.tsx), then system fonts.
+        sans: ["var(--font-plex-sans-arabic)", ...defaultTheme.fontFamily.sans],
+      },
       colors: {
         brand: {
           50: "#eff6ff",

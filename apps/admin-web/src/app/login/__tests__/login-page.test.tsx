@@ -3,12 +3,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { DevLoginUser } from "@fieldmaster/api-client";
 import { AuthProvider } from "@/lib/auth-context";
+import { NextIntlClientProvider } from "next-intl";
+import { createIntlWrapper, getTestMessages } from "@/test/render-with-intl";
+import { BUSINESS_TIME_ZONE, INTL_LOCALE, type Locale } from "@/i18n/config";
+import en from "@/i18n/messages/en.json";
 import { sessionStore } from "@/lib/session-store";
 import LoginPage from "../page";
 
 const replaceMock = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: replaceMock }),
+  useRouter: () => ({ replace: replaceMock, refresh: vi.fn() }),
 }));
 
 const DEV_USERS: DevLoginUser[] = [
@@ -37,7 +41,7 @@ function mockApi(devMode: boolean) {
   return fetchMock;
 }
 
-function renderLogin() {
+function renderLogin(locale: Locale = "en") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -45,6 +49,7 @@ function renderLogin() {
         <LoginPage />
       </AuthProvider>
     </QueryClientProvider>,
+    { wrapper: createIntlWrapper({ locale }) },
   );
 }
 
@@ -97,5 +102,61 @@ describe("Login page test-mode options", () => {
     const loginCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/auth/dev/login"));
     expect(JSON.parse(String(loginCall?.[1]?.body))).toEqual({ membershipId: "m-fm", deviceId: "admin-web", platform: "WEB" });
     expect(sessionStore.load()?.role).toBe("FIELD_MANAGER");
+  });
+
+  it("renders the login page, banner and quick-login list in Arabic", async () => {
+    mockApi(true);
+    renderLogin("ar");
+    await waitFor(() => expect(screen.getByText("وضع الاختبار — تسجيل الدخول بدون رسالة SMS")).toBeTruthy());
+    expect(screen.getByText("تسجيل الدخول إلى لوحة الإدارة")).toBeTruthy();
+    expect(screen.getByLabelText("رقم الهاتف")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "إرسال رمز التحقق" })).toBeTruthy();
+    expect(screen.getByText("تسجيل دخول تجريبي سريع")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /المالكون/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /مدراء الميدان/ })).toBeTruthy();
+    // Role names come from the glossary.
+    expect(screen.getByRole("button", { name: "تسجيل الدخول باسم Yossi Manager (مدير ميدان)" })).toBeTruthy();
+    // The phone number stays left-to-right inside the Arabic text.
+    expect(screen.getByText("+972500000011").closest("bdi")?.getAttribute("dir")).toBe("ltr");
+  });
+
+  it("translates API errors on the login page (Arabic)", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith("/auth/dev/users")
+        ? new Response(JSON.stringify({ statusCode: 404, code: "NOT_FOUND", message: "x", details: {}, correlationId: "c" }), { status: 404 })
+        : new Response(JSON.stringify({ statusCode: 429, code: "OTP_RATE_LIMITED", message: "Too many verification codes requested.", details: {}, correlationId: "c" }), { status: 429 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderLogin("ar");
+    fireEvent.change(screen.getByLabelText("رقم الهاتف"), { target: { value: "+972500000001" } });
+    fireEvent.click(screen.getByRole("button", { name: "إرسال رمز التحقق" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("تم طلب عدد كبير من رموز التحقق. حاول مرة أخرى لاحقًا."));
+  });
+
+  it("shows an error that is already on screen in the new language after switching", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url.endsWith("/auth/dev/users")
+        ? new Response(JSON.stringify({ statusCode: 404, code: "NOT_FOUND", message: "x", details: {}, correlationId: "c" }), { status: 404 })
+        : new Response(JSON.stringify({ statusCode: 429, code: "OTP_RATE_LIMITED", message: "Too many verification codes requested.", details: {}, correlationId: "c" }), { status: 429 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Same tree, only the provider's locale changes, like router.refresh() after a switch: component state survives.
+    const tree = (locale: Locale) => (
+      <NextIntlClientProvider locale={INTL_LOCALE[locale]} messages={getTestMessages(locale)} timeZone={BUSINESS_TIME_ZONE}>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <LoginPage />
+          </AuthProvider>
+        </QueryClientProvider>
+      </NextIntlClientProvider>
+    );
+    const { rerender } = render(tree("ar"));
+    fireEvent.change(screen.getByLabelText("رقم الهاتف"), { target: { value: "+972500000001" } });
+    fireEvent.click(screen.getByRole("button", { name: "إرسال رمز التحقق" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("تم طلب عدد كبير من رموز التحقق. حاول مرة أخرى لاحقًا."));
+
+    rerender(tree("en"));
+    expect(screen.getByRole("alert").textContent).toBe(en.errors.OTP_RATE_LIMITED);
   });
 });

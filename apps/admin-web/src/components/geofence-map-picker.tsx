@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Circle, useMapEvents } from "react-leaflet";
+import { useEffect, useId, useRef } from "react";
+import { AttributionControl, Circle, MapContainer, Marker, TileLayer, ZoomControl, useMapEvents } from "react-leaflet";
 import L from "leaflet";
+import { useTranslations } from "next-intl";
 import "leaflet/dist/leaflet.css";
+import { localeDirection } from "@/i18n/config";
+import { useAppLocale } from "@/i18n/use-app-locale";
+import { useFormat } from "@/lib/use-format";
 
 // Default Leaflet marker icons reference image URLs that bundlers don't
 // resolve correctly out of the box; point them at the CDN-hosted assets
@@ -23,6 +27,8 @@ interface GeofenceMapPickerProps {
   longitude: number;
   radiusMeters: number;
   onChange: (lat: number, lng: number) => void;
+  /** Id of a visible element naming the map; without it the map gets its own aria-label. */
+  labelId?: string;
 }
 
 function ClickToMove({ onChange }: { onChange: (lat: number, lng: number) => void }) {
@@ -55,28 +61,65 @@ function RecenterOnChange({ latitude, longitude }: { latitude: number; longitude
  * for. Click anywhere on the map, or drag the marker, to set the site's
  * center; the shaded circle shows the actual geofence radius workers must
  * be inside to clock in.
+ *
+ * RTL: Leaflet lays out tiles, panes and control corners with physical
+ * left/right CSS, so the map container stays `dir="ltr"`. The controls are
+ * placed by direction instead: the zoom control sits on the inline-start
+ * corner (top-right in Arabic, top-left in English) and the attribution on
+ * the opposite bottom corner.
  */
-export function GeofenceMapPicker({ latitude, longitude, radiusMeters, onChange }: GeofenceMapPickerProps) {
+export function GeofenceMapPicker({ latitude, longitude, radiusMeters, onChange, labelId }: GeofenceMapPickerProps) {
+  const t = useTranslations("geofenceMap");
+  const locale = useAppLocale();
+  const format = useFormat();
+  const helpId = useId();
+  const rtl = localeDirection(locale) === "rtl";
+
   return (
-    <div className="overflow-hidden rounded-md border border-slate-300">
-      <MapContainer center={[latitude, longitude]} zoom={16} style={{ height: "280px", width: "100%" }}>
-        <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        <Marker
-          position={[latitude, longitude]}
-          icon={markerIcon}
-          draggable
-          eventHandlers={{
-            dragend: (e) => {
-              const marker = e.target as L.Marker;
-              const pos = marker.getLatLng();
-              onChange(pos.lat, pos.lng);
-            },
-          }}
-        />
-        <Circle center={[latitude, longitude]} radius={radiusMeters} pathOptions={{ color: "#2563eb", fillOpacity: 0.1 }} />
-        <ClickToMove onChange={onChange} />
-        <RecenterOnChange latitude={latitude} longitude={longitude} />
-      </MapContainer>
+    <div className="space-y-1">
+      {/* Leaflet's internal layout is physical (left/right), so the map itself stays LTR. */}
+      <div
+        dir="ltr"
+        role="group"
+        aria-label={labelId ? undefined : t("label")}
+        aria-labelledby={labelId}
+        aria-describedby={helpId}
+        className="overflow-hidden rounded-md border border-slate-300"
+      >
+        <MapContainer
+          center={[latitude, longitude]}
+          zoom={16}
+          zoomControl={false}
+          attributionControl={false}
+          style={{ height: "280px", width: "100%" }}
+        >
+          <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          {/* The zoom control and marker are keyed by locale: react-leaflet sets their titles/alt only on creation. */}
+          <ZoomControl key={locale} position={rtl ? "topright" : "topleft"} zoomInTitle={t("zoomIn")} zoomOutTitle={t("zoomOut")} />
+          <AttributionControl position={rtl ? "bottomleft" : "bottomright"} />
+          <Marker
+            key={locale}
+            position={[latitude, longitude]}
+            icon={markerIcon}
+            draggable
+            alt={t("markerAlt")}
+            title={t("markerTitle")}
+            eventHandlers={{
+              dragend: (e) => {
+                const marker = e.target as L.Marker;
+                const pos = marker.getLatLng();
+                onChange(pos.lat, pos.lng);
+              },
+            }}
+          />
+          <Circle center={[latitude, longitude]} radius={radiusMeters} pathOptions={{ color: "#2563eb", fillOpacity: 0.1 }} />
+          <ClickToMove onChange={onChange} />
+          <RecenterOnChange latitude={latitude} longitude={longitude} />
+        </MapContainer>
+      </div>
+      <p id={helpId} className="text-xs text-slate-500">
+        {t("help", { radius: format.number(radiusMeters) })}
+      </p>
     </div>
   );
 }

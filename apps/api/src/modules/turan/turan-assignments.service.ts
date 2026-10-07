@@ -3,6 +3,7 @@ import { NotificationType, TuranStatus, TuranType } from "@fieldmaster/shared-ty
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { AssignmentKind, TuranAssignmentChange } from "../notifications/notification-data";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
@@ -69,6 +70,13 @@ export class TuranAssignmentsService {
       type: NotificationType.TURAN_ASSIGNMENT_CREATED,
       title: `${dto.turanType === TuranType.NIGHT_TURAN ? "Night" : "Day"} Turan assignment`,
       body: `You've been scheduled for ${dto.turanType.replace("_", " ").toLowerCase()} from ${startAt.toISOString()} to ${endAt.toISOString()}.`,
+      data: {
+        assignmentKind: AssignmentKind.TURAN,
+        turanAssignmentId: assignment.id,
+        turanType: dto.turanType,
+        startAt: startAt.toISOString(),
+        endAt: endAt.toISOString(),
+      },
     });
 
     return assignment;
@@ -95,6 +103,13 @@ export class TuranAssignmentsService {
       type: NotificationType.TURAN_ASSIGNMENT_CHANGED,
       title: "Turan assignment cancelled",
       body: "One of your scheduled Turan assignments was cancelled.",
+      data: {
+        change: TuranAssignmentChange.CANCELLED,
+        turanAssignmentId: assignment.id,
+        turanType: assignment.turanType,
+        startAt: assignment.startAt.toISOString(),
+        endAt: assignment.endAt.toISOString(),
+      },
     });
 
     return updated;

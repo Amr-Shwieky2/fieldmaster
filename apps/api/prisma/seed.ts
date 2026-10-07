@@ -21,6 +21,7 @@ import {
   EmergencyAuthorizationSource,
   EventOrigin,
   LocationValidationStatus,
+  NotificationType,
   OrgRole,
   PayrollAdjustmentSource,
   PayrollAdjustmentType,
@@ -36,6 +37,7 @@ import {
 import {
   calculateDailyCompensation,
   calculateHourlyCompensation,
+  calculateShiftCompensation,
   computeEmergencyCompensation,
   evaluateForgottenStampInfraction,
   toBusinessDate,
@@ -514,12 +516,96 @@ async function main() {
   await recordAudit(org.id, owner1User.id, "PAYROLL_FINALIZED", "PayrollPeriod", payrollPeriod.id);
 
   // ── Notifications ─────────────────────────────────────────────────────
+  // Same shape as the API writes them: English title/body (still read as-is
+  // by the mobile app) plus data_json with the raw values the admin web
+  // renders in Arabic or English. Money (estimatedCostAgorot) is only ever in
+  // an Owner's data -- never a Field Manager's.
   console.log("Creating notifications...");
-  await prisma.notification.create({
-    data: { id: id(), organizationId: org.id, recipientUserId: owner1User.id, type: "PAYROLL_FINALIZED", title: "Payroll finalized", body: `Payroll for ${yearMonth} has been finalized.` },
+  const formatHm = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  async function estimatedCostAgorot(workerProfileId: string, minutes: number) {
+    const profile = await prisma.compensationProfile.findFirstOrThrow({ where: { workerProfileId } });
+    return calculateShiftCompensation({
+      compensationType: profile.compensationType,
+      approvedMinutes: minutes,
+      fullDayCredit: false,
+      dailyBaseRateAgorot: profile.dailyBaseRateAgorot ?? undefined,
+      baseHourlyRateAgorot: profile.baseHourlyRateAgorot ?? undefined,
+      overtimeHourlyRateAgorot: profile.overtimeHourlyRateAgorot,
+    }).totalCompensationAgorot;
+  }
+  async function seedNotification(
+    recipientUserId: string,
+    type: NotificationType,
+    title: string,
+    body: string,
+    data: Record<string, string | number | boolean | null>,
+    options: { createdAt?: Date; readAt?: Date } = {},
+  ) {
+    await prisma.notification.create({
+      data: { id: id(), organizationId: org.id, recipientUserId, type, title, body, dataJson: data, ...options },
+    });
+  }
+
+  // Emergency call-out ended: Owners see the estimated cost, Field Managers do not.
+  const emergencyWorker = workers[1];
+  const emergencyMinutes = emergencyComp.compensatedDurationMinutes;
+  const emergencyData = {
+    timeEntryId: emergencyEntry.id,
+    workerProfileId: emergencyWorker.profile.id,
+    workerName: emergencyWorker.user.fullLegalName,
+    endedAt: emergencyComp.actualEndClick.toISOString(),
+    compensatedDurationMinutes: emergencyMinutes,
+  };
+  const emergencyCost = await estimatedCostAgorot(emergencyWorker.profile.id, emergencyMinutes);
+  const emergencyManagerBody = `Emergency call-out ended. Compensated duration: ${formatHm(emergencyMinutes)}. Approval is required.`;
+  const emergencyOwnerBody = `Emergency call-out ended. Compensated duration: ${formatHm(emergencyMinutes)}. Estimated cost: ₪${(emergencyCost / 100).toFixed(2)}`;
+  const emergencyRead = { createdAt: emergencyComp.actualEndClick, readAt: emergencyComp.compensatedEnd };
+  for (const owner of [owner1User, owner2User]) {
+    await seedNotification(owner.id, "EMERGENCY_SHIFT_ENDED", "Emergency call-out ended", emergencyOwnerBody, { ...emergencyData, estimatedCostAgorot: emergencyCost }, emergencyRead);
+  }
+  for (const manager of [fm1User, fm2User]) {
+    await seedNotification(manager.id, "EMERGENCY_SHIFT_ENDED", "Emergency call-out ended", emergencyManagerBody, emergencyData, emergencyRead);
+  }
+
+  // The pending-approval entry's clock-out: the shift's manager gets no cost, Owners do.
+  const pendingWorker = workers[7];
+  const pendingMinutes = pendingEntry.rawDurationMinutes ?? 0;
+  const pendingSplit = `Total: ${formatHm(pendingMinutes)}\nRegular: ${formatHm(Math.min(pendingMinutes, 540))}\nOvertime: ${formatHm(Math.max(0, pendingMinutes - 540))}`;
+  const clockOutData = {
+    timeEntryId: pendingEntry.id,
+    shiftId: pendingShift.id,
+    shiftTitle: pendingShift.title,
+    workerProfileId: pendingWorker.profile.id,
+    workerName: pendingWorker.user.fullLegalName,
+    clockOutAt: pendingClockOut.toISOString(),
+    durationMinutes: pendingMinutes,
+    regularMinutes: Math.min(pendingMinutes, 540),
+    overtimeMinutes: Math.max(0, pendingMinutes - 540),
+  };
+  const clockOutCost = await estimatedCostAgorot(pendingWorker.profile.id, pendingMinutes);
+  await seedNotification(fm1User.id, "WORKER_CLOCKED_OUT", "Worker clocked out", `Worker clocked out of "${pendingShift.title}".\n${pendingSplit}\nApproval is required.`, clockOutData, {
+    createdAt: pendingClockOut,
   });
-  await prisma.notification.create({
-    data: { id: id(), organizationId: org.id, recipientUserId: fm1User.id, type: "SHIFT_AWAITING_APPROVAL", title: "Attendance awaiting approval", body: "A worker clocked out and needs approval." },
+  for (const owner of [owner1User, owner2User]) {
+    await seedNotification(
+      owner.id,
+      "WORKER_CLOCKED_OUT",
+      "Worker clocked out",
+      `Worker clocked out of "${pendingShift.title}".\n${pendingSplit}\nEstimated cost: ₪${(clockOutCost / 100).toFixed(2)}`,
+      { ...clockOutData, estimatedCostAgorot: clockOutCost },
+      { createdAt: pendingClockOut },
+    );
+  }
+
+  await seedNotification(owner1User.id, "PAYROLL_FINALIZED", "Payroll finalized", `Payroll for ${yearMonth} has been finalized.`, { yearMonth });
+  await seedNotification(fm1User.id, "SHIFT_AWAITING_APPROVAL", "Attendance awaiting approval", "A worker clocked out and needs approval.", {
+    timeEntryId: pendingEntry.id,
+    shiftId: pendingShift.id,
+    shiftTitle: pendingShift.title,
+    workerProfileId: pendingWorker.profile.id,
+    workerName: pendingWorker.user.fullLegalName,
+    clockOutAt: pendingClockOut.toISOString(),
+    durationMinutes: pendingMinutes,
   });
 
   console.log("\nSeed complete.\n");

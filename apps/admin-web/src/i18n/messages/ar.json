@@ -1,0 +1,994 @@
+{
+  "common": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "create": "إنشاء",
+    "edit": "تعديل",
+    "delete": "حذف",
+    "search": "بحث",
+    "filter": "تصفية",
+    "refresh": "تحديث",
+    "retry": "إعادة المحاولة",
+    "back": "رجوع",
+    "next": "التالي",
+    "previous": "السابق",
+    "close": "إغلاق",
+    "confirm": "تأكيد",
+    "yes": "نعم",
+    "no": "لا",
+    "actions": "الإجراءات",
+    "status": "الحالة",
+    "name": "الاسم",
+    "phone": "رقم الهاتف",
+    "date": "التاريخ",
+    "time": "الوقت",
+    "notes": "ملاحظات",
+    "reason": "السبب",
+    "total": "الإجمالي",
+    "loading": "جارٍ التحميل…",
+    "view": "عرض",
+    "details": "التفاصيل",
+    "submit": "إرسال",
+    "send": "إرسال",
+    "download": "تنزيل",
+    "upload": "رفع",
+    "select": "اختيار",
+    "selectPlaceholder": "اختر خيارًا",
+    "optional": "اختياري",
+    "required": "مطلوب",
+    "all": "الكل",
+    "none": "لا شيء",
+    "more": "المزيد",
+    "noResults": "لا توجد نتائج",
+    "add": "إضافة",
+    "remove": "إزالة",
+    "apply": "تطبيق",
+    "reset": "إعادة تعيين",
+    "clear": "مسح",
+    "export": "تصدير",
+    "copy": "نسخ",
+    "open": "فتح",
+    "done": "تم",
+    "from": "من",
+    "to": "إلى",
+    "today": "اليوم",
+    "pageOf": "صفحة {page} من {total}",
+    "login": "تسجيل الدخول",
+    "signOut": "تسجيل الخروج",
+    "verificationCode": "رمز التحقق",
+    "accessDenied": "غير مصرّح بالوصول",
+    "approve": "موافقة",
+    "approved": "تمت الموافقة",
+    "reject": "رفض",
+    "rejected": "مرفوض",
+    "pendingApproval": "بانتظار الموافقة",
+    "month": "الشهر",
+    "hours": "ساعات",
+    "minutes": "دقائق",
+    "days": "أيام",
+    "compensation": "الأجر",
+    "hourlyRate": "أجر الساعة",
+    "dailyRate": "أجر اليوم",
+    "gross": "الإجمالي قبل الخصم",
+    "net": "الصافي",
+    "deductions": "الخصومات",
+    "adjustments": "التعديلات",
+    "calculate": "احتساب",
+    "finalize": "إقفال الفترة",
+    "reopen": "إعادة فتح",
+    "dashboard": "لوحة التحكم",
+    "workers": "العمال",
+    "worker": "عامل",
+    "sitesProjects": "المواقع والمشاريع",
+    "sites": "المواقع",
+    "site": "موقع",
+    "projects": "المشاريع",
+    "project": "مشروع",
+    "scheduling": "الجدولة",
+    "shifts": "الورديات",
+    "shift": "وردية",
+    "turanEmergency": "المناوبات والطوارئ",
+    "attendanceApproval": "الموافقة على الحضور",
+    "attendance": "الحضور",
+    "reports": "التقارير",
+    "notifications": "الإشعارات",
+    "auditLog": "سجل التدقيق",
+    "payroll": "الرواتب",
+    "temporarySupervisor": "مشرف مؤقت",
+    "clockIn": "بدء الدوام",
+    "clockOut": "إنهاء الدوام",
+    "dayTuran": "مناوبة نهارية",
+    "nightTuran": "مناوبة ليلية",
+    "emergencyCallout": "استدعاء طوارئ",
+    "geofence": "نطاق الموقع",
+    "flexiCheck": "تسجيل مرن",
+    "creditAsFullDay": "احتساب يوم كامل",
+    "overtime": "ساعات إضافية",
+    "dailySummary": "ملخص العمل اليومي",
+    "forgottenStamp": "نسيان تسجيل",
+    "workerAttendanceLedger": "سجل حضور العامل"
+  },
+  "states": {
+    "loading": "جارٍ التحميل…",
+    "emptyTitle": "لا توجد بيانات بعد",
+    "emptyDescription": "لا توجد سجلات لعرضها حاليًا.",
+    "errorTitle": "حدث خطأ ما",
+    "errorDescription": "تعذّر تحميل هذه المعلومات. يُرجى المحاولة مرة أخرى.",
+    "notFoundTitle": "غير موجود",
+    "notFoundDescription": "العنصر الذي تبحث عنه غير موجود أو تمت إزالته.",
+    "retry": "إعادة المحاولة",
+    "accessDeniedTitle": "غير مصرّح بالوصول",
+    "accessDeniedDescription": "ليست لديك صلاحية لعرض هذه الصفحة. إذا كنت تعتقد أن هذا خطأ، تواصل مع المالك في مؤسستك.",
+    "goToDashboard": "الانتقال إلى لوحة التحكم",
+    "pageNotFoundTitle": "الصفحة غير موجودة",
+    "pageNotFoundDescription": "الصفحة التي فتحتها غير موجودة. تحقّق من العنوان أو ارجع إلى لوحة التحكم.",
+    "pageErrorDescription": "حدث خطأ غير متوقع أوقف هذه الصفحة. حاول مرة أخرى أو ارجع إلى لوحة التحكم."
+  },
+  "errors": {
+    "network": "تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت وحاول مرة أخرى.",
+    "unknown": "حدث خطأ غير متوقع. يُرجى المحاولة مرة أخرى.",
+    "rateLimited": "عدد الطلبات كبير جدًا. انتظر قليلًا ثم حاول مرة أخرى.",
+    "VALIDATION_FAILED": "بعض البيانات المُدخلة غير صالحة. راجع الحقول وحاول مرة أخرى.",
+    "UNAUTHENTICATED": "انتهت جلستك. يُرجى تسجيل الدخول مرة أخرى.",
+    "FORBIDDEN": "ليست لديك صلاحية لتنفيذ هذا الإجراء.",
+    "NOT_FOUND": "لم نتمكن من العثور على العنصر المطلوب.",
+    "CONFLICT": "يتعارض هذا الإجراء مع الحالة الحالية للسجل. حدّث الصفحة وحاول مرة أخرى.",
+    "GEOFENCE_OUTSIDE_ALLOWED_RADIUS": "أنت خارج نطاق الموقع: المسافة {distanceMeters} م، والحد المسموح {allowedRadiusMeters} م.",
+    "GPS_ACCURACY_TOO_LOW": "دقة تحديد الموقع ضعيفة ({accuracyMeters} م)، والمطلوب {requiredMeters} م أو أقل. انتقل إلى مكان مكشوف وحاول مرة أخرى.",
+    "MOCK_LOCATION_BLOCKED": "تم رفض الطلب لأن الجهاز يستخدم موقعًا وهميًا. أوقف تطبيقات تغيير الموقع وحاول مرة أخرى.",
+    "DEVICE_TIME_DEVIATION_EXCEEDED": "ساعة الجهاز تختلف عن الوقت الصحيح بـ {deviationSeconds} ثانية. اضبط التاريخ والوقت على الوضع التلقائي وحاول مرة أخرى.",
+    "ACTIVE_TIME_ENTRY_EXISTS": "هناك دوام جارٍ بالفعل. يجب إنهاء الدوام أولًا.",
+    "NO_ACTIVE_TIME_ENTRY": "لا يوجد دوام جارٍ لإنهائه.",
+    "SUMMARY_REQUIRED": "ملخص العمل اليومي مطلوب قبل إنهاء الدوام.",
+    "MAX_OWNERS_REACHED": "تم الوصول إلى الحد الأقصى لعدد المالكين في هذه المؤسسة.",
+    "OVERLAPPING_COMPENSATION_PROFILE": "تتداخل فترة هذا الأجر مع فترة أجر أخرى لنفس العامل.",
+    "PAYROLL_PERIOD_FINALIZED": "فترة الرواتب هذه مُقفلة. أعد فتحها لإجراء التعديلات.",
+    "IDEMPOTENCY_KEY_REQUIRED": "الطلب غير مكتمل. حدّث الصفحة وحاول مرة أخرى.",
+    "IDEMPOTENCY_KEY_CONFLICT": "سبق استخدام هذا الطلب مع بيانات مختلفة. حدّث الصفحة وحاول مرة أخرى.",
+    "EMERGENCY_NOT_ELIGIBLE": "هذا العامل غير مؤهل لاستدعاء طوارئ.",
+    "FULL_DAY_CREDIT_NOT_ALLOWED": "لا يمكن تطبيق احتساب يوم كامل على هذا السجل.",
+    "INVITATION_INVALID_OR_EXPIRED": "رابط الدعوة غير صالح أو منتهي الصلاحية.",
+    "DEVICE_KEY_NOT_REGISTERED": "هذا الجهاز غير مسجّل لدى الخادم. يُرجى تسجيل الدخول مرة أخرى.",
+    "INVALID_OFFLINE_SIGNATURE": "تعذّر التحقق من التسجيل الذي تمّ دون اتصال.",
+    "OTP_INVALID_OR_EXPIRED": "رمز التحقق غير صحيح أو منتهي الصلاحية.",
+    "OTP_MAX_ATTEMPTS_EXCEEDED": "تجاوزت الحد المسموح من المحاولات الخاطئة. اطلب رمز تحقق جديدًا.",
+    "OTP_RATE_LIMITED": "تم طلب عدد كبير من رموز التحقق. حاول مرة أخرى لاحقًا.",
+    "INVALID_REFRESH_TOKEN": "جلستك غير صالحة. يُرجى تسجيل الدخول مرة أخرى.",
+    "REFRESH_TOKEN_REVOKED": "تم إنهاء جلستك. يُرجى تسجيل الدخول مرة أخرى.",
+    "REFRESH_TOKEN_EXPIRED": "انتهت صلاحية جلستك. يُرجى تسجيل الدخول مرة أخرى.",
+    "REFRESH_TOKEN_REUSED": "تم إنهاء جلستك لأسباب أمنية. يُرجى تسجيل الدخول مرة أخرى.",
+    "NO_ACTIVE_MEMBERSHIP": "لا توجد لهذا الحساب عضوية نشطة في أي مؤسسة.",
+    "ORGANIZATION_SELECTION_REQUIRED": "اختر المؤسسة التي تريد تسجيل الدخول إليها.",
+    "RATE_LIMITED": "عدد الطلبات كبير جدًا. انتظر قليلًا ثم حاول مرة أخرى.",
+    "TOO_MANY_REQUESTS": "عدد الطلبات كبير جدًا. انتظر قليلًا ثم حاول مرة أخرى.",
+    "INTERNAL_ERROR": "حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.",
+    "SERVICE_UNAVAILABLE": "الخدمة غير متاحة مؤقتًا. يُرجى المحاولة بعد قليل.",
+    "ERROR": "حدث خطأ غير متوقع. يُرجى المحاولة مرة أخرى.",
+    "GEOFENCE_OUTSIDE_ALLOWED_RADIUS_NO_DETAILS": "موقعك الحالي خارج نطاق الموقع المسموح به.",
+    "GPS_ACCURACY_TOO_LOW_NO_DETAILS": "دقة تحديد الموقع (GPS) ضعيفة. انتقل إلى مكان مكشوف وحاول مرة أخرى.",
+    "DEVICE_TIME_DEVIATION_EXCEEDED_NO_DETAILS": "ساعة الجهاز لا تطابق الوقت الصحيح. اضبط التاريخ والوقت على الوضع التلقائي في إعدادات الجهاز."
+  },
+  "enums": {
+    "OrgRole": {
+      "OWNER": "المالك",
+      "FIELD_MANAGER": "مدير ميدان",
+      "WORKER": "عامل"
+    },
+    "AccountStatus": {
+      "INVITED": "مدعو",
+      "PENDING_APPROVAL": "بانتظار الموافقة",
+      "ACTIVE": "نشط",
+      "SUSPENDED": "موقوف",
+      "REJECTED": "مرفوض",
+      "ARCHIVED": "مؤرشف"
+    },
+    "CompensationType": {
+      "DAILY": "أجر اليوم",
+      "HOURLY": "أجر الساعة"
+    },
+    "ShiftType": {
+      "STANDARD": "وردية عادية",
+      "DAY_TURAN": "مناوبة نهارية",
+      "NIGHT_TURAN": "مناوبة ليلية",
+      "EMERGENCY_CALLOUT": "استدعاء طوارئ"
+    },
+    "ShiftStatus": {
+      "DRAFT": "مسودة",
+      "PUBLISHED": "منشورة",
+      "OPEN": "مفتوحة",
+      "ACTIVE": "جارية",
+      "PENDING_APPROVAL": "بانتظار الموافقة",
+      "APPROVED": "تمت الموافقة",
+      "REJECTED": "مرفوضة",
+      "CLOSED": "مغلقة",
+      "CANCELLED": "ملغاة"
+    },
+    "CheckInMethod": {
+      "GEOFENCED": "نطاق الموقع",
+      "FLEXI_CHECK": "تسجيل مرن"
+    },
+    "ClockEventType": {
+      "CLOCK_IN": "بدء الدوام",
+      "CLOCK_OUT": "إنهاء الدوام"
+    },
+    "EventOrigin": {
+      "ONLINE": "عبر الإنترنت",
+      "OFFLINE": "دون اتصال"
+    },
+    "TimeEntryStatus": {
+      "ACTIVE": "جارٍ",
+      "PENDING_APPROVAL": "بانتظار الموافقة",
+      "APPROVED": "تمت الموافقة",
+      "REJECTED": "مرفوض",
+      "CORRECTION_REQUESTED": "مطلوب تصحيح"
+    },
+    "LocationValidationStatus": {
+      "PASSED": "سليم",
+      "FLAGGED": "مُعلَّم للمراجعة",
+      "BLOCKED": "محظور",
+      "UNAVAILABLE": "غير متاح"
+    },
+    "CorrectionReason": {
+      "FORGOTTEN_CLOCK_IN": "نسيان تسجيل بدء الدوام",
+      "FORGOTTEN_CLOCK_OUT": "نسيان تسجيل إنهاء الدوام",
+      "DEVICE_FAILURE": "عطل في الجهاز",
+      "BROKEN_PHONE": "الهاتف مكسور",
+      "NO_CONNECTIVITY": "لا يوجد اتصال بالإنترنت",
+      "SYSTEM_ERROR": "خطأ في النظام",
+      "MANAGER_INSTRUCTION": "تعليمات المدير",
+      "OTHER": "أخرى"
+    },
+    "TuranType": {
+      "DAY_TURAN": "مناوبة نهارية",
+      "NIGHT_TURAN": "مناوبة ليلية"
+    },
+    "TuranStatus": {
+      "SCHEDULED": "مجدولة",
+      "ACTIVE": "جارية",
+      "COMPLETED": "مكتملة",
+      "CANCELLED": "ملغاة",
+      "MISSED": "فائتة"
+    },
+    "EmergencyAuthorizationSource": {
+      "NIGHT_TURAN_ASSIGNMENT": "تكليف بمناوبة ليلية",
+      "MANUAL_MANAGER_AUTHORIZATION": "إذن من المدير"
+    },
+    "TemporaryPointStatus": {
+      "ACTIVE": "نشطة",
+      "EXPIRED": "منتهية",
+      "REVOKED": "ملغاة"
+    },
+    "PayrollPeriodStatus": {
+      "OPEN": "مفتوحة",
+      "CALCULATING": "قيد الاحتساب",
+      "REVIEW": "قيد المراجعة",
+      "FINALIZED": "مُقفلة",
+      "REOPENED": "أُعيد فتحها"
+    },
+    "PayrollAdjustmentType": {
+      "FORGOTTEN_STAMP_PENALTY": "خصم نسيان تسجيل",
+      "FORGOTTEN_STAMP_REVERSAL": "إلغاء خصم نسيان تسجيل",
+      "MANUAL_DEDUCTION": "خصم يدوي",
+      "MANUAL_BONUS": "مكافأة يدوية"
+    },
+    "PayrollAdjustmentSource": {
+      "SYSTEM": "النظام",
+      "MANUAL": "يدوي"
+    },
+    "ApprovalAction": {
+      "APPROVE": "موافقة",
+      "REJECT": "رفض",
+      "REQUEST_CORRECTION": "طلب تصحيح"
+    },
+    "TaskCategory": {
+      "CONSTRUCTION": "أعمال إنشاءات",
+      "TRAFFIC_CONTROL": "تنظيم حركة المرور",
+      "TRAFFIC_SIGN": "لافتات مرورية",
+      "TRAFFIC_LIGHT_INSTALLATION": "تركيب إشارات المرور",
+      "TRAFFIC_LIGHT_REPAIR": "إصلاح إشارات المرور",
+      "INSPECTION": "فحص",
+      "MAINTENANCE": "صيانة",
+      "EMERGENCY_REPAIR": "إصلاح طارئ",
+      "OTHER": "أخرى"
+    },
+    "NotificationType": {
+      "WORKER_CLOCKED_IN": "بدأ عامل الدوام",
+      "WORKER_CLOCKED_OUT": "أنهى عامل الدوام",
+      "OVERTIME_THRESHOLD_CROSSED": "بدأت الساعات الإضافية",
+      "EMERGENCY_SHIFT_STARTED": "بدأ استدعاء طوارئ",
+      "EMERGENCY_SHIFT_ENDED": "انتهى استدعاء طوارئ",
+      "SHIFT_AWAITING_APPROVAL": "حضور بانتظار الموافقة",
+      "SHIFT_APPROVED": "تمت الموافقة على الحضور",
+      "SHIFT_REJECTED": "تم رفض الحضور",
+      "ONBOARDING_SUBMITTED": "تم تقديم طلب انضمام",
+      "WORKER_APPROVED": "تمت الموافقة على عامل",
+      "TURAN_ASSIGNMENT_CREATED": "تم إنشاء تكليف مناوبة",
+      "TURAN_ASSIGNMENT_CHANGED": "تم تغيير تكليف مناوبة",
+      "TEMPORARY_CHECK_IN_POINT_OPENED": "تم فتح نقطة تسجيل مؤقتة",
+      "PAYROLL_FINALIZED": "تم إقفال فترة الرواتب",
+      "OFFLINE_EVENT_SYNCED": "تمت مزامنة حضور دون اتصال",
+      "OFFLINE_EVENT_REJECTED": "تم رفض حضور مسجّل دون اتصال",
+      "SUSPICIOUS_LOCATION_DETECTED": "تم رصد موقع مشبوه"
+    },
+    "OfflineSyncEventStatus": {
+      "PENDING": "قيد الانتظار",
+      "VERIFIED": "تم التحقق",
+      "FLAGGED": "مُعلَّم للمراجعة",
+      "REJECTED": "مرفوض",
+      "DUPLICATE": "مكرّر"
+    }
+  },
+  "units": {
+    "hoursShort": "{count} س",
+    "minutesShort": "{count} د",
+    "daysShort": "{count} يوم",
+    "hoursMinutesShort": "{hours} س {minutes} د",
+    "hoursLong": "{count, plural, zero {{count} ساعة} one {ساعة واحدة} two {ساعتان} few {{count} ساعات} many {{count} ساعة} other {{count} ساعة}}",
+    "minutesLong": "{count, plural, zero {{count} دقيقة} one {دقيقة واحدة} two {دقيقتان} few {{count} دقائق} many {{count} دقيقة} other {{count} دقيقة}}",
+    "daysLong": "{count, plural, zero {{count} يوم} one {يوم واحد} two {يومان} few {{count} أيام} many {{count} يومًا} other {{count} يوم}}"
+  },
+  "language": {
+    "label": "اللغة",
+    "arabic": "العربية",
+    "english": "English",
+    "current": "اللغة الحالية",
+    "switchTo": "تغيير اللغة إلى {language}",
+    "saved": "تم تحديث اللغة",
+    "saveFailed": "تم تغيير اللغة على هذا الجهاز، لكن تعذّر حفظها في حسابك."
+  },
+  "nav": {
+    "mainNavigation": "القائمة الرئيسية",
+    "dashboard": "لوحة التحكم",
+    "workers": "العمال",
+    "sitesProjects": "المواقع والمشاريع",
+    "scheduling": "الجدولة",
+    "turanEmergency": "المناوبات والطوارئ",
+    "attendanceApproval": "الموافقة على الحضور",
+    "payroll": "الرواتب",
+    "reports": "التقارير",
+    "notifications": "الإشعارات",
+    "auditLog": "سجل التدقيق"
+  },
+  "shell": {
+    "brand": "FieldMaster",
+    "skipToContent": "الانتقال إلى المحتوى",
+    "signedInAs": "تم تسجيل الدخول بصفة {role}",
+    "signOut": "تسجيل الخروج",
+    "metaTitle": "FieldMaster — لوحة الإدارة",
+    "metaDescription": "إدارة طواقم الميدان: الورديات والحضور والمناوبات والرواتب."
+  },
+  "auth": {
+    "subtitle": "تسجيل الدخول إلى لوحة الإدارة",
+    "loginTitle": "تسجيل الدخول",
+    "phoneLabel": "رقم الهاتف",
+    "sendCode": "إرسال رمز التحقق",
+    "sending": "جارٍ الإرسال…",
+    "codeSentTo": "أدخل الرمز الذي وصلك على الرقم <phone></phone>.",
+    "codeLabel": "رمز التحقق",
+    "verify": "تحقّق وسجّل الدخول",
+    "verifying": "جارٍ التحقق…",
+    "useDifferentNumber": "استخدام رقم هاتف آخر",
+    "chooseOrganization": "هذا الرقم مرتبط بأكثر من مؤسسة. اختر المؤسسة:",
+    "testModeCodeHint": "وضع الاختبار — الرمز: <code></code>"
+  },
+  "devLogin": {
+    "bannerTitle": "وضع الاختبار — تسجيل الدخول بدون رسالة SMS",
+    "bannerBody": "تسجيل الدخول التجريبي مفعَّل على هذا الخادم. لا تستخدمه أبدًا مع بيانات حقيقية.",
+    "quickLoginTitle": "تسجيل دخول تجريبي سريع",
+    "quickLoginDescription": "اضغط على أي مستخدم تجريبي لتسجيل الدخول باسمه مباشرة، بدون رسالة أو رمز.",
+    "groupOwners": "المالكون",
+    "groupFieldManagers": "مدراء الميدان",
+    "groupWorkers": "العمال",
+    "groupCount": "({count})",
+    "workersNote": "العمال يستخدمون تطبيق الهاتف. على الويب تظهر لهم رسالة توضيحية فقط.",
+    "signInAs": "تسجيل الدخول باسم {name} ({role})",
+    "signingIn": "جارٍ تسجيل الدخول…",
+    "noUsers": "لا يوجد مستخدمون نشطون. شغّل pnpm db:seed لإنشاء الحسابات التجريبية.",
+    "failed": "تعذّر تسجيل الدخول السريع. تأكد من أن خادم الـ API يعمل."
+  },
+  "workerNotice": {
+    "title": "العمال يستخدمون تطبيق الهاتف",
+    "body": "لوحة الإدارة مخصّصة للمالك ومدير الميدان. بصفتك عاملًا، استخدم تطبيق FieldMaster على الهاتف لبدء الدوام وإنهائه ولمتابعة ورديّاتك وسجل حضورك."
+  },
+  "attendance": {
+    "title": "الموافقة على الحضور",
+    "description": "راجع الورديات المسجّلة التي تنتظر موافقتك. لا تظهر في هذه الصفحة أي مبالغ مالية.",
+    "pendingCount": "{count, plural, zero {لا توجد ورديات بانتظار الموافقة} one {وردية واحدة بانتظار الموافقة} two {ورديتان بانتظار الموافقة} few {{count} ورديات بانتظار الموافقة} many {{count} وردية بانتظار الموافقة} other {{count} وردية بانتظار الموافقة}}",
+    "listLabel": "الورديات بانتظار الموافقة",
+    "fullDayCreditApplied": "تم احتساب يوم كامل",
+    "fields": {
+      "duration": "المدة"
+    },
+    "actions": {
+      "approving": "جارٍ الموافقة…",
+      "rejecting": "جارٍ الرفض…",
+      "applyingFullDayCredit": "جارٍ الاحتساب…",
+      "confirmReject": "تأكيد الرفض",
+      "confirmFullDayCredit": "تأكيد احتساب يوم كامل"
+    },
+    "reasonPrompt": {
+      "rejectLabel": "سبب الرفض",
+      "rejectHint": "سيصل هذا السبب إلى العامل في إشعار.",
+      "rejectDefault": "تم الرفض بعد المراجعة.",
+      "fullDayCreditLabel": "سبب احتساب يوم كامل",
+      "fullDayCreditHint": "يُحفظ هذا السبب في سجل التدقيق.",
+      "fullDayCreditDefault": "توقّف العمل بسبب الطقس",
+      "required": "اكتب السبب قبل المتابعة."
+    },
+    "empty": {
+      "title": "لا توجد ورديات بانتظار الموافقة",
+      "description": "تمت مراجعة كل الورديات المسجّلة."
+    },
+    "messages": {
+      "approved": "تمت الموافقة على وردية {name}.",
+      "rejected": "تم رفض وردية {name}.",
+      "fullDayCreditApplied": "تم احتساب يوم كامل لوردية {name}."
+    }
+  },
+  "auditLog": {
+    "title": "سجل التدقيق",
+    "description": "كل حدث مربوط بالحدث الذي قبله ببصمة <ltr>SHA-256</ltr>، فلا يمكن تعديل السجل أو حذف شيء منه دون أن يُكتشف ذلك.",
+    "verify": {
+      "action": "التحقق من سلامة السجل",
+      "pending": "جارٍ التحقق…",
+      "valid": "السجل سليم — لم يُكتشف أي تلاعب",
+      "broken": "السجل غير سليم — يوجد خلل عند الحدث <ltr>{id}</ltr>",
+      "brokenUnknown": "السجل غير سليم — تم اكتشاف خلل في تسلسل الأحداث",
+      "failed": "تعذّر التحقق من سلامة السجل"
+    },
+    "events": {
+      "title": "الأحداث",
+      "caption": "أحداث سجل التدقيق"
+    },
+    "columns": {
+      "action": "الإجراء",
+      "entity": "العنصر",
+      "reason": "السبب",
+      "when": "التاريخ والوقت"
+    },
+    "entityIdTitle": "المعرّف الكامل: {id}",
+    "empty": {
+      "title": "لا توجد أحداث في السجل بعد",
+      "description": "ستظهر هنا كل عملية مهمة، مثل الموافقة على الحضور واحتساب الرواتب."
+    },
+    "actions": {
+      "CLOCK_IN": "بدء الدوام",
+      "CLOCK_OUT": "إنهاء الدوام",
+      "MANUAL_TIME_CORRECTION": "تصحيح يدوي للوقت",
+      "FORGOTTEN_STAMP_INFRACTION_RECORDED": "رصد حالة نسيان تسجيل",
+      "FORGOTTEN_STAMP_DEDUCTION_REVERSED": "إلغاء خصم نسيان تسجيل",
+      "FULL_DAY_CREDIT_APPLIED": "احتساب يوم كامل",
+      "TIME_ENTRY_APPROVED": "الموافقة على سجل حضور",
+      "TIME_ENTRY_REJECTED": "رفض سجل حضور",
+      "TIME_ENTRY_CORRECTION_REQUESTED": "طلب تصحيح سجل حضور",
+      "DEV_LOGIN": "تسجيل دخول تجريبي بدون رسالة نصية",
+      "TURAN_ASSIGNMENT_CREATED": "إنشاء مناوبة",
+      "TURAN_ASSIGNMENT_CANCELLED": "إلغاء مناوبة",
+      "EMERGENCY_CALLOUT_STARTED": "بدء استدعاء طوارئ",
+      "EMERGENCY_CALLOUT_ENDED": "انتهاء استدعاء طوارئ",
+      "PROJECT_CREATED": "إنشاء مشروع",
+      "SITE_CREATED": "إنشاء موقع",
+      "GEOFENCE_CREATED": "تحديد نطاق الموقع",
+      "MEMBERSHIP_CREATED": "إضافة عضو إلى المؤسسة",
+      "OFFLINE_EVENT_REJECTED": "رفض تسجيل تمّ دون اتصال",
+      "WORKER_APPROVED": "الموافقة على عامل",
+      "WORKER_REJECTED": "رفض عامل",
+      "COMPENSATION_PROFILE_CREATED": "تحديد أجر عامل",
+      "ONBOARDING_INVITATION_CREATED": "إرسال دعوة انضمام",
+      "ONBOARDING_INVITATION_REVOKED": "إلغاء دعوة انضمام",
+      "ONBOARDING_SUBMITTED": "تقديم طلب انضمام",
+      "PAYROLL_CALCULATED": "احتساب الرواتب",
+      "PAYROLL_FINALIZED": "إقفال فترة الرواتب",
+      "PAYROLL_PERIOD_REOPENED": "إعادة فتح فترة الرواتب",
+      "PAYROLL_ADJUSTMENT_CREATED": "إضافة تعديل على الراتب",
+      "TEMPORARY_CHECK_IN_POINT_CREATED": "إنشاء نقطة تسجيل مؤقتة",
+      "TEMPORARY_CHECK_IN_POINT_REVOKED": "إلغاء نقطة تسجيل مؤقتة",
+      "SHIFT_CREATED": "إنشاء وردية",
+      "SHIFT_WORKER_ASSIGNED": "تعيين عامل في وردية",
+      "SHIFT_CLOSED": "إغلاق وردية",
+      "TEMPORARY_SUPERVISOR_ASSIGNED": "تعيين مشرف مؤقت",
+      "TEMPORARY_SUPERVISOR_REVOKED": "إلغاء تعيين مشرف مؤقت",
+      "REPORT_GENERATED": "إنشاء تقرير",
+      "DEVICE_PUBLIC_KEY_REGISTERED": "تسجيل مفتاح جهاز",
+      "DEVICE_PUBLIC_KEY_REVOKED": "إلغاء مفتاح جهاز"
+    },
+    "entityTypes": {
+      "CompensationProfile": "ملف الأجر",
+      "DevicePublicKey": "مفتاح الجهاز",
+      "EmergencyCallout": "استدعاء طوارئ",
+      "ForgottenStampInfraction": "نسيان تسجيل",
+      "GeneratedReport": "تقرير",
+      "Geofence": "نطاق الموقع",
+      "OfflineSyncEvent": "تسجيل دون اتصال",
+      "OnboardingInvitation": "دعوة انضمام",
+      "OrganizationMembership": "عضوية في المؤسسة",
+      "PayrollAdjustment": "تعديل على الراتب",
+      "PayrollPeriod": "فترة الرواتب",
+      "Project": "مشروع",
+      "Shift": "وردية",
+      "ShiftAssignment": "تعيين في وردية",
+      "Site": "موقع",
+      "TemporaryCheckInPoint": "نقطة تسجيل مؤقتة",
+      "TemporarySupervisorAssignment": "تعيين مشرف مؤقت",
+      "TimeEntry": "سجل حضور",
+      "TuranAssignment": "مناوبة",
+      "WorkerProfile": "عامل"
+    }
+  },
+  "dashboard": {
+    "title": "لوحة التحكم",
+    "description": "ملخص شهر {month}",
+    "stats": {
+      "activeWorkers": "العمال النشطون",
+      "pendingApprovals": "حضور بانتظار الموافقة",
+      "payrollThisMonth": "رواتب هذا الشهر",
+      "previousMonth": "مقابل <ltr>{amount}</ltr> في الشهر الماضي",
+      "overtimeCost": "تكلفة الساعات الإضافية"
+    },
+    "financial": {
+      "loading": "جارٍ تحميل الأرقام المالية…",
+      "ownersOnly": "الأرقام المالية تظهر للمالك فقط."
+    },
+    "costByProject": {
+      "title": "التكلفة حسب المشروع",
+      "unassigned": "بدون مشروع",
+      "emptyTitle": "لا توجد تكاليف بعد",
+      "emptyDescription": "لا توجد هذا الشهر بعد ورديات تمت الموافقة عليها واحتُسبت تكلفتها."
+    },
+    "exposure": {
+      "title": "مبالغ معلّقة وخصومات",
+      "pendingApprovalEstimate": "تقدير تكلفة الحضور بانتظار الموافقة",
+      "forgottenStampDeductions": "خصومات نسيان تسجيل"
+    }
+  },
+  "geofenceMap": {
+    "label": "خريطة نطاق الموقع",
+    "help": "اضغط على الخريطة أو اسحب الدبوس لتحديد المركز. الدائرة الملوّنة هي نطاق الموقع ({radius} م)، ويجب أن يكون العامل داخلها ليتمكن من بدء الدوام.",
+    "loading": "جارٍ تحميل الخريطة…",
+    "markerAlt": "دبوس مركز نطاق الموقع",
+    "markerTitle": "اسحب الدبوس لتغيير المركز",
+    "zoomIn": "تكبير",
+    "zoomOut": "تصغير"
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "description": "إشعارات بدء الدوام وإنهائه، والموافقات، واستدعاءات الطوارئ، والرواتب.",
+    "activity": "النشاط",
+    "listLabel": "قائمة الإشعارات، الأحدث أولًا",
+    "unread": "غير مقروء",
+    "unreadCount": "غير مقروءة: {count}",
+    "markRead": "تحديد كمقروء",
+    "markingRead": "جارٍ التحديد…",
+    "markedRead": "تم تحديد الإشعار كمقروء.",
+    "markReadFailed": "تعذّر تحديد الإشعار كمقروء.",
+    "loading": "جارٍ تحميل الإشعارات…",
+    "empty": {
+      "title": "لا توجد إشعارات بعد",
+      "description": "ستظهر هنا إشعارات بدء الدوام وإنهائه والموافقات واستدعاءات الطوارئ."
+    },
+    "someWorker": "أحد العمال",
+    "genericTitle": "إشعار جديد",
+    "genericBody": "لديك إشعار جديد.",
+    "turanTypes": {
+      "DAY_TURAN": "مناوبة نهارية",
+      "NIGHT_TURAN": "مناوبة ليلية"
+    },
+    "types": {
+      "WORKER_CLOCKED_IN": {
+        "title": "بدأ عامل الدوام",
+        "body": "بدأ {workerName} الدوام في وردية «{shiftTitle}».\nالوقت: {time}",
+        "fallbackBody": "بدأ أحد العمال الدوام في وردية."
+      },
+      "WORKER_CLOCKED_OUT": {
+        "title": "أنهى عامل الدوام",
+        "body": "أنهى {workerName} الدوام في وردية «{shiftTitle}».\nالمجموع: {total}\nساعات عادية: {regular}\nساعات إضافية: {overtime}\nالحضور بانتظار الموافقة.",
+        "bodyWithCost": "أنهى {workerName} الدوام في وردية «{shiftTitle}».\nالمجموع: {total}\nساعات عادية: {regular}\nساعات إضافية: {overtime}\nالتكلفة التقديرية: {cost}\nالحضور بانتظار الموافقة.",
+        "fallbackBody": "أنهى أحد العمال الدوام، والحضور بانتظار الموافقة."
+      },
+      "OVERTIME_THRESHOLD_CROSSED": {
+        "title": "بدأت الساعات الإضافية",
+        "body": "تجاوز {workerName} الدوام العادي في وردية «{shiftTitle}»، وبدأت ساعاته الإضافية.",
+        "fallbackBody": "تجاوز أحد العمال الدوام العادي، وبدأت ساعاته الإضافية."
+      },
+      "EMERGENCY_SHIFT_STARTED": {
+        "title": "بدأ استدعاء طوارئ",
+        "body": "بدأ {workerName} استدعاء طوارئ.\nالوقت: {time}",
+        "fallbackBody": "بدأ أحد العمال استدعاء طوارئ."
+      },
+      "EMERGENCY_SHIFT_ENDED": {
+        "title": "انتهى استدعاء طوارئ",
+        "body": "أنهى {workerName} استدعاء الطوارئ.\nالمدة المحتسبة: {duration}\nالحضور بانتظار الموافقة.",
+        "bodyWithCost": "أنهى {workerName} استدعاء الطوارئ.\nالمدة المحتسبة: {duration}\nالتكلفة التقديرية: {cost}\nالحضور بانتظار الموافقة.",
+        "fallbackBody": "انتهى استدعاء طوارئ، والحضور بانتظار الموافقة."
+      },
+      "SHIFT_AWAITING_APPROVAL": {
+        "title": "حضور بانتظار الموافقة",
+        "body": "أنهى {workerName} الدوام في وردية «{shiftTitle}».\nالحضور بانتظار الموافقة.",
+        "fallbackBody": "أنهى أحد العمال الدوام، والحضور بانتظار الموافقة."
+      },
+      "SHIFT_APPROVED": {
+        "title": "تمت الموافقة على الحضور",
+        "body": "تمت الموافقة على حضورك في وردية «{shiftTitle}» بتاريخ {date}.\nساعات عادية: {regular}\nساعات إضافية: {overtime}",
+        "fallbackBody": "تمت الموافقة على حضورك في إحدى الورديات."
+      },
+      "SHIFT_REJECTED": {
+        "title": "تم رفض الحضور",
+        "body": "تم رفض حضورك في وردية «{shiftTitle}» بتاريخ {date}.\nالسبب: {reason}",
+        "fallbackBody": "تم رفض حضورك في إحدى الورديات. راجع مديرك لمعرفة السبب."
+      },
+      "ONBOARDING_SUBMITTED": {
+        "title": "طلب انضمام جديد",
+        "body": "قدّم {workerName} طلب انضمام، وهو بانتظار مراجعتك.",
+        "fallbackBody": "قدّم عامل جديد طلب انضمام، وهو بانتظار مراجعتك."
+      },
+      "WORKER_APPROVED": {
+        "title": "تمت الموافقة على طلبك",
+        "body": "أهلًا بك في الفريق. يمكنك الآن بدء الدوام في الورديات المخصّصة لك.",
+        "fallbackBody": "أهلًا بك في الفريق. يمكنك الآن بدء الدوام في الورديات المخصّصة لك."
+      },
+      "TURAN_ASSIGNMENT_CREATED": {
+        "title": "تكليف جديد",
+        "turanTitle": "تكليف {turanType}",
+        "body": "لديك {turanType}.\nمن: {start}\nإلى: {end}",
+        "shiftAssignedTitle": "وردية جديدة",
+        "shiftAssignedBody": "تم تعيينك في وردية «{shiftTitle}».\nالبداية: {start}",
+        "fallbackBody": "لديك تكليف جديد. راجع جدولك لمعرفة التفاصيل."
+      },
+      "TURAN_ASSIGNMENT_CHANGED": {
+        "title": "تغيير في المناوبة",
+        "body": "تم تغيير إحدى مناوباتك ({turanType}).\nمن: {start}\nإلى: {end}",
+        "cancelledTitle": "تم إلغاء المناوبة",
+        "cancelledBody": "تم إلغاء إحدى مناوباتك ({turanType}).\nمن: {start}\nإلى: {end}",
+        "fallbackBody": "تم تغيير إحدى مناوباتك. راجع جدولك لمعرفة التفاصيل."
+      },
+      "TEMPORARY_CHECK_IN_POINT_OPENED": {
+        "title": "تم فتح نقطة تسجيل مؤقتة",
+        "body": "تم فتح نقطة تسجيل مؤقتة لوردية «{shiftTitle}».",
+        "fallbackBody": "تم فتح نقطة تسجيل مؤقتة لإحدى الورديات."
+      },
+      "PAYROLL_FINALIZED": {
+        "title": "تم إقفال الرواتب",
+        "body": "تم إقفال رواتب شهر {month}.",
+        "fallbackBody": "تم إقفال إحدى فترات الرواتب."
+      },
+      "OFFLINE_EVENT_SYNCED": {
+        "title": "تمت مزامنة حضور دون اتصال",
+        "body": "تمت مزامنة سجلات حضور {workerName} المسجّلة دون اتصال.\nعدد السجلات: {count}",
+        "fallbackBody": "تمت مزامنة سجلات حضور مسجّلة دون اتصال."
+      },
+      "OFFLINE_EVENT_REJECTED": {
+        "title": "حضور دون اتصال يحتاج إلى مراجعة",
+        "body": "سجلات حضور {workerName} المسجّلة دون اتصال تحتاج إلى مراجعة.\nمُعلَّمة للمراجعة: {flagged}\nمرفوضة: {rejected}",
+        "fallbackBody": "تم رفض بعض سجلات الحضور المسجّلة دون اتصال، وهي تحتاج إلى مراجعة."
+      },
+      "SUSPICIOUS_LOCATION_DETECTED": {
+        "title": "موقع مشبوه يحتاج إلى مراجعة",
+        "body": "سجلات حضور {workerName} المسجّلة دون اتصال تحتاج إلى مراجعة.\nمُعلَّمة للمراجعة: {flagged}\nمرفوضة: {rejected}",
+        "fallbackBody": "تم رصد موقع مشبوه في سجلات الحضور، وهو يحتاج إلى مراجعة."
+      }
+    }
+  },
+  "payroll": {
+    "title": "الرواتب",
+    "description": "للمالك فقط. احتسب رواتب الشهر وراجعها، ثم أقفل الفترة.",
+    "actions": {
+      "calculateMonth": "احتساب رواتب {month}",
+      "calculating": "جارٍ الاحتساب…"
+    },
+    "messages": {
+      "calculated": "تم احتساب رواتب {month}. راجعها قبل إقفال الفترة."
+    },
+    "list": {
+      "title": "فترات الرواتب",
+      "caption": "فترات الرواتب مع رقم الإصدار والحالة",
+      "columns": {
+        "month": "الشهر",
+        "version": "الإصدار",
+        "status": "الحالة"
+      },
+      "empty": {
+        "title": "لا توجد فترات رواتب بعد",
+        "description": "احتسب رواتب الشهر الحالي للبدء."
+      }
+    },
+    "period": {
+      "title": "رواتب {month}",
+      "backToList": "العودة إلى الرواتب",
+      "version": "الإصدار {version}",
+      "breakdownTitle": "رواتب العمال بالتفصيل",
+      "totalNet": "إجمالي الصافي: <ltr>{total}</ltr>",
+      "caption": "تفاصيل رواتب العمال لشهر {month}",
+      "columns": {
+        "worker": "العامل",
+        "days": "الأيام المحتسبة",
+        "regular": "الساعات العادية",
+        "adjustments": "الإضافات والخصومات"
+      },
+      "added": "إضافة:",
+      "deducted": "خصم:",
+      "actions": {
+        "finalizing": "جارٍ إقفال الفترة…",
+        "reopening": "جارٍ إعادة الفتح…"
+      },
+      "messages": {
+        "finalized": "تم إقفال فترة الرواتب.",
+        "reopened": "أُعيد فتح فترة الرواتب، ويمكنك الآن تعديلها."
+      },
+      "empty": {
+        "title": "لا توجد رواتب محتسبة لهذا الشهر",
+        "description": "اضغط «احتساب» في صفحة الرواتب لاحتساب رواتب العمال."
+      },
+      "notFound": {
+        "title": "لم تُحتسب رواتب هذا الشهر بعد",
+        "description": "لا توجد فترة رواتب لهذا الشهر. ارجع إلى صفحة الرواتب لاحتسابها."
+      },
+      "reopenReason": "يلزم تصحيح بعد المراجعة"
+    }
+  },
+  "reports": {
+    "title": "التقارير",
+    "description": "سجل حضور العامل ملف PDF لا يمكن تعديله دون أن يُكتشف ذلك، ويضم إثباتات الموقع (GPS) والتصحيحات والموافقات. تظهر الأرقام المالية فقط إذا أنشأه المالك، أو إذا أنشأ العامل سجله بنفسه.",
+    "generate": {
+      "title": "إنشاء سجل حضور العامل",
+      "worker": "العامل",
+      "workerPlaceholder": "اختر عاملًا…",
+      "workersLoading": "جارٍ تحميل العمال…",
+      "noWorkers": "لا يوجد عمال بعد",
+      "workersError": "تعذّر تحميل قائمة العمال: {message}",
+      "from": "من تاريخ",
+      "to": "إلى تاريخ",
+      "submit": "إنشاء ملف PDF",
+      "submitting": "جارٍ إنشاء التقرير…",
+      "readyWithFinancials": "التقرير جاهز، ويتضمن الأرقام المالية.",
+      "readyOperationalOnly": "التقرير جاهز، ويتضمن معلومات العمل فقط بدون أرقام مالية.",
+      "openPdf": "فتح ملف PDF"
+    },
+    "past": {
+      "title": "التقارير السابقة",
+      "caption": "التقارير التي أُنشئت سابقًا",
+      "columns": {
+        "worker": "العامل",
+        "generatedAt": "تاريخ الإنشاء",
+        "financials": "الأرقام المالية",
+        "hash": "بصمة الملف"
+      },
+      "financialsIncluded": "مُضمَّنة",
+      "operationalOnly": "معلومات العمل فقط",
+      "downloadLabel": "تنزيل تقرير {worker} ({date})",
+      "downloading": "جارٍ التحضير…",
+      "downloadFailed": "تعذّر تنزيل التقرير: {message}",
+      "empty": {
+        "title": "لم يُنشأ أي تقرير بعد",
+        "description": "اختر عاملًا وفترة في الأعلى، ثم اضغط «إنشاء ملف PDF»."
+      }
+    }
+  },
+  "shifts": {
+    "backToList": "كل الورديات",
+    "list": {
+      "title": "الجدولة",
+      "description": "الورديات والمناوبات وتكليف العمال.",
+      "newShift": "وردية جديدة",
+      "cardTitle": "الورديات",
+      "caption": "الورديات مع النوع والموعد وعدد العمال المكلّفين والحالة",
+      "columns": {
+        "title": "العنوان",
+        "type": "النوع",
+        "start": "البداية",
+        "end": "النهاية",
+        "assigned": "العمال المكلّفون",
+        "status": "الحالة"
+      },
+      "empty": {
+        "title": "لا توجد ورديات بعد",
+        "description": "أنشئ أول وردية للبدء."
+      }
+    },
+    "detail": {
+      "details": "تفاصيل الوردية",
+      "fields": {
+        "type": "النوع",
+        "checkInMethod": "طريقة تسجيل الحضور",
+        "start": "البداية",
+        "end": "النهاية",
+        "site": "الموقع"
+      },
+      "assigned": {
+        "title": "العمال المكلّفون ({count})",
+        "empty": "لم يُكلَّف أي عامل بهذه الوردية بعد."
+      },
+      "assign": {
+        "label": "تكليف عامل",
+        "placeholder": "اختر عاملًا…",
+        "loadingWorkers": "جارٍ تحميل العمال…",
+        "noneAvailable": "لا يوجد عمال نشطون آخرون متاحون للتكليف.",
+        "submit": "تكليف",
+        "submitting": "جارٍ التكليف…",
+        "success": "تم تكليف العامل بالوردية.",
+        "overlap": "هذا العامل مكلّف بوردية أخرى في الوقت نفسه."
+      }
+    },
+    "form": {
+      "title": "وردية جديدة",
+      "description": "أدخل بيانات الوردية. بعد الحفظ يمكنك تكليف العمال بها.",
+      "cardTitle": "بيانات الوردية",
+      "fields": {
+        "title": "عنوان الوردية",
+        "titlePlaceholder": "مثال: تنظيم حركة المرور صباحًا",
+        "shiftType": "نوع الوردية",
+        "project": "المشروع",
+        "noProject": "بدون مشروع",
+        "site": "الموقع",
+        "noSite": "بدون موقع",
+        "checkInMethod": "طريقة تسجيل الحضور",
+        "start": "وقت البداية",
+        "end": "وقت النهاية"
+      },
+      "hints": {
+        "loadingSites": "جارٍ تحميل المواقع…",
+        "noSites": "لا توجد مواقع لهذا المشروع بعد.",
+        "noGeofence": "لم يُحدَّد نطاق الموقع لهذا الموقع بعد.",
+        "endBeforeStart": "يجب أن يكون وقت النهاية بعد وقت البداية."
+      },
+      "submit": "إنشاء الوردية",
+      "submitting": "جارٍ إنشاء الوردية…"
+    }
+  },
+  "sites": {
+    "title": "المواقع والمشاريع",
+    "description": "المشاريع ومواقع العمل، مع نطاق الموقع لكلٍّ منها.",
+    "projects": {
+      "title": "المشاريع",
+      "listLabel": "قائمة المشاريع",
+      "client": "العميل: {client}",
+      "budget": "الميزانية: <money></money>",
+      "empty": {
+        "title": "لا توجد مشاريع بعد",
+        "description": "أضف أول مشروع من النموذج أدناه."
+      },
+      "form": {
+        "title": "مشروع جديد",
+        "name": "اسم المشروع",
+        "client": "العميل (اختياري)",
+        "code": "رمز المشروع",
+        "submit": "إنشاء المشروع",
+        "submitting": "جارٍ إنشاء المشروع…"
+      },
+      "messages": {
+        "created": "تم إنشاء المشروع."
+      }
+    },
+    "sites": {
+      "title": "المواقع",
+      "listLabel": "قائمة المواقع",
+      "radius": "نطاق الموقع: {radius} م",
+      "empty": {
+        "title": "لا توجد مواقع بعد",
+        "description": "اختر مشروعًا وحدّد مكان الموقع على الخريطة لإضافة أول موقع."
+      },
+      "form": {
+        "title": "موقع جديد",
+        "project": "المشروع",
+        "projectPlaceholder": "اختر مشروعًا…",
+        "noProjects": "أنشئ مشروعًا أولًا، ثم أضف إليه موقعًا.",
+        "name": "اسم الموقع",
+        "mapLabel": "مركز نطاق الموقع",
+        "latitude": "خط العرض",
+        "longitude": "خط الطول",
+        "radius": "نصف القطر (متر)",
+        "coordinatesHint": "يمكنك أيضًا كتابة الإحداثيات ونصف القطر يدويًا.",
+        "submit": "إنشاء الموقع مع نطاق الموقع",
+        "submitting": "جارٍ إنشاء الموقع…"
+      },
+      "messages": {
+        "created": "تم إنشاء الموقع ونطاق الموقع."
+      }
+    }
+  },
+  "turan": {
+    "title": "المناوبات والطوارئ",
+    "description": "جدولة المناوبات النهارية والليلية. استدعاءات الطوارئ التي تبدأ من مناوبة ليلية تظهر في صفحة <scheduling>الجدولة</scheduling> كورديات مستقلة.",
+    "form": {
+      "title": "مناوبة جديدة",
+      "type": "نوع المناوبة",
+      "worker": "العامل",
+      "workerPlaceholder": "اختر عاملًا…",
+      "workersLoading": "جارٍ تحميل العمال…",
+      "start": "البداية",
+      "end": "النهاية",
+      "notes": "ملاحظات (اختياري)",
+      "submit": "إنشاء المناوبة",
+      "submitting": "جارٍ الإنشاء…",
+      "timesRequired": "حدّد وقت البداية ووقت النهاية.",
+      "endBeforeStart": "يجب أن يكون وقت النهاية بعد وقت البداية."
+    },
+    "overlap": {
+      "title": "لدى هذا العامل مناوبة أخرى في الوقت نفسه",
+      "description": "تتداخل هذه المناوبة مع {type} من {start} إلى {end}. هل تريد إنشاءها رغم التداخل؟",
+      "descriptionUnknown": "تتداخل هذه المناوبة مع مناوبة أخرى مجدولة للعامل نفسه. هل تريد إنشاءها رغم التداخل؟",
+      "confirm": "نعم، أنشئ المناوبة"
+    },
+    "list": {
+      "title": "المناوبات",
+      "caption": "قائمة المناوبات النهارية والليلية",
+      "columns": {
+        "type": "النوع",
+        "worker": "العامل",
+        "start": "البداية",
+        "end": "النهاية",
+        "status": "الحالة",
+        "actions": "الإجراءات"
+      }
+    },
+    "actions": {
+      "cancelAssignmentFor": "إلغاء مناوبة {name}",
+      "cancelling": "جارٍ الإلغاء…"
+    },
+    "empty": {
+      "title": "لا توجد مناوبات بعد",
+      "description": "أنشئ مناوبة نهارية أو ليلية من النموذج أعلاه."
+    },
+    "messages": {
+      "created": "تم إنشاء المناوبة.",
+      "cancelled": "تم إلغاء المناوبة."
+    }
+  },
+  "workers": {
+    "title": "العمال",
+    "description": "قائمة العمال وطلبات الانضمام والأجور.",
+    "backToList": "العودة إلى قائمة العمال",
+    "rate": {
+      "perDay": "<ltr>{amount}</ltr> يوميًا",
+      "perHour": "<ltr>{amount}</ltr> للساعة"
+    },
+    "pending": {
+      "title": "بانتظار الموافقة ({count})",
+      "review": "مراجعة الطلب",
+      "reviewLabel": "مراجعة الطلب: {name}"
+    },
+    "list": {
+      "title": "جميع العمال",
+      "empty": {
+        "title": "لا يوجد عمال بعد",
+        "description": "أرسل دعوة إلى عامل للبدء."
+      }
+    },
+    "detail": {
+      "profile": "الملف الشخصي",
+      "role": "الدور",
+      "joined": "تاريخ الانضمام",
+      "compensationType": "نوع الأجر",
+      "overtimeRate": "أجر الساعات الإضافية",
+      "effectiveFrom": "يسري من",
+      "noCompensationActive": "لا تظهر بيانات أجر لهذا العامل.",
+      "noCompensationOther": "صلاحياتك لا تسمح بعرض الأجر، أو لا يوجد أجر مسجّل لهذا العامل.",
+      "notFound": "لم نعثر على هذا العامل. ربما تمت إزالته."
+    },
+    "approve": {
+      "title": "الموافقة على العامل",
+      "description": "حدّد الأجر لتفعيل حساب هذا العامل.",
+      "form": {
+        "compensationType": "نوع الأجر",
+        "dailyRate": "أجر اليوم (بالشيكل)",
+        "hourlyRate": "أجر الساعة (بالشيكل)",
+        "overtimeRate": "أجر الساعات الإضافية (بالشيكل للساعة)",
+        "hint": "أدخل المبالغ بالشيكل، مثل 400 أو 45.50."
+      },
+      "actions": {
+        "approve": "الموافقة على العامل",
+        "approving": "جارٍ الموافقة…",
+        "rejecting": "جارٍ الرفض…"
+      },
+      "messages": {
+        "approved": "تمت الموافقة على العامل.",
+        "rejected": "تم رفض طلب العامل.",
+        "approveFailed": "تعذّرت الموافقة على العامل.",
+        "rejectFailed": "تعذّر رفض طلب العامل."
+      },
+      "reasons": {
+        "initialApproval": "موافقة أولية عند الانضمام",
+        "rejected": "تم الرفض أثناء مراجعة الإدارة."
+      }
+    }
+  }
+}

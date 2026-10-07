@@ -3,6 +3,7 @@ import { ApprovalAction, NotificationType, STANDARD_DAY_MINUTES, TimeEntryStatus
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import type { NotificationData } from "../notifications/notification-data";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
@@ -105,7 +106,14 @@ export class AttendanceApprovalsService {
       return entry;
     });
 
-    await this.notifyWorker(organizationId, timeEntry.workerProfileId, NotificationType.SHIFT_APPROVED, "Attendance approved", "Your clocked shift has been approved.");
+    await this.notifyWorker(organizationId, timeEntry.workerProfileId, NotificationType.SHIFT_APPROVED, "Attendance approved", "Your clocked shift has been approved.", {
+      timeEntryId,
+      shiftId: timeEntry.shiftId,
+      shiftTitle: await this.shiftTitle(timeEntry.shiftId),
+      businessDate: timeEntry.businessDate,
+      approvedRegularMinutes,
+      approvedOvertimeMinutes,
+    });
 
     return updated;
   }
@@ -132,7 +140,13 @@ export class AttendanceApprovalsService {
       return entry;
     });
 
-    await this.notifyWorker(organizationId, timeEntry.workerProfileId, NotificationType.SHIFT_REJECTED, "Attendance rejected", reason);
+    await this.notifyWorker(organizationId, timeEntry.workerProfileId, NotificationType.SHIFT_REJECTED, "Attendance rejected", reason, {
+      timeEntryId,
+      shiftId: timeEntry.shiftId,
+      shiftTitle: await this.shiftTitle(timeEntry.shiftId),
+      businessDate: timeEntry.businessDate,
+      reason,
+    });
 
     return updated;
   }
@@ -167,9 +181,15 @@ export class AttendanceApprovalsService {
     }
   }
 
-  private async notifyWorker(organizationId: string, workerProfileId: string, type: NotificationType, title: string, body: string) {
+  /** Notifies the worker. `data` never carries money (Workers do not see compensation). */
+  private async notifyWorker(organizationId: string, workerProfileId: string, type: NotificationType, title: string, body: string, data: NotificationData) {
     const worker = await this.prisma.workerProfile.findUnique({ where: { id: workerProfileId }, include: { membership: true } });
     if (!worker) return;
-    await this.notifications.notify({ organizationId, recipientUserId: worker.membership.userId, type, title, body });
+    await this.notifications.notify({ organizationId, recipientUserId: worker.membership.userId, type, title, body, data });
+  }
+
+  private async shiftTitle(shiftId: string): Promise<string | null> {
+    const shift = await this.prisma.shift.findUnique({ where: { id: shiftId }, select: { title: true } });
+    return shift?.title ?? null;
   }
 }

@@ -4,6 +4,7 @@ import { toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { AssignmentKind } from "../notifications/notification-data";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
@@ -150,6 +151,14 @@ export class ShiftsService {
         type: NotificationType.TURAN_ASSIGNMENT_CREATED,
         title: "New shift assignment",
         body: `You've been assigned to "${shift.title}" starting ${shift.scheduledStart.toISOString()}.`,
+        // Sent with the TURAN_ASSIGNMENT_CREATED type; assignmentKind tells clients it is a shift.
+        data: {
+          assignmentKind: AssignmentKind.SHIFT,
+          shiftId: shift.id,
+          shiftTitle: shift.title,
+          startAt: shift.scheduledStart.toISOString(),
+          endAt: shift.scheduledEnd.toISOString(),
+        },
       });
     }
 

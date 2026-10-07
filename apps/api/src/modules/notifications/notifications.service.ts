@@ -1,9 +1,10 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import type { Prisma, Notification } from "@prisma/client";
-import type { NotificationType } from "@fieldmaster/shared-types";
+import { AccountStatus, OrgRole, type NotificationType } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { generateId } from "../../common/ids";
+import { hasFinancialData, withoutFinancialData } from "./notification-data";
 
 export interface NotifyInput {
   organizationId: string;
@@ -11,6 +12,7 @@ export interface NotifyInput {
   type: NotificationType;
   title: string;
   body: string;
+  /** Values the text is built from, for localized rendering (see notification-data.ts). Money only for Owner recipients. */
   data?: Record<string, unknown>;
 }
 
@@ -38,6 +40,7 @@ export class NotificationsService {
   ) {}
 
   async notify(input: NotifyInput) {
+    const data = await this.guardFinancialData(input);
     const notification = await this.prisma.notification.create({
       data: {
         id: generateId(),
@@ -46,7 +49,7 @@ export class NotificationsService {
         type: input.type,
         title: input.title,
         body: input.body,
-        dataJson: (input.data ?? {}) as Prisma.InputJsonValue,
+        dataJson: data as Prisma.InputJsonValue,
       },
     });
 
@@ -85,6 +88,25 @@ export class NotificationsService {
 
   async notifyMany(inputs: NotifyInput[]) {
     return Promise.all(inputs.map((input) => this.notify(input)));
+  }
+
+  /**
+   * Safety net for financial isolation: money values (`*Agorot` keys) in
+   * `data` are kept only when the recipient is an active Owner of the
+   * organization. Call sites already send money to Owners only; this makes a
+   * mistake there strip the values (and log) instead of leaking them to a
+   * Field Manager or Worker. Costs one lookup, and only when data has money.
+   */
+  private async guardFinancialData(input: NotifyInput): Promise<Record<string, unknown>> {
+    const data = input.data ?? {};
+    if (!hasFinancialData(data)) return data;
+    const ownerMembership = await this.prisma.organizationMembership.findFirst({
+      where: { organizationId: input.organizationId, userId: input.recipientUserId, role: OrgRole.OWNER, status: AccountStatus.ACTIVE, archivedAt: null },
+      select: { id: true },
+    });
+    if (ownerMembership) return data;
+    this.logger.warn(`Stripped financial values from a ${input.type} notification for non-Owner recipient ${input.recipientUserId}.`);
+    return withoutFinancialData(data);
   }
 
   async listForUser(organizationId: string, recipientUserId: string) {

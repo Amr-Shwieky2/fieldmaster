@@ -2,22 +2,35 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { ApiRequestError, type AuthSession } from "@fieldmaster/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { useEnumLabel } from "@/i18n/enums";
+import { useErrorMessage } from "@/lib/use-error-message";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LtrText } from "@/components/formatted";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import { DevQuickLogin, TestModeBanner, useDevLoginUsers } from "@/components/dev-quick-login";
 
 type Step = "phone" | "code";
 
+const DEV_FIXED_CODE = "123456";
+
 export default function LoginPage() {
   const router = useRouter();
   const { client, login } = useAuth();
+  const t = useTranslations("auth");
+  const tShell = useTranslations("shell");
+  const enumLabel = useEnumLabel();
+  const errorMessage = useErrorMessage();
   const [step, setStep] = useState<Step>("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // The cause is kept (not the translated text) so the message follows a language switch.
+  const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
+  const error = failure ? errorMessage(failure.cause) : null;
   const [submitting, setSubmitting] = useState(false);
   const [organizations, setOrganizations] = useState<{ organizationId: string; role: string }[] | null>(null);
   // Non-null only while the API runs in dev login (test) mode; otherwise every test option stays hidden.
@@ -31,13 +44,13 @@ export default function LoginPage() {
 
   async function handleRequestOtp(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setFailure(null);
     setSubmitting(true);
     try {
       await client.requestOtp(phoneNumber);
       setStep("code");
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.body.message : "Failed to send verification code.");
+      setFailure({ cause: err });
     } finally {
       setSubmitting(false);
     }
@@ -45,7 +58,7 @@ export default function LoginPage() {
 
   async function handleVerify(e: React.FormEvent, organizationId?: string) {
     e.preventDefault();
-    setError(null);
+    setFailure(null);
     setSubmitting(true);
     try {
       const session = await client.verifyOtp({ phoneNumber, code, deviceId: "admin-web", platform: "WEB", organizationId });
@@ -55,7 +68,7 @@ export default function LoginPage() {
         setOrganizations((err.body.details?.organizations as { organizationId: string; role: string }[]) ?? []);
         return;
       }
-      setError(err instanceof ApiRequestError ? err.body.message : "Verification failed.");
+      setFailure({ cause: err });
     } finally {
       setSubmitting(false);
     }
@@ -63,6 +76,9 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-100 px-4 py-10">
+      <div className="flex w-full max-w-xl justify-end">
+        <LocaleSwitcher />
+      </div>
       {devMode && (
         <div className="w-full max-w-xl">
           <TestModeBanner />
@@ -70,19 +86,33 @@ export default function LoginPage() {
       )}
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>FieldMaster</CardTitle>
-          <p className="mt-1 text-sm text-slate-500">Sign in to the admin dashboard</p>
+          <CardTitle>{tShell("brand")}</CardTitle>
+          <h1 className="mt-1 text-sm text-slate-500">{t("subtitle")}</h1>
         </CardHeader>
         <CardContent>
           {step === "phone" && (
             <form onSubmit={handleRequestOtp} className="space-y-4">
               <div>
-                <Label htmlFor="phone">Phone number</Label>
-                <Input id="phone" type="tel" required placeholder="+972501234567" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} />
+                <Label htmlFor="phone">{t("phoneLabel")}</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  dir="ltr"
+                  autoComplete="tel"
+                  required
+                  placeholder="+972501234567"
+                  className="text-start"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                />
               </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && (
+                <p role="alert" className="text-sm text-red-600">
+                  {error}
+                </p>
+              )}
               <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Sending…" : "Send verification code"}
+                {submitting ? t("sending") : t("sendCode")}
               </Button>
             </form>
           )}
@@ -90,43 +120,49 @@ export default function LoginPage() {
           {step === "code" && !organizations && (
             <form onSubmit={(e) => handleVerify(e)} className="space-y-4">
               <p className="text-sm text-slate-600">
-                Enter the code sent to <span className="font-medium">{phoneNumber}</span>.
+                {t.rich("codeSentTo", { phone: () => <LtrText className="font-medium">{phoneNumber}</LtrText> })}
               </p>
               <div>
-                <Label htmlFor="code">Verification code</Label>
+                <Label htmlFor="code">{t("codeLabel")}</Label>
                 <Input
                   id="code"
+                  dir="ltr"
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   required
                   placeholder="123456"
+                  className="text-start"
                   aria-describedby={devMode ? "code-hint" : undefined}
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                 />
                 {devMode && (
                   <p id="code-hint" className="mt-1 text-xs text-amber-700">
-                    Test mode — code: <span className="font-mono font-semibold">123456</span>
+                    {t.rich("testModeCodeHint", { code: () => <LtrText className="font-mono font-semibold">{DEV_FIXED_CODE}</LtrText> })}
                   </p>
                 )}
               </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && (
+                <p role="alert" className="text-sm text-red-600">
+                  {error}
+                </p>
+              )}
               <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Verifying…" : "Verify and sign in"}
+                {submitting ? t("verifying") : t("verify")}
               </Button>
               <button type="button" className="w-full text-center text-sm text-slate-500 hover:underline" onClick={() => setStep("phone")}>
-                Use a different phone number
+                {t("useDifferentNumber")}
               </button>
             </form>
           )}
 
           {organizations && (
             <div className="space-y-3">
-              <p className="text-sm text-slate-600">This phone number belongs to multiple organizations. Choose one:</p>
+              <p className="text-sm text-slate-600">{t("chooseOrganization")}</p>
               {organizations.map((org) => (
                 <Button key={org.organizationId} variant="secondary" className="w-full justify-between" onClick={(e) => handleVerify(e, org.organizationId)}>
-                  <span>{org.organizationId}</span>
-                  <span className="text-slate-400">{org.role}</span>
+                  <LtrText>{org.organizationId}</LtrText>
+                  <span className="text-slate-400">{enumLabel("OrgRole", org.role)}</span>
                 </Button>
               ))}
             </div>

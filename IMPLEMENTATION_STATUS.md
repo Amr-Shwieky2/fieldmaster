@@ -1,5 +1,117 @@
 # FieldMaster — Implementation Status
 
+## Step 2 of 10 — Arabic + RTL for the admin web (2026-10-07)
+
+Scope: `apps/admin-web` only (mobile is Step 3, PDF reports later). One small
+API change was needed for notifications (see below).
+
+- **Languages.** Arabic (default) and English, no Hebrew. The choice is saved
+  in the `fm_locale` cookie. `<html lang dir>` is rendered on the server from
+  that cookie, so the first HTML already has `lang="ar" dir="rtl"` (checked
+  with `curl` and with a root-layout test) and there is no hydration warning
+  when switching. The switcher is in the header and on the login page, and it
+  changes language without leaving the page. Built on `next-intl` without
+  URL prefixes.
+- **All UI text** is in `src/i18n/messages/ar.json` / `en.json` (734 keys).
+  `pnpm lint` in admin-web now also runs `scripts/check-i18n.mjs`, which fails
+  when:
+  - a key exists in only one language, or the placeholders differ;
+  - a key is used in code but missing from the files;
+  - a glossary term changed;
+  - the files contain Hebrew or Arabic-Indic digits;
+  - a component uses physical direction classes (`ml-`, `pl-`, `left-`,
+    `text-left`, …).
+
+  ESLint's `i18next/no-literal-string` rule catches hard-coded JSX text.
+- **RTL.**
+  - Only logical Tailwind classes are used.
+  - Directional icons (chevrons, arrows) are mirrored.
+  - The sidebar border and active marker sit on the start edge.
+  - Tables align to the start and scroll inside their own box.
+  - Forms keep phone and code inputs LTR.
+  - The Turan schedule and the dashboard bar list follow RTL.
+  - On the Leaflet map, the zoom control moves to the top right and the
+    attribution to the bottom left in Arabic.
+
+  The app has no Recharts charts and no calendar widget yet, so there was
+  nothing to convert for those.
+- **Font.** IBM Plex Sans Arabic via `next/font`, with a Latin fallback.
+- **Formatting** (`src/lib/format.ts`):
+  - Western digits (`ar-u-nu-latn`) and Gregorian dates in `Asia/Jerusalem`.
+  - Money from integer agorot as `₪ 1,234.50`, isolated with `<bdi dir="ltr">`
+    so it never reorders inside Arabic text. Phones and IDs are isolated the
+    same way.
+- **API errors** are translated from their code, including details: for
+  `GEOFENCE_OUTSIDE_ALLOWED_RADIUS` the message shows the distance and the
+  allowed radius. GPS accuracy and device-clock errors work the same way. For
+  an unknown code the API's own message is shown.
+- **Notifications** are rendered from `type` + `data_json` in the reader's
+  language. The English `title`/`body` stay in the database as a fallback.
+  The API now fills `data_json` for every notification type and strips
+  `*Agorot` amounts from non-Owner recipients. The decision is recorded in
+  `docs/technical-decisions.md`.
+- **Test mode banner and quick login** are translated.
+- **Glossary** terms are exact and enforced by the checker. The Arabic copy
+  had a separate native-language review: 37 wording fixes applied.
+- **Taken from `wip/phase1-arabic-rtl`** (branch left untouched): the locale
+  config/cookie helpers, the enum-label helper, the test render helper, and
+  parts of the translation files. Their wording was redone to match the
+  glossary.
+- **Left on that branch:** the Tailwind v4 upgrade, the shadcn migration,
+  the Pino/health API changes, and the Husky/Prettier/Docker changes.
+
+**Checked in the browser** (Arabic and English, as Owner and as Field
+Manager, desktop width; automated pass for `dir`, horizontal overflow, raw
+keys, Arabic-Indic digits, left-aligned cells and stray English text, then
+screenshots):
+- login;
+- dashboard;
+- workers, worker detail, approve worker;
+- sites (with map);
+- shifts, shift detail, new shift;
+- Turan;
+- attendance;
+- payroll and a payroll period (Owner only; the Field Manager is redirected);
+- reports;
+- notifications;
+- audit log (Owner only).
+
+Also checked:
+- the Worker "use the mobile app" notice;
+- the Field Manager sees no ₪ amounts on any page.
+
+One RTL bug found and fixed: screen-reader table captions pushed `/turan` wider
+than the screen in Arabic.
+
+**Adversarial review.** Three code lenses ran, and each finding went to two
+skeptics. 13 findings came back; 7 were confirmed and fixed:
+
+1. Emergency call-out shifts showed the API's English title. They now show
+   "استدعاء طوارئ".
+2. The audit log showed raw error codes as reasons. They are now translated.
+3. Fixed English reasons were sent for payroll reopen and worker reject. They
+   are now sent in the user's language.
+4. 429 and 503 errors showed a generic message. They now get their own
+   messages.
+5. Messages already on screen did not follow a language switch. They now do.
+6. The map marker's tooltip did not follow a language switch. It now does.
+7. Unknown URLs and crashes showed Next's English pages. There are now
+   translated `not-found` and `error` pages.
+
+Hardening from the refuted findings:
+- The money-stripping guard now also catches nested fields.
+- The RTL class check now also catches negative insets, `origin-*` and
+  `bg-left/right`, and it covers `components/ui`.
+- ESLint now also checks `description`, `message` and `hint` props.
+
+### Final run after this step
+
+`pnpm lint` ✅ (incl. i18n check, 734 keys) · `pnpm typecheck` ✅ ·
+`pnpm test` ✅ 285 (35 shared-validation + 25 API + 225 admin-web) ·
+`pnpm test:e2e` ✅ 39 · `pnpm build` ✅.
+
+---
+
 ## Step 1 of 10 — verification + test login (2026-10-05)
 
 ### Part A: does the existing project run?
