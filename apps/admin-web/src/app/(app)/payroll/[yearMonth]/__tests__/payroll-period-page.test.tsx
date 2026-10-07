@@ -5,7 +5,6 @@ import { OrgRole } from "@fieldmaster/shared-types";
 import { AuthProvider } from "@/lib/auth-context";
 import { sessionStore } from "@/lib/session-store";
 import { createIntlWrapper } from "@/test/render-with-intl";
-import type { Locale } from "@/i18n/config";
 import PayrollPeriodPage from "../page";
 
 const replaceMock = vi.fn();
@@ -36,11 +35,28 @@ function mockApi(routes: Record<string, Handler>) {
   return fetchMock;
 }
 
+/** Attributes a user reads (tooltip, placeholder) or hears from a screen reader (accessible name, alt text). */
+const READABLE_ATTRIBUTES = ["aria-label", "title", "placeholder", "alt"];
+
+/** Distinct Latin-script words on the page, read per text node (so adjacent elements do not merge) and per readable attribute. */
+function latinWordsOnPage(): { text: string[]; attributes: string[] } {
+  const collect = (values: Iterable<string | null>) => {
+    const words = new Set<string>();
+    for (const value of values) for (const word of value?.match(/[A-Za-z]+/g) ?? []) words.add(word);
+    return [...words].sort();
+  };
+  const texts: (string | null)[] = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node.textContent);
+  const attributes = [...document.body.querySelectorAll("*")].flatMap((el) => READABLE_ATTRIBUTES.map((name) => el.getAttribute(name)));
+  return { text: collect(texts), attributes: collect(attributes) };
+}
+
 function seedSession(role: OrgRole) {
   sessionStore.save({ accessToken: "test-access", refreshToken: "test-refresh", organizationId: "org-1", role, workerProfileId: null });
 }
 
-function renderPage(locale: Locale = "ar") {
+function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -48,7 +64,7 @@ function renderPage(locale: Locale = "ar") {
         <PayrollPeriodPage />
       </AuthProvider>
     </QueryClientProvider>,
-    { wrapper: createIntlWrapper({ locale }) },
+    { wrapper: createIntlWrapper() },
   );
 }
 
@@ -93,15 +109,17 @@ describe("Payroll period page", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the worker breakdown in Arabic with LTR money and the inline-start worker column", async () => {
+  it("renders the worker breakdown with LTR money and the inline-start worker column", async () => {
     seedSession(OrgRole.OWNER);
     mockApi({ "GET /payroll-periods/2026-09": () => json(200, period("REVIEW")) });
-    renderPage("ar");
+    renderPage();
 
     expect(await screen.findByRole("heading", { level: 1, name: /رواتب سبتمبر 2026/ })).toBeTruthy();
     expect(screen.getByText("قيد المراجعة")).toBeTruthy();
     expect(screen.getByText("الإصدار 2")).toBeTruthy();
     expect(screen.getByRole("button", { name: "إقفال الفترة" })).toBeTruthy();
+    // A period under review can be finalized but not reopened.
+    expect(screen.queryByRole("button", { name: "إعادة فتح" })).toBeNull();
     expect(screen.getByRole("link", { name: "العودة إلى الرواتب" }).getAttribute("href")).toBe("/payroll");
 
     // Total net = 8,548.50 + 1,234.50, rendered left-to-right inside the Arabic sentence.
@@ -129,27 +147,39 @@ describe("Payroll period page", () => {
     expect(screen.getByText("wp-2").closest("bdi")?.getAttribute("dir")).toBe("ltr");
     expect(document.body.textContent).not.toMatch(/[٠-٩]/);
     expect(screen.queryByText("REVIEW")).toBeNull();
+    // Arabic only: no language switch, and the only Latin-script text is data (the worker name and the fallback id);
+    // accessible names, tooltips and placeholders carry no Latin-script text at all.
+    expect(screen.queryByRole("button", { name: /English/ })).toBeNull();
+    expect(latinWordsOnPage()).toEqual({ text: ["Eli", "Ramzani", "wp"], attributes: [] });
   });
 
-  it("renders in English", async () => {
+  it("renders a finalized period with only the reopen action and translated column headers", async () => {
     seedSession(OrgRole.OWNER);
     mockApi({ "GET /payroll-periods/2026-09": () => json(200, period("FINALIZED")) });
-    renderPage("en");
+    renderPage();
 
-    expect(await screen.findByRole("heading", { level: 1, name: /Payroll — September 2026/ })).toBeTruthy();
-    expect(screen.getByText("Finalized")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reopen" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Finalize period" })).toBeNull();
-    expect(screen.getByRole("columnheader", { name: "Overtime" })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Net" })).toBeTruthy();
-    expect(screen.getByText("168h 0m")).toBeTruthy();
-    expect(screen.getByText("Total net:", { exact: false }).textContent).toBe("Total net: ₪ 9,783.00");
+    expect(await screen.findByRole("heading", { level: 1, name: /رواتب سبتمبر 2026/ })).toBeTruthy();
+    expect(screen.getByText("مُقفلة")).toBeTruthy();
+    expect(screen.queryByText("FINALIZED")).toBeNull();
+    expect(screen.getByRole("button", { name: "إعادة فتح" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "إقفال الفترة" })).toBeNull();
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "العامل",
+      "الأيام المحتسبة",
+      "الساعات العادية",
+      "ساعات إضافية",
+      "الإجمالي قبل الخصم",
+      "الإضافات والخصومات",
+      "الصافي",
+    ]);
+    expect(screen.getByText("168 س 0 د")).toBeTruthy();
+    expect(screen.getByText("إجمالي الصافي:", { exact: false }).textContent).toBe("إجمالي الصافي: ₪ 9,783.00");
   });
 
   it("shows the empty state when the period has no items", async () => {
     seedSession(OrgRole.OWNER);
     mockApi({ "GET /payroll-periods/2026-09": () => json(200, period("REVIEW", [])) });
-    renderPage("ar");
+    renderPage();
 
     expect(await screen.findByText("لا توجد رواتب محتسبة لهذا الشهر")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
@@ -159,7 +189,7 @@ describe("Payroll period page", () => {
     seedSession(OrgRole.OWNER);
     let calls = 0;
     mockApi({ "GET /payroll-periods/2026-09": () => (++calls === 1 ? apiError(503, "SERVICE_UNAVAILABLE") : json(200, period("REVIEW"))) });
-    renderPage("ar");
+    renderPage();
 
     expect((await screen.findByRole("alert")).textContent).toContain("الخدمة غير متاحة مؤقتًا. يُرجى المحاولة بعد قليل.");
     fireEvent.click(screen.getByRole("button", { name: "إعادة المحاولة" }));
@@ -169,7 +199,7 @@ describe("Payroll period page", () => {
   it("shows a page-specific state when the month was never calculated (404)", async () => {
     seedSession(OrgRole.OWNER);
     mockApi({ "GET /payroll-periods/2026-09": () => apiError(404, "NOT_FOUND", "Payroll period not found.") });
-    renderPage("ar");
+    renderPage();
 
     expect(await screen.findByText("لم تُحتسب رواتب هذا الشهر بعد")).toBeTruthy();
     expect(screen.queryByText("Payroll period not found.")).toBeNull();
@@ -179,15 +209,17 @@ describe("Payroll period page", () => {
   it("shows the access-denied state on 403", async () => {
     seedSession(OrgRole.OWNER);
     mockApi({ "GET /payroll-periods/2026-09": () => apiError(403, "FORBIDDEN") });
-    renderPage("en");
+    renderPage();
 
-    expect(await screen.findByText("Access denied")).toBeTruthy();
+    expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "الانتقال إلى لوحة التحكم" }).getAttribute("href")).toBe("/dashboard");
+    expect(screen.queryByText("English API message")).toBeNull();
   });
 
   it("never loads or renders figures for a Field Manager", async () => {
     seedSession(OrgRole.FIELD_MANAGER);
     const fetchMock = mockApi({ "GET /payroll-periods/2026-09": () => json(200, period("REVIEW")) });
-    renderPage("ar");
+    renderPage();
 
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/dashboard"));
     expect(screen.queryByText(/₪/)).toBeNull();
@@ -209,7 +241,7 @@ describe("Payroll period page", () => {
           };
         }),
     });
-    renderPage("ar");
+    renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "إقفال الفترة" }));
     expect(((await screen.findByRole("button", { name: "جارٍ إقفال الفترة…" })) as HTMLButtonElement).disabled).toBe(true);
@@ -227,7 +259,7 @@ describe("Payroll period page", () => {
       "GET /payroll-periods/2026-09": () => json(200, period("FINALIZED")),
       "POST /payroll-periods/2026-09/reopen": () => apiError(409, "CONFLICT", "Period is not finalized."),
     });
-    renderPage("ar");
+    renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "إعادة فتح" }));
     await waitFor(() =>

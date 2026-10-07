@@ -18,7 +18,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 
-/** Result of the last "Calculate" click; the text is built at render time so it follows the UI language. */
+/** Result of the last "Calculate" click, kept as data and translated while rendering. */
 type CalculateFeedback = { type: "success"; yearMonth: string } | { type: "error"; error: unknown } | null;
 
 function PayrollPageContent() {

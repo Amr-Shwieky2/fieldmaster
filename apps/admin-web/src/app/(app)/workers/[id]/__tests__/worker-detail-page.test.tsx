@@ -33,9 +33,9 @@ describe("Worker detail page", () => {
     auth.client = {};
   });
 
-  it("renders the Owner view in Arabic with translated labels, LTR money and Arabic dates in Western digits", async () => {
+  it("renders the Owner view with translated labels, LTR money and dates in Western digits", async () => {
     const getWorker = withGetWorker(async () => OWNER_WORKERS[0]);
-    renderWorkersPage(<WorkerDetailPage />, "ar");
+    renderWorkersPage(<WorkerDetailPage />);
 
     expect(await screen.findByRole("heading", { level: 1, name: "Eli Ramzani" })).toBeTruthy();
     expect(getWorker).toHaveBeenCalledWith("w-daily");
@@ -57,24 +57,30 @@ describe("Worker detail page", () => {
     expect(hasArabicIndicDigits(document.body.textContent)).toBe(false);
   });
 
-  it("renders the Owner view in English", async () => {
+  it("renders the Owner view of an hourly, suspended worker with the hourly rate and LTR money", async () => {
     withGetWorker(async () => OWNER_WORKERS[1]);
-    renderWorkersPage(<WorkerDetailPage />, "en");
+    renderWorkersPage(<WorkerDetailPage />);
 
     expect(await screen.findByRole("heading", { level: 1, name: "Samir Haddad" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Back to workers" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Profile" })).toBeTruthy();
-    expect(rowValue("Status")).toBe("Suspended");
-    expect(rowValue("Role")).toBe("Worker");
-    expect(rowValue("Compensation type")).toBe("Hourly rate");
-    expect(rowValue("Hourly rate")).toBe("₪ 1,234.50");
-    expect(rowValue("Overtime rate")).toBe("₪ 75.25/hr");
-    expect(rowValue("Effective from")).toBe("Feb 1, 2026");
+    expect(screen.getByRole("link", { name: "العودة إلى قائمة العمال" }).getAttribute("href")).toBe("/workers");
+    expect(screen.getByRole("heading", { name: "الملف الشخصي" })).toBeTruthy();
+    expect(rowValue("الحالة")).toBe("موقوف");
+    expect(rowValue("الدور")).toBe("عامل");
+    expect(rowValue("نوع الأجر")).toBe("أجر الساعة");
+    expect(rowValue("أجر الساعة")).toBe("₪ 1,234.50");
+    expect(screen.getByText("₪ 1,234.50").closest("bdi")?.getAttribute("dir")).toBe("ltr");
+    // An hourly worker has no daily-rate row.
+    expect(screen.queryByText("أجر اليوم", { selector: "dt" })).toBeNull();
+    expect(rowValue("أجر الساعات الإضافية")).toBe("₪ 75.25 للساعة");
+    expect(rowValue("يسري من")).toBe("1 فبراير 2026");
+    expect(screen.queryByText("HOURLY")).toBeNull();
+    expect(screen.queryByText("SUSPENDED")).toBeNull();
+    expect(hasArabicIndicDigits(document.body.textContent)).toBe(false);
   });
 
   it("never shows compensation to a Field Manager (the API omits it) and explains why", async () => {
     withGetWorker(async () => MANAGER_WORKERS[0]);
-    renderWorkersPage(<WorkerDetailPage />, "ar");
+    renderWorkersPage(<WorkerDetailPage />);
 
     expect(await screen.findByText("لا تظهر بيانات أجر لهذا العامل.")).toBeTruthy();
     expect(screen.queryByText("نوع الأجر")).toBeNull();
@@ -83,18 +89,21 @@ describe("Worker detail page", () => {
 
   it("explains that compensation may be hidden by role for a worker who is not active", async () => {
     withGetWorker(async () => MANAGER_WORKERS[1]);
-    renderWorkersPage(<WorkerDetailPage />, "en");
+    renderWorkersPage(<WorkerDetailPage />);
 
-    expect(await screen.findByText("Compensation is not visible to your role, or this worker has none on file.")).toBeTruthy();
+    expect(await screen.findByText("صلاحياتك لا تسمح بعرض الأجر، أو لا يوجد أجر مسجّل لهذا العامل.")).toBeTruthy();
+    expect(screen.queryByText("لا تظهر بيانات أجر لهذا العامل.")).toBeNull();
+    expect(screen.queryByText("نوع الأجر")).toBeNull();
     expect(document.body.textContent).not.toContain("₪");
   });
 
   it("shows a translated error with a working retry", async () => {
     const getWorker = withGetWorker(async () => OWNER_WORKERS[0]);
     getWorker.mockRejectedValueOnce(apiError(500, "INTERNAL_ERROR", "Internal server error"));
-    renderWorkersPage(<WorkerDetailPage />, "ar");
+    renderWorkersPage(<WorkerDetailPage />);
 
     expect(await screen.findByText("حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.")).toBeTruthy();
+    expect(screen.queryByText("Internal server error")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "إعادة المحاولة" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Eli Ramzani" })).toBeTruthy();
     expect(getWorker).toHaveBeenCalledTimes(2);
@@ -104,20 +113,22 @@ describe("Worker detail page", () => {
     withGetWorker(async () => {
       throw apiError(403, "FORBIDDEN");
     });
-    renderWorkersPage(<WorkerDetailPage />, "ar");
+    renderWorkersPage(<WorkerDetailPage />);
 
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "الانتقال إلى لوحة التحكم" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "الانتقال إلى لوحة التحكم" }).getAttribute("href")).toBe("/dashboard");
   });
 
-  it("shows a not-found state on 404", async () => {
+  it("shows a not-found state on 404 instead of the API's English message", async () => {
     withGetWorker(async () => {
       throw apiError(404, "NOT_FOUND", "Worker not found");
     });
-    renderWorkersPage(<WorkerDetailPage />, "en");
+    renderWorkersPage(<WorkerDetailPage />);
 
-    expect(await screen.findByText("Not found")).toBeTruthy();
-    expect(screen.getByText("We could not find this worker. It may have been removed.")).toBeTruthy();
+    expect(await screen.findByText("غير موجود")).toBeTruthy();
+    expect(screen.getByText("لم نعثر على هذا العامل. ربما تمت إزالته.")).toBeTruthy();
     expect(screen.queryByText("Worker not found")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("link", { name: "العودة إلى قائمة العمال" }).getAttribute("href")).toBe("/workers");
   });
 });

@@ -6,7 +6,7 @@ import { LtrText } from "@/components/formatted";
 import { useFormat } from "@/lib/use-format";
 
 /**
- * A pay rate such as "₪ 400.00 يوميًا" / "₪ 400.00/day". The amount stays an
+ * A pay rate such as "₪ 400.00 يوميًا". The amount stays an
  * integer number of agorot and is wrapped in an LTR isolate so it keeps its
  * order inside Arabic text.
  */
