@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createIntlWrapper } from "../../test/render-with-intl";
 import { OrgRole } from "@fieldmaster/shared-types";
 import { OwnerOnly } from "../owner-only";
 import { AuthProvider } from "../../lib/auth-context";
@@ -13,9 +14,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
 }));
 
-// AuthProvider clears the React Query cache on login/logout, so it needs a QueryClient above it.
+// AuthProvider clears the React Query cache on login/logout, so it needs a QueryClient above it;
+// the loading state is translated, so it also needs the intl provider.
 function render(ui: ReactElement) {
-  return rtlRender(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
+  return rtlRender(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>, { wrapper: createIntlWrapper({ locale: "en" }) });
 }
 
 function seedSession(role: OrgRole) {

@@ -104,6 +104,8 @@ export class WorkersService {
       type: NotificationType.WORKER_APPROVED,
       title: "Your application was approved",
       body: "Welcome to the team. You can now clock in for assigned shifts.",
+      // Never the new compensation profile: Workers do not see compensation in notifications.
+      data: { workerProfileId },
     });
 
     return { workerProfileId, compensationProfile: result };

@@ -159,8 +159,16 @@ export interface FinancialDashboard {
 export interface NotificationItem {
   id: string;
   type: NotificationType;
+  /** English text as stored by the API (still shown as-is by the mobile app). */
   title: string;
   body: string;
+  /**
+   * The raw values the text is built from (names, ISO instants, minutes,
+   * counts, enum values) so a client can render the message in its own
+   * language. `{}` or `null` on notifications created before this existed.
+   * Money (`*Agorot`) is present only in an Owner's notifications.
+   */
+  dataJson: Record<string, unknown> | null;
   readAt: string | null;
   createdAt: string;
 }

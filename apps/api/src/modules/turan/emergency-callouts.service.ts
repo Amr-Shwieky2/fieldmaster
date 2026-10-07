@@ -17,6 +17,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { loadWorkerName, withoutFinancialData, type NotificationData } from "../notifications/notification-data";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { TuranAssignmentsService } from "./turan-assignments.service";
@@ -155,7 +156,15 @@ export class EmergencyCalloutsService {
         correlationId,
       });
 
-      await this.notifyOwnersAndManagers(organizationId, NotificationType.EMERGENCY_SHIFT_STARTED, "Emergency call-out started", "A worker started a Night Turan emergency call-out.");
+      await this.notifyOwnersAndManagers(organizationId, NotificationType.EMERGENCY_SHIFT_STARTED, "Emergency call-out started", "A worker started a Night Turan emergency call-out.", {
+        timeEntryId: timeEntry.id,
+        calloutId: callout.id,
+        workerProfileId,
+        workerName: await loadWorkerName(this.prisma, workerProfileId),
+        startedAt: actualStartClick.toISOString(),
+        compensatedStartAt: compensatedStart.toISOString(),
+        authorizationSource,
+      });
 
       return {
         status: 201,
@@ -258,7 +267,11 @@ export class EmergencyCalloutsService {
         correlationId,
       });
 
-      await this.notifyEmergencyEnd(organizationId, actor.workerProfileId, compensation.compensatedDurationMinutes);
+      await this.notifyEmergencyEnd(organizationId, actor.workerProfileId, compensation.compensatedDurationMinutes, {
+        timeEntryId: timeEntry.id,
+        calloutId: timeEntry.emergencyCallout.id,
+        endedAt: actualEndClick.toISOString(),
+      });
 
       return {
         status: 200,
@@ -277,20 +290,35 @@ export class EmergencyCalloutsService {
     return result.body;
   }
 
-  private async notifyOwnersAndManagers(organizationId: string, type: NotificationType, title: string, body: string) {
+  /** Same text and data for Owners and Field Managers, so `data` must never carry money. */
+  private async notifyOwnersAndManagers(organizationId: string, type: NotificationType, title: string, body: string, data: NotificationData) {
     const recipients = await this.prisma.organizationMembership.findMany({
       where: { organizationId, role: { in: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] }, status: "ACTIVE", archivedAt: null },
     });
-    await this.notifications.notifyMany(recipients.map((r) => ({ organizationId, recipientUserId: r.userId, type, title, body })));
+    const sharedData = withoutFinancialData(data);
+    await this.notifications.notifyMany(recipients.map((r) => ({ organizationId, recipientUserId: r.userId, type, title, body, data: sharedData })));
   }
 
-  private async notifyEmergencyEnd(organizationId: string, workerProfileId: string, compensatedDurationMinutes: number) {
+  private async notifyEmergencyEnd(
+    organizationId: string,
+    workerProfileId: string,
+    compensatedDurationMinutes: number,
+    refs: { timeEntryId: string; calloutId: string; endedAt: string },
+  ) {
     const formatHm = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`;
     const owners = await this.prisma.organizationMembership.findMany({ where: { organizationId, role: OrgRole.OWNER, status: "ACTIVE", archivedAt: null } });
     const managers = await this.prisma.organizationMembership.findMany({ where: { organizationId, role: OrgRole.FIELD_MANAGER, status: "ACTIVE", archivedAt: null } });
 
     const managerBody = `Emergency call-out ended. Compensated duration: ${formatHm(compensatedDurationMinutes)}. Approval is required.`;
+    // No money here: this is what Field Managers get.
+    const managerData: NotificationData = {
+      ...refs,
+      workerProfileId,
+      workerName: await loadWorkerName(this.prisma, workerProfileId),
+      compensatedDurationMinutes,
+    };
     let ownerBody = managerBody;
+    let ownerData: NotificationData = managerData;
 
     const activeCompensation = await this.prisma.compensationProfile.findFirst({
       where: { workerProfileId, effectiveStartDate: { lte: new Date() }, OR: [{ effectiveEndDate: null }, { effectiveEndDate: { gte: new Date() } }] },
@@ -306,11 +334,20 @@ export class EmergencyCalloutsService {
         overtimeHourlyRateAgorot: activeCompensation.overtimeHourlyRateAgorot,
       });
       ownerBody = `Emergency call-out ended. Compensated duration: ${formatHm(compensatedDurationMinutes)}. Estimated cost: ₪${(estimate.totalCompensationAgorot / 100).toFixed(2)}`;
+      // Owner-only: the same estimate as the cost line in ownerBody.
+      ownerData = { ...managerData, estimatedCostAgorot: estimate.totalCompensationAgorot };
     }
 
     await this.notifications.notifyMany([
-      ...owners.map((o) => ({ organizationId, recipientUserId: o.userId, type: NotificationType.EMERGENCY_SHIFT_ENDED, title: "Emergency call-out ended", body: ownerBody })),
-      ...managers.map((m) => ({ organizationId, recipientUserId: m.userId, type: NotificationType.EMERGENCY_SHIFT_ENDED, title: "Emergency call-out ended", body: managerBody })),
+      ...owners.map((o) => ({ organizationId, recipientUserId: o.userId, type: NotificationType.EMERGENCY_SHIFT_ENDED, title: "Emergency call-out ended", body: ownerBody, data: ownerData })),
+      ...managers.map((m) => ({
+        organizationId,
+        recipientUserId: m.userId,
+        type: NotificationType.EMERGENCY_SHIFT_ENDED,
+        title: "Emergency call-out ended",
+        body: managerBody,
+        data: withoutFinancialData(managerData),
+      })),
     ]);
   }
 }

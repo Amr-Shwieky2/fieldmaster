@@ -28,3 +28,12 @@ class MemoryStorage implements Storage {
 const memoryStorage = new MemoryStorage();
 Object.defineProperty(globalThis, "localStorage", { value: memoryStorage, configurable: true, writable: true });
 Object.defineProperty(window, "localStorage", { value: memoryStorage, configurable: true, writable: true });
+
+// Vitest runs with `globals: false`, so Testing Library cannot register its
+// own automatic cleanup. Do it here so tests never leak DOM into each other.
+import { afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
+
+afterEach(() => {
+  cleanup();
+});

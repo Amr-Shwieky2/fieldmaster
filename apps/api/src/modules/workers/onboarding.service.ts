@@ -177,7 +177,7 @@ export class OnboardingService {
         type: NotificationType.ONBOARDING_SUBMITTED,
         title: "New worker application",
         body: `${dto.fullLegalName} submitted an onboarding application awaiting your review.`,
-        data: { workerProfileId: workerProfile.id },
+        data: { workerProfileId: workerProfile.id, workerName: dto.fullLegalName },
       })),
     );
 

@@ -308,6 +308,7 @@ export class OfflineSyncService {
         type: rejectedCount > 0 ? NotificationType.OFFLINE_EVENT_REJECTED : NotificationType.SUSPICIOUS_LOCATION_DETECTED,
         title: "Offline attendance needs review",
         body,
+        data: { workerProfileId, workerName: worker?.membership.user.fullLegalName ?? null, flaggedCount, rejectedCount },
       })),
     );
   }

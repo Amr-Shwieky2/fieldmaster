@@ -1,0 +1,994 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "create": "Create",
+    "edit": "Edit",
+    "delete": "Delete",
+    "search": "Search",
+    "filter": "Filter",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "close": "Close",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No",
+    "actions": "Actions",
+    "status": "Status",
+    "name": "Name",
+    "phone": "Phone number",
+    "date": "Date",
+    "time": "Time",
+    "notes": "Notes",
+    "reason": "Reason",
+    "total": "Total",
+    "loading": "Loading…",
+    "view": "View",
+    "details": "Details",
+    "submit": "Submit",
+    "send": "Send",
+    "download": "Download",
+    "upload": "Upload",
+    "select": "Select",
+    "selectPlaceholder": "Select an option",
+    "optional": "Optional",
+    "required": "Required",
+    "all": "All",
+    "none": "None",
+    "more": "More",
+    "noResults": "No results found",
+    "add": "Add",
+    "remove": "Remove",
+    "apply": "Apply",
+    "reset": "Reset",
+    "clear": "Clear",
+    "export": "Export",
+    "copy": "Copy",
+    "open": "Open",
+    "done": "Done",
+    "from": "From",
+    "to": "To",
+    "today": "Today",
+    "pageOf": "Page {page} of {total}",
+    "login": "Login",
+    "signOut": "Sign out",
+    "verificationCode": "Verification code",
+    "accessDenied": "Access denied",
+    "approve": "Approve",
+    "approved": "Approved",
+    "reject": "Reject",
+    "rejected": "Rejected",
+    "pendingApproval": "Pending approval",
+    "month": "Month",
+    "hours": "Hours",
+    "minutes": "Minutes",
+    "days": "Days",
+    "compensation": "Compensation",
+    "hourlyRate": "Hourly rate",
+    "dailyRate": "Daily rate",
+    "gross": "Gross",
+    "net": "Net",
+    "deductions": "Deductions",
+    "adjustments": "Adjustments",
+    "calculate": "Calculate",
+    "finalize": "Finalize period",
+    "reopen": "Reopen",
+    "dashboard": "Dashboard",
+    "workers": "Workers",
+    "worker": "Worker",
+    "sitesProjects": "Sites & Projects",
+    "sites": "Sites",
+    "site": "Site",
+    "projects": "Projects",
+    "project": "Project",
+    "scheduling": "Scheduling",
+    "shifts": "Shifts",
+    "shift": "Shift",
+    "turanEmergency": "Turan & Emergency",
+    "attendanceApproval": "Attendance Approval",
+    "attendance": "Attendance",
+    "reports": "Reports",
+    "notifications": "Notifications",
+    "auditLog": "Audit Log",
+    "payroll": "Payroll",
+    "temporarySupervisor": "Temporary Supervisor",
+    "clockIn": "Clock in",
+    "clockOut": "Clock out",
+    "dayTuran": "Day Turan",
+    "nightTuran": "Night Turan",
+    "emergencyCallout": "Emergency call-out",
+    "geofence": "Geofence",
+    "flexiCheck": "Flexi-Check",
+    "creditAsFullDay": "Credit as Full Day",
+    "overtime": "Overtime",
+    "dailySummary": "Daily summary",
+    "forgottenStamp": "Forgotten stamp",
+    "workerAttendanceLedger": "Worker Attendance Ledger"
+  },
+  "states": {
+    "loading": "Loading…",
+    "emptyTitle": "Nothing here yet",
+    "emptyDescription": "There are no records to show right now.",
+    "errorTitle": "Something went wrong",
+    "errorDescription": "We could not load this information. Please try again.",
+    "notFoundTitle": "Not found",
+    "notFoundDescription": "The item you are looking for does not exist or was removed.",
+    "retry": "Retry",
+    "accessDeniedTitle": "Access denied",
+    "accessDeniedDescription": "You do not have permission to view this page. If you think this is a mistake, contact your organization's Owner.",
+    "goToDashboard": "Go to dashboard",
+    "pageNotFoundTitle": "Page not found",
+    "pageNotFoundDescription": "The page you opened does not exist. Check the address, or go back to the dashboard.",
+    "pageErrorDescription": "An unexpected error stopped this page. Try again, or go back to the dashboard."
+  },
+  "errors": {
+    "network": "Could not reach the server. Check your internet connection and try again.",
+    "unknown": "Something went wrong. Please try again.",
+    "rateLimited": "Too many requests. Please wait a moment and try again.",
+    "VALIDATION_FAILED": "Some of the information entered is not valid. Check the fields and try again.",
+    "UNAUTHENTICATED": "Your session has ended. Please log in again.",
+    "FORBIDDEN": "You do not have permission to do this.",
+    "NOT_FOUND": "We could not find what you asked for.",
+    "CONFLICT": "This conflicts with the current state of the record. Refresh the page and try again.",
+    "GEOFENCE_OUTSIDE_ALLOWED_RADIUS": "You are outside the geofence: {distanceMeters} m away, the allowed radius is {allowedRadiusMeters} m.",
+    "GPS_ACCURACY_TOO_LOW": "Location accuracy is too low ({accuracyMeters} m); {requiredMeters} m or better is required. Move to an open area and try again.",
+    "MOCK_LOCATION_BLOCKED": "The request was rejected because the device is using a mock location. Turn off location-spoofing apps and try again.",
+    "DEVICE_TIME_DEVIATION_EXCEEDED": "The device clock is {deviationSeconds} seconds off. Set date and time to automatic and try again.",
+    "ACTIVE_TIME_ENTRY_EXISTS": "There is already an active shift in progress. Clock out first.",
+    "NO_ACTIVE_TIME_ENTRY": "There is no active shift to clock out of.",
+    "SUMMARY_REQUIRED": "A daily summary is required before clocking out.",
+    "MAX_OWNERS_REACHED": "The maximum number of Owners for this organization has been reached.",
+    "OVERLAPPING_COMPENSATION_PROFILE": "This compensation period overlaps another compensation period for the same worker.",
+    "PAYROLL_PERIOD_FINALIZED": "This payroll period is finalized. Reopen it to make changes.",
+    "IDEMPOTENCY_KEY_REQUIRED": "The request is incomplete. Refresh the page and try again.",
+    "IDEMPOTENCY_KEY_CONFLICT": "This request was already used with different data. Refresh the page and try again.",
+    "EMERGENCY_NOT_ELIGIBLE": "This worker is not eligible for an emergency call-out.",
+    "FULL_DAY_CREDIT_NOT_ALLOWED": "Credit as Full Day cannot be applied to this record.",
+    "INVITATION_INVALID_OR_EXPIRED": "The invitation link is invalid or has expired.",
+    "DEVICE_KEY_NOT_REGISTERED": "This device is not registered with the server. Please log in again.",
+    "INVALID_OFFLINE_SIGNATURE": "The offline record could not be verified.",
+    "OTP_INVALID_OR_EXPIRED": "The verification code is incorrect or has expired.",
+    "OTP_MAX_ATTEMPTS_EXCEEDED": "Too many incorrect attempts. Request a new verification code.",
+    "OTP_RATE_LIMITED": "Too many verification codes were requested. Try again later.",
+    "INVALID_REFRESH_TOKEN": "Your session is not valid. Please log in again.",
+    "REFRESH_TOKEN_REVOKED": "Your session was ended. Please log in again.",
+    "REFRESH_TOKEN_EXPIRED": "Your session has expired. Please log in again.",
+    "REFRESH_TOKEN_REUSED": "Your session was ended for security reasons. Please log in again.",
+    "NO_ACTIVE_MEMBERSHIP": "This account has no active membership in any organization.",
+    "ORGANIZATION_SELECTION_REQUIRED": "Choose the organization you want to log in to.",
+    "RATE_LIMITED": "Too many requests. Please wait a moment and try again.",
+    "TOO_MANY_REQUESTS": "Too many requests. Please wait a moment and try again.",
+    "INTERNAL_ERROR": "A server error occurred. Please try again later.",
+    "SERVICE_UNAVAILABLE": "The service is temporarily unavailable. Please try again shortly.",
+    "ERROR": "Something went wrong. Please try again.",
+    "GEOFENCE_OUTSIDE_ALLOWED_RADIUS_NO_DETAILS": "Your current location is outside the allowed geofence.",
+    "GPS_ACCURACY_TOO_LOW_NO_DETAILS": "Location (GPS) accuracy is too low. Move to an open area and try again.",
+    "DEVICE_TIME_DEVIATION_EXCEEDED_NO_DETAILS": "The device clock does not match the real time. Set date and time to automatic in the device settings."
+  },
+  "enums": {
+    "OrgRole": {
+      "OWNER": "Owner",
+      "FIELD_MANAGER": "Field Manager",
+      "WORKER": "Worker"
+    },
+    "AccountStatus": {
+      "INVITED": "Invited",
+      "PENDING_APPROVAL": "Pending approval",
+      "ACTIVE": "Active",
+      "SUSPENDED": "Suspended",
+      "REJECTED": "Rejected",
+      "ARCHIVED": "Archived"
+    },
+    "CompensationType": {
+      "DAILY": "Daily rate",
+      "HOURLY": "Hourly rate"
+    },
+    "ShiftType": {
+      "STANDARD": "Standard shift",
+      "DAY_TURAN": "Day Turan",
+      "NIGHT_TURAN": "Night Turan",
+      "EMERGENCY_CALLOUT": "Emergency call-out"
+    },
+    "ShiftStatus": {
+      "DRAFT": "Draft",
+      "PUBLISHED": "Published",
+      "OPEN": "Open",
+      "ACTIVE": "In progress",
+      "PENDING_APPROVAL": "Pending approval",
+      "APPROVED": "Approved",
+      "REJECTED": "Rejected",
+      "CLOSED": "Closed",
+      "CANCELLED": "Cancelled"
+    },
+    "CheckInMethod": {
+      "GEOFENCED": "Geofence",
+      "FLEXI_CHECK": "Flexi-Check"
+    },
+    "ClockEventType": {
+      "CLOCK_IN": "Clock in",
+      "CLOCK_OUT": "Clock out"
+    },
+    "EventOrigin": {
+      "ONLINE": "Online",
+      "OFFLINE": "Offline"
+    },
+    "TimeEntryStatus": {
+      "ACTIVE": "In progress",
+      "PENDING_APPROVAL": "Pending approval",
+      "APPROVED": "Approved",
+      "REJECTED": "Rejected",
+      "CORRECTION_REQUESTED": "Correction requested"
+    },
+    "LocationValidationStatus": {
+      "PASSED": "Passed",
+      "FLAGGED": "Flagged",
+      "BLOCKED": "Blocked",
+      "UNAVAILABLE": "Unavailable"
+    },
+    "CorrectionReason": {
+      "FORGOTTEN_CLOCK_IN": "Forgot to clock in",
+      "FORGOTTEN_CLOCK_OUT": "Forgot to clock out",
+      "DEVICE_FAILURE": "Device failure",
+      "BROKEN_PHONE": "Broken phone",
+      "NO_CONNECTIVITY": "No connectivity",
+      "SYSTEM_ERROR": "System error",
+      "MANAGER_INSTRUCTION": "Manager instruction",
+      "OTHER": "Other"
+    },
+    "TuranType": {
+      "DAY_TURAN": "Day Turan",
+      "NIGHT_TURAN": "Night Turan"
+    },
+    "TuranStatus": {
+      "SCHEDULED": "Scheduled",
+      "ACTIVE": "In progress",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled",
+      "MISSED": "Missed"
+    },
+    "EmergencyAuthorizationSource": {
+      "NIGHT_TURAN_ASSIGNMENT": "Night Turan assignment",
+      "MANUAL_MANAGER_AUTHORIZATION": "Manager authorization"
+    },
+    "TemporaryPointStatus": {
+      "ACTIVE": "Active",
+      "EXPIRED": "Expired",
+      "REVOKED": "Revoked"
+    },
+    "PayrollPeriodStatus": {
+      "OPEN": "Open",
+      "CALCULATING": "Calculating",
+      "REVIEW": "Under review",
+      "FINALIZED": "Finalized",
+      "REOPENED": "Reopened"
+    },
+    "PayrollAdjustmentType": {
+      "FORGOTTEN_STAMP_PENALTY": "Forgotten stamp deduction",
+      "FORGOTTEN_STAMP_REVERSAL": "Forgotten stamp reversal",
+      "MANUAL_DEDUCTION": "Manual deduction",
+      "MANUAL_BONUS": "Manual bonus"
+    },
+    "PayrollAdjustmentSource": {
+      "SYSTEM": "System",
+      "MANUAL": "Manual"
+    },
+    "ApprovalAction": {
+      "APPROVE": "Approve",
+      "REJECT": "Reject",
+      "REQUEST_CORRECTION": "Request correction"
+    },
+    "TaskCategory": {
+      "CONSTRUCTION": "Construction",
+      "TRAFFIC_CONTROL": "Traffic control",
+      "TRAFFIC_SIGN": "Traffic signs",
+      "TRAFFIC_LIGHT_INSTALLATION": "Traffic light installation",
+      "TRAFFIC_LIGHT_REPAIR": "Traffic light repair",
+      "INSPECTION": "Inspection",
+      "MAINTENANCE": "Maintenance",
+      "EMERGENCY_REPAIR": "Emergency repair",
+      "OTHER": "Other"
+    },
+    "NotificationType": {
+      "WORKER_CLOCKED_IN": "Worker clocked in",
+      "WORKER_CLOCKED_OUT": "Worker clocked out",
+      "OVERTIME_THRESHOLD_CROSSED": "Overtime threshold crossed",
+      "EMERGENCY_SHIFT_STARTED": "Emergency call-out started",
+      "EMERGENCY_SHIFT_ENDED": "Emergency call-out ended",
+      "SHIFT_AWAITING_APPROVAL": "Shift pending approval",
+      "SHIFT_APPROVED": "Shift approved",
+      "SHIFT_REJECTED": "Shift rejected",
+      "ONBOARDING_SUBMITTED": "Onboarding submitted",
+      "WORKER_APPROVED": "Worker approved",
+      "TURAN_ASSIGNMENT_CREATED": "Turan assignment created",
+      "TURAN_ASSIGNMENT_CHANGED": "Turan assignment changed",
+      "TEMPORARY_CHECK_IN_POINT_OPENED": "Temporary check-in point opened",
+      "PAYROLL_FINALIZED": "Payroll finalized",
+      "OFFLINE_EVENT_SYNCED": "Offline record synced",
+      "OFFLINE_EVENT_REJECTED": "Offline record rejected",
+      "SUSPICIOUS_LOCATION_DETECTED": "Suspicious location detected"
+    },
+    "OfflineSyncEventStatus": {
+      "PENDING": "Pending",
+      "VERIFIED": "Verified",
+      "FLAGGED": "Flagged",
+      "REJECTED": "Rejected",
+      "DUPLICATE": "Duplicate"
+    }
+  },
+  "units": {
+    "hoursShort": "{count}h",
+    "minutesShort": "{count}m",
+    "daysShort": "{count}d",
+    "hoursMinutesShort": "{hours}h {minutes}m",
+    "hoursLong": "{count, plural, one {{count} hour} other {{count} hours}}",
+    "minutesLong": "{count, plural, one {{count} minute} other {{count} minutes}}",
+    "daysLong": "{count, plural, one {{count} day} other {{count} days}}"
+  },
+  "language": {
+    "label": "Language",
+    "arabic": "العربية",
+    "english": "English",
+    "current": "Current language",
+    "switchTo": "Switch language to {language}",
+    "saved": "Language updated",
+    "saveFailed": "Your language was changed on this device, but it could not be saved to your account."
+  },
+  "nav": {
+    "mainNavigation": "Main navigation",
+    "dashboard": "Dashboard",
+    "workers": "Workers",
+    "sitesProjects": "Sites & Projects",
+    "scheduling": "Scheduling",
+    "turanEmergency": "Turan & Emergency",
+    "attendanceApproval": "Attendance Approval",
+    "payroll": "Payroll",
+    "reports": "Reports",
+    "notifications": "Notifications",
+    "auditLog": "Audit Log"
+  },
+  "shell": {
+    "brand": "FieldMaster",
+    "skipToContent": "Skip to content",
+    "signedInAs": "Signed in as {role}",
+    "signOut": "Sign out",
+    "metaTitle": "FieldMaster — Admin",
+    "metaDescription": "Workforce management for field crews: shifts, attendance, Turan and payroll."
+  },
+  "auth": {
+    "subtitle": "Sign in to the admin dashboard",
+    "loginTitle": "Login",
+    "phoneLabel": "Phone number",
+    "sendCode": "Send verification code",
+    "sending": "Sending…",
+    "codeSentTo": "Enter the code sent to <phone></phone>.",
+    "codeLabel": "Verification code",
+    "verify": "Verify and sign in",
+    "verifying": "Verifying…",
+    "useDifferentNumber": "Use a different phone number",
+    "chooseOrganization": "This phone number belongs to more than one organization. Choose one:",
+    "testModeCodeHint": "Test mode — code: <code></code>"
+  },
+  "devLogin": {
+    "bannerTitle": "TEST MODE — login without SMS",
+    "bannerBody": "This server is running with dev login enabled. Never use it with real data.",
+    "quickLoginTitle": "Quick test login",
+    "quickLoginDescription": "One click signs you in as a seeded user. No SMS or code needed.",
+    "groupOwners": "Owners",
+    "groupFieldManagers": "Field Managers",
+    "groupWorkers": "Workers",
+    "groupCount": "({count})",
+    "workersNote": "Workers use the mobile app; on the web they only see a notice.",
+    "signInAs": "Sign in as {name} ({role})",
+    "signingIn": "Signing in…",
+    "noUsers": "No active users found. Run pnpm db:seed to create the test accounts.",
+    "failed": "Quick login failed. Is the API running?"
+  },
+  "workerNotice": {
+    "title": "Workers use the mobile app",
+    "body": "The FieldMaster admin dashboard is for Owners and Field Managers. As a worker, use the FieldMaster mobile app to clock in and out and to see your shifts and attendance history."
+  },
+  "attendance": {
+    "title": "Attendance approval",
+    "description": "Review clocked shifts awaiting your approval. No monetary figures are shown on this page.",
+    "pendingCount": "{count, plural, one {{count} shift pending approval} other {{count} shifts pending approval}}",
+    "listLabel": "Shifts pending approval",
+    "fullDayCreditApplied": "Credited as Full Day",
+    "fields": {
+      "duration": "Duration"
+    },
+    "actions": {
+      "approving": "Approving…",
+      "rejecting": "Rejecting…",
+      "applyingFullDayCredit": "Applying…",
+      "confirmReject": "Confirm rejection",
+      "confirmFullDayCredit": "Confirm Credit as Full Day"
+    },
+    "reasonPrompt": {
+      "rejectLabel": "Reason for rejection",
+      "rejectHint": "The worker receives this reason in a notification.",
+      "rejectDefault": "Rejected during review.",
+      "fullDayCreditLabel": "Reason for Credit as Full Day",
+      "fullDayCreditHint": "This reason is saved in the audit log.",
+      "fullDayCreditDefault": "Weather stopped work",
+      "required": "Enter a reason to continue."
+    },
+    "empty": {
+      "title": "Nothing to review",
+      "description": "All clocked shifts are approved."
+    },
+    "messages": {
+      "approved": "Approved the shift of {name}.",
+      "rejected": "Rejected the shift of {name}.",
+      "fullDayCreditApplied": "Credit as Full Day applied to the shift of {name}."
+    }
+  },
+  "auditLog": {
+    "title": "Audit Log",
+    "description": "Append-only, <ltr>SHA-256</ltr> hash-chained event history.",
+    "verify": {
+      "action": "Verify chain integrity",
+      "pending": "Verifying…",
+      "valid": "Chain verified — no tampering detected",
+      "broken": "Chain broken at audit log <ltr>{id}</ltr>",
+      "brokenUnknown": "Chain broken — the event sequence was altered",
+      "failed": "Could not verify the chain"
+    },
+    "events": {
+      "title": "Events",
+      "caption": "Audit log events"
+    },
+    "columns": {
+      "action": "Action",
+      "entity": "Entity",
+      "reason": "Reason",
+      "when": "When"
+    },
+    "entityIdTitle": "Full ID: {id}",
+    "empty": {
+      "title": "No audit events yet",
+      "description": "Every important action, such as approving attendance or calculating payroll, will appear here."
+    },
+    "actions": {
+      "CLOCK_IN": "Clock in",
+      "CLOCK_OUT": "Clock out",
+      "MANUAL_TIME_CORRECTION": "Manual time correction",
+      "FORGOTTEN_STAMP_INFRACTION_RECORDED": "Forgotten stamp recorded",
+      "FORGOTTEN_STAMP_DEDUCTION_REVERSED": "Forgotten-stamp deduction reversed",
+      "FULL_DAY_CREDIT_APPLIED": "Credit as Full Day applied",
+      "TIME_ENTRY_APPROVED": "Time entry approved",
+      "TIME_ENTRY_REJECTED": "Time entry rejected",
+      "TIME_ENTRY_CORRECTION_REQUESTED": "Time entry correction requested",
+      "DEV_LOGIN": "Test-mode login without SMS",
+      "TURAN_ASSIGNMENT_CREATED": "Turan assignment created",
+      "TURAN_ASSIGNMENT_CANCELLED": "Turan assignment cancelled",
+      "EMERGENCY_CALLOUT_STARTED": "Emergency call-out started",
+      "EMERGENCY_CALLOUT_ENDED": "Emergency call-out ended",
+      "PROJECT_CREATED": "Project created",
+      "SITE_CREATED": "Site created",
+      "GEOFENCE_CREATED": "Geofence created",
+      "MEMBERSHIP_CREATED": "Member added to the organization",
+      "OFFLINE_EVENT_REJECTED": "Offline event rejected",
+      "WORKER_APPROVED": "Worker approved",
+      "WORKER_REJECTED": "Worker rejected",
+      "COMPENSATION_PROFILE_CREATED": "Compensation set",
+      "ONBOARDING_INVITATION_CREATED": "Onboarding invitation sent",
+      "ONBOARDING_INVITATION_REVOKED": "Onboarding invitation revoked",
+      "ONBOARDING_SUBMITTED": "Onboarding submitted",
+      "PAYROLL_CALCULATED": "Payroll calculated",
+      "PAYROLL_FINALIZED": "Payroll period finalized",
+      "PAYROLL_PERIOD_REOPENED": "Payroll period reopened",
+      "PAYROLL_ADJUSTMENT_CREATED": "Payroll adjustment added",
+      "TEMPORARY_CHECK_IN_POINT_CREATED": "Temporary check-in point created",
+      "TEMPORARY_CHECK_IN_POINT_REVOKED": "Temporary check-in point revoked",
+      "SHIFT_CREATED": "Shift created",
+      "SHIFT_WORKER_ASSIGNED": "Worker assigned to shift",
+      "SHIFT_CLOSED": "Shift closed",
+      "TEMPORARY_SUPERVISOR_ASSIGNED": "Temporary Supervisor assigned",
+      "TEMPORARY_SUPERVISOR_REVOKED": "Temporary Supervisor removed",
+      "REPORT_GENERATED": "Report generated",
+      "DEVICE_PUBLIC_KEY_REGISTERED": "Device key registered",
+      "DEVICE_PUBLIC_KEY_REVOKED": "Device key revoked"
+    },
+    "entityTypes": {
+      "CompensationProfile": "Compensation profile",
+      "DevicePublicKey": "Device key",
+      "EmergencyCallout": "Emergency call-out",
+      "ForgottenStampInfraction": "Forgotten stamp",
+      "GeneratedReport": "Report",
+      "Geofence": "Geofence",
+      "OfflineSyncEvent": "Offline event",
+      "OnboardingInvitation": "Onboarding invitation",
+      "OrganizationMembership": "Organization membership",
+      "PayrollAdjustment": "Payroll adjustment",
+      "PayrollPeriod": "Payroll period",
+      "Project": "Project",
+      "Shift": "Shift",
+      "ShiftAssignment": "Shift assignment",
+      "Site": "Site",
+      "TemporaryCheckInPoint": "Temporary check-in point",
+      "TemporarySupervisorAssignment": "Temporary Supervisor assignment",
+      "TimeEntry": "Time entry",
+      "TuranAssignment": "Turan assignment",
+      "WorkerProfile": "Worker"
+    }
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "description": "Overview for {month}",
+    "stats": {
+      "activeWorkers": "Active workers",
+      "pendingApprovals": "Pending approvals",
+      "payrollThisMonth": "Payroll this month",
+      "previousMonth": "vs. <ltr>{amount}</ltr> last month",
+      "overtimeCost": "Overtime cost"
+    },
+    "financial": {
+      "loading": "Loading financial figures…",
+      "ownersOnly": "Financial figures are visible to Owners only."
+    },
+    "costByProject": {
+      "title": "Cost by project",
+      "unassigned": "Unassigned",
+      "emptyTitle": "No costs yet",
+      "emptyDescription": "No approved, costed shifts yet this month."
+    },
+    "exposure": {
+      "title": "Financial exposure",
+      "pendingApprovalEstimate": "Pending-approval estimate",
+      "forgottenStampDeductions": "Forgotten-stamp deductions"
+    }
+  },
+  "geofenceMap": {
+    "label": "Geofence map",
+    "help": "Click the map or drag the pin to set the center. The shaded circle is the geofence ({radius} m); workers must be inside it to clock in.",
+    "loading": "Loading map…",
+    "markerAlt": "Geofence center pin",
+    "markerTitle": "Drag the pin to move the center",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "description": "Clock-ins, approvals, emergencies, and payroll events.",
+    "activity": "Activity",
+    "listLabel": "Notifications, newest first",
+    "unread": "Unread",
+    "unreadCount": "Unread: {count}",
+    "markRead": "Mark as read",
+    "markingRead": "Marking…",
+    "markedRead": "Notification marked as read.",
+    "markReadFailed": "Could not mark the notification as read.",
+    "loading": "Loading notifications…",
+    "empty": {
+      "title": "No notifications yet",
+      "description": "Clock-ins, clock-outs, approvals and emergency call-outs will show up here."
+    },
+    "someWorker": "A worker",
+    "genericTitle": "New notification",
+    "genericBody": "You have a new notification.",
+    "turanTypes": {
+      "DAY_TURAN": "Day Turan",
+      "NIGHT_TURAN": "Night Turan"
+    },
+    "types": {
+      "WORKER_CLOCKED_IN": {
+        "title": "Worker clocked in",
+        "body": "{workerName} clocked in for “{shiftTitle}”.\nTime: {time}",
+        "fallbackBody": "A worker clocked in for a shift."
+      },
+      "WORKER_CLOCKED_OUT": {
+        "title": "Worker clocked out",
+        "body": "{workerName} clocked out of “{shiftTitle}”.\nTotal: {total}\nRegular: {regular}\nOvertime: {overtime}\nPending approval.",
+        "bodyWithCost": "{workerName} clocked out of “{shiftTitle}”.\nTotal: {total}\nRegular: {regular}\nOvertime: {overtime}\nEstimated cost: {cost}\nPending approval.",
+        "fallbackBody": "A worker clocked out. The attendance is pending approval."
+      },
+      "OVERTIME_THRESHOLD_CROSSED": {
+        "title": "Overtime started",
+        "body": "{workerName} passed regular hours on “{shiftTitle}” and is now on overtime.",
+        "fallbackBody": "A worker passed regular hours and is now on overtime."
+      },
+      "EMERGENCY_SHIFT_STARTED": {
+        "title": "Emergency call-out started",
+        "body": "{workerName} started an emergency call-out.\nTime: {time}",
+        "fallbackBody": "A worker started an emergency call-out."
+      },
+      "EMERGENCY_SHIFT_ENDED": {
+        "title": "Emergency call-out ended",
+        "body": "{workerName} ended an emergency call-out.\nCompensated duration: {duration}\nPending approval.",
+        "bodyWithCost": "{workerName} ended an emergency call-out.\nCompensated duration: {duration}\nEstimated cost: {cost}\nPending approval.",
+        "fallbackBody": "An emergency call-out ended. The attendance is pending approval."
+      },
+      "SHIFT_AWAITING_APPROVAL": {
+        "title": "Attendance pending approval",
+        "body": "{workerName} clocked out of “{shiftTitle}”.\nThe attendance is pending approval.",
+        "fallbackBody": "A worker clocked out. The attendance is pending approval."
+      },
+      "SHIFT_APPROVED": {
+        "title": "Attendance approved",
+        "body": "Your attendance for “{shiftTitle}” on {date} was approved.\nRegular: {regular}\nOvertime: {overtime}",
+        "fallbackBody": "Your attendance for a shift was approved."
+      },
+      "SHIFT_REJECTED": {
+        "title": "Attendance rejected",
+        "body": "Your attendance for “{shiftTitle}” on {date} was rejected.\nReason: {reason}",
+        "fallbackBody": "Your attendance for a shift was rejected. Ask your manager for the reason."
+      },
+      "ONBOARDING_SUBMITTED": {
+        "title": "New worker application",
+        "body": "{workerName} submitted an application to join. It is waiting for your review.",
+        "fallbackBody": "A new worker submitted an application to join. It is waiting for your review."
+      },
+      "WORKER_APPROVED": {
+        "title": "Your application was approved",
+        "body": "Welcome to the team. You can now clock in for your assigned shifts.",
+        "fallbackBody": "Welcome to the team. You can now clock in for your assigned shifts."
+      },
+      "TURAN_ASSIGNMENT_CREATED": {
+        "title": "New assignment",
+        "turanTitle": "{turanType} assignment",
+        "body": "You’re scheduled for a {turanType}.\nFrom: {start}\nTo: {end}",
+        "shiftAssignedTitle": "New shift assignment",
+        "shiftAssignedBody": "You’ve been assigned to “{shiftTitle}”.\nStarts: {start}",
+        "fallbackBody": "You have a new assignment. Check your schedule for details."
+      },
+      "TURAN_ASSIGNMENT_CHANGED": {
+        "title": "Turan assignment changed",
+        "body": "One of your Turan assignments ({turanType}) was changed.\nFrom: {start}\nTo: {end}",
+        "cancelledTitle": "Turan assignment cancelled",
+        "cancelledBody": "One of your Turan assignments ({turanType}) was cancelled.\nFrom: {start}\nTo: {end}",
+        "fallbackBody": "One of your Turan assignments was changed. Check your schedule for details."
+      },
+      "TEMPORARY_CHECK_IN_POINT_OPENED": {
+        "title": "Temporary check-in point opened",
+        "body": "A temporary check-in point was opened for “{shiftTitle}”.",
+        "fallbackBody": "A temporary check-in point was opened for a shift."
+      },
+      "PAYROLL_FINALIZED": {
+        "title": "Payroll finalized",
+        "body": "Payroll for {month} has been finalized.",
+        "fallbackBody": "A payroll period has been finalized."
+      },
+      "OFFLINE_EVENT_SYNCED": {
+        "title": "Offline attendance synced",
+        "body": "{workerName}’s offline attendance records were synced.\nRecords: {count}",
+        "fallbackBody": "Offline attendance records were synced."
+      },
+      "OFFLINE_EVENT_REJECTED": {
+        "title": "Offline attendance needs review",
+        "body": "{workerName}’s offline attendance sync needs review.\nFlagged: {flagged}\nRejected: {rejected}",
+        "fallbackBody": "Some offline attendance records were rejected and need review."
+      },
+      "SUSPICIOUS_LOCATION_DETECTED": {
+        "title": "Suspicious location needs review",
+        "body": "{workerName}’s offline attendance sync needs review.\nFlagged: {flagged}\nRejected: {rejected}",
+        "fallbackBody": "A suspicious location was found in attendance records and needs review."
+      }
+    }
+  },
+  "payroll": {
+    "title": "Payroll",
+    "description": "Owner-only. Calculate, review, and finalize monthly payroll.",
+    "actions": {
+      "calculateMonth": "Calculate {month}",
+      "calculating": "Calculating…"
+    },
+    "messages": {
+      "calculated": "Payroll for {month} was calculated. Review it before you finalize the period."
+    },
+    "list": {
+      "title": "Payroll periods",
+      "caption": "Payroll periods with version and status",
+      "columns": {
+        "month": "Month",
+        "version": "Version",
+        "status": "Status"
+      },
+      "empty": {
+        "title": "No payroll periods yet",
+        "description": "Calculate the current month to get started."
+      }
+    },
+    "period": {
+      "title": "Payroll — {month}",
+      "backToList": "Back to payroll",
+      "version": "Version {version}",
+      "breakdownTitle": "Worker breakdown",
+      "totalNet": "Total net: <ltr>{total}</ltr>",
+      "caption": "Payroll breakdown per worker for {month}",
+      "columns": {
+        "worker": "Worker",
+        "days": "Days credited",
+        "regular": "Regular hours",
+        "adjustments": "Adjustments"
+      },
+      "added": "Added:",
+      "deducted": "Deducted:",
+      "actions": {
+        "finalizing": "Finalizing…",
+        "reopening": "Reopening…"
+      },
+      "messages": {
+        "finalized": "The payroll period was finalized.",
+        "reopened": "The payroll period was reopened. You can make changes now."
+      },
+      "empty": {
+        "title": "No payroll items yet",
+        "description": "Run “Calculate” from the Payroll list to calculate this month."
+      },
+      "notFound": {
+        "title": "Payroll for this month has not been calculated yet",
+        "description": "There is no payroll period for this month. Go back to Payroll to calculate it."
+      },
+      "reopenReason": "Correction needed after review"
+    }
+  },
+  "reports": {
+    "title": "Reports",
+    "description": "The Worker Attendance Ledger is a tamper-evident PDF with GPS evidence, corrections, and approvals. Financial figures only appear when an Owner generates it, or when workers generate their own.",
+    "generate": {
+      "title": "Generate a Worker Attendance Ledger",
+      "worker": "Worker",
+      "workerPlaceholder": "Select a worker…",
+      "workersLoading": "Loading workers…",
+      "noWorkers": "No workers yet",
+      "workersError": "Could not load the worker list: {message}",
+      "from": "From",
+      "to": "To",
+      "submit": "Generate PDF",
+      "submitting": "Generating…",
+      "readyWithFinancials": "Report ready. It includes financial figures.",
+      "readyOperationalOnly": "Report ready. Operational only — no financial figures.",
+      "openPdf": "Open PDF"
+    },
+    "past": {
+      "title": "Past reports",
+      "caption": "Previously generated reports",
+      "columns": {
+        "worker": "Worker",
+        "generatedAt": "Generated",
+        "financials": "Financials",
+        "hash": "Hash"
+      },
+      "financialsIncluded": "Included",
+      "operationalOnly": "Operational only",
+      "downloadLabel": "Download the report for {worker} ({date})",
+      "downloading": "Preparing…",
+      "downloadFailed": "Could not download the report: {message}",
+      "empty": {
+        "title": "No reports generated yet",
+        "description": "Choose a worker and a date range above, then select “Generate PDF”."
+      }
+    }
+  },
+  "shifts": {
+    "backToList": "All shifts",
+    "list": {
+      "title": "Scheduling",
+      "description": "Shifts, Turan, and assignments.",
+      "newShift": "New shift",
+      "cardTitle": "Shifts",
+      "caption": "Shifts with type, schedule, assigned workers and status",
+      "columns": {
+        "title": "Title",
+        "type": "Type",
+        "start": "Start",
+        "end": "End",
+        "assigned": "Assigned",
+        "status": "Status"
+      },
+      "empty": {
+        "title": "No shifts yet",
+        "description": "Create the first shift to get started."
+      }
+    },
+    "detail": {
+      "details": "Shift details",
+      "fields": {
+        "type": "Type",
+        "checkInMethod": "Check-in method",
+        "start": "Start",
+        "end": "End",
+        "site": "Site"
+      },
+      "assigned": {
+        "title": "Assigned workers ({count})",
+        "empty": "No workers assigned yet."
+      },
+      "assign": {
+        "label": "Assign a worker",
+        "placeholder": "Select a worker…",
+        "loadingWorkers": "Loading workers…",
+        "noneAvailable": "There are no other active workers to assign.",
+        "submit": "Assign",
+        "submitting": "Assigning…",
+        "success": "Worker assigned to the shift.",
+        "overlap": "This worker is already assigned to an overlapping shift."
+      }
+    },
+    "form": {
+      "title": "New shift",
+      "description": "Enter the shift details. After saving, you can assign workers to it.",
+      "cardTitle": "Shift details",
+      "fields": {
+        "title": "Title",
+        "titlePlaceholder": "e.g. Morning traffic control",
+        "shiftType": "Shift type",
+        "project": "Project",
+        "noProject": "No project",
+        "site": "Site",
+        "noSite": "No site",
+        "checkInMethod": "Check-in method",
+        "start": "Start",
+        "end": "End"
+      },
+      "hints": {
+        "loadingSites": "Loading sites…",
+        "noSites": "This project has no sites yet.",
+        "noGeofence": "This site has no geofence configured yet.",
+        "endBeforeStart": "The end time must be after the start time."
+      },
+      "submit": "Create shift",
+      "submitting": "Creating shift…"
+    }
+  },
+  "sites": {
+    "title": "Sites & Projects",
+    "description": "Projects, sites, and their geofences.",
+    "projects": {
+      "title": "Projects",
+      "listLabel": "Projects list",
+      "client": "Client: {client}",
+      "budget": "Budget: <money></money>",
+      "empty": {
+        "title": "No projects yet",
+        "description": "Add the first project with the form below."
+      },
+      "form": {
+        "title": "New project",
+        "name": "Project name",
+        "client": "Client (optional)",
+        "code": "Project code",
+        "submit": "Create project",
+        "submitting": "Creating project…"
+      },
+      "messages": {
+        "created": "Project created."
+      }
+    },
+    "sites": {
+      "title": "Sites",
+      "listLabel": "Sites list",
+      "radius": "Geofence: {radius} m",
+      "empty": {
+        "title": "No sites yet",
+        "description": "Choose a project and set the location on the map to add the first site."
+      },
+      "form": {
+        "title": "New site",
+        "project": "Project",
+        "projectPlaceholder": "Select a project…",
+        "noProjects": "Create a project first, then add a site to it.",
+        "name": "Site name",
+        "mapLabel": "Geofence center",
+        "latitude": "Latitude",
+        "longitude": "Longitude",
+        "radius": "Radius (m)",
+        "coordinatesHint": "You can also type the coordinates and radius.",
+        "submit": "Create site + geofence",
+        "submitting": "Creating site…"
+      },
+      "messages": {
+        "created": "Site and geofence created."
+      }
+    }
+  },
+  "turan": {
+    "title": "Turan & Emergency",
+    "description": "Day and Night Turan on-call scheduling. Emergency call-outs started from a Night Turan assignment appear in <scheduling>Scheduling</scheduling> as their own shift.",
+    "form": {
+      "title": "New assignment",
+      "type": "Type",
+      "worker": "Worker",
+      "workerPlaceholder": "Select a worker…",
+      "workersLoading": "Loading workers…",
+      "start": "Start",
+      "end": "End",
+      "notes": "Notes (optional)",
+      "submit": "Create assignment",
+      "submitting": "Creating…",
+      "timesRequired": "Enter a start and an end time.",
+      "endBeforeStart": "The end time must be after the start time."
+    },
+    "overlap": {
+      "title": "This worker already has a Turan assignment at this time",
+      "description": "It overlaps a {type} from {start} to {end}. Create this assignment anyway?",
+      "descriptionUnknown": "It overlaps another scheduled assignment for the same worker. Create this assignment anyway?",
+      "confirm": "Create anyway"
+    },
+    "list": {
+      "title": "Assignments",
+      "caption": "Day and Night Turan assignments",
+      "columns": {
+        "type": "Type",
+        "worker": "Worker",
+        "start": "Start",
+        "end": "End",
+        "status": "Status",
+        "actions": "Actions"
+      }
+    },
+    "actions": {
+      "cancelAssignmentFor": "Cancel the assignment of {name}",
+      "cancelling": "Cancelling…"
+    },
+    "empty": {
+      "title": "No Turan assignments yet",
+      "description": "Create a Day or Night Turan assignment with the form above."
+    },
+    "messages": {
+      "created": "Assignment created.",
+      "cancelled": "Assignment cancelled."
+    }
+  },
+  "workers": {
+    "title": "Workers",
+    "description": "Roster, onboarding approvals, and compensation.",
+    "backToList": "Back to workers",
+    "rate": {
+      "perDay": "<ltr>{amount}</ltr>/day",
+      "perHour": "<ltr>{amount}</ltr>/hr"
+    },
+    "pending": {
+      "title": "Pending approval ({count})",
+      "review": "Review application",
+      "reviewLabel": "Review application: {name}"
+    },
+    "list": {
+      "title": "All workers",
+      "empty": {
+        "title": "No workers yet",
+        "description": "Invite a worker to get started."
+      }
+    },
+    "detail": {
+      "profile": "Profile",
+      "role": "Role",
+      "joined": "Joined",
+      "compensationType": "Compensation type",
+      "overtimeRate": "Overtime rate",
+      "effectiveFrom": "Effective from",
+      "noCompensationActive": "No compensation profile visible.",
+      "noCompensationOther": "Compensation is not visible to your role, or this worker has none on file.",
+      "notFound": "We could not find this worker. It may have been removed."
+    },
+    "approve": {
+      "title": "Approve worker",
+      "description": "Set compensation to activate this worker's account.",
+      "form": {
+        "compensationType": "Compensation type",
+        "dailyRate": "Daily rate (ILS)",
+        "hourlyRate": "Hourly rate (ILS)",
+        "overtimeRate": "Overtime rate (ILS/hr)",
+        "hint": "Enter amounts in shekels, for example 400 or 45.50."
+      },
+      "actions": {
+        "approve": "Approve worker",
+        "approving": "Approving…",
+        "rejecting": "Rejecting…"
+      },
+      "messages": {
+        "approved": "Worker approved.",
+        "rejected": "Worker application rejected.",
+        "approveFailed": "Could not approve the worker.",
+        "rejectFailed": "Could not reject the worker application."
+      },
+      "reasons": {
+        "initialApproval": "Initial onboarding approval",
+        "rejected": "Rejected during admin review."
+      }
+    }
+  }
+}

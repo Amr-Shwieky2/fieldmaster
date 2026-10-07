@@ -1,30 +1,60 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiRequestError } from "@fieldmaster/api-client";
+import { useTranslations } from "next-intl";
 import { useAuth } from "@/lib/auth-context";
+import { useErrorMessage } from "@/lib/use-error-message";
+import { useFormat } from "@/lib/use-format";
+import { LtrText, Money } from "@/components/formatted";
+import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 
+function MapLoading() {
+  const tMap = useTranslations("geofenceMap");
+  return (
+    <div role="status" className="flex h-[280px] items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-sm text-slate-500">
+      {tMap("loading")}
+    </div>
+  );
+}
+
 // Leaflet touches `window` at import time, so it can only load client-side.
 const GeofenceMapPicker = dynamic(() => import("@/components/geofence-map-picker").then((m) => m.GeofenceMapPicker), {
   ssr: false,
-  loading: () => <div className="flex h-[280px] items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-sm text-slate-400">Loading map…</div>,
+  loading: () => <MapLoading />,
 });
+
+const COORDINATE_FORMAT: Intl.NumberFormatOptions = { minimumFractionDigits: 4, maximumFractionDigits: 4, useGrouping: false };
+
+/** Translated mutation outcome: the error (role="alert") or a success message. */
+function MutationFeedback({ error, success }: { error: unknown; success: string | null }) {
+  const errorMessage = useErrorMessage();
+  return (
+    <div aria-live="polite">
+      {error ? (
+        <p role="alert" className="text-sm text-red-600">
+          {errorMessage(error)}
+        </p>
+      ) : null}
+      {!error && success ? <p className="text-sm text-emerald-700">{success}</p> : null}
+    </div>
+  );
+}
 
 export default function SitesPage() {
   const { client, session } = useAuth();
+  const t = useTranslations("sites");
+  const format = useFormat();
   const queryClient = useQueryClient();
   const isOwner = session?.role === "OWNER";
 
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: () => client.listProjects() });
   const sitesQuery = useQuery({ queryKey: ["sites"], queryFn: () => client.listSites() });
-
-  const [error, setError] = useState<string | null>(null);
 
   // Project form
   const [projectName, setProjectName] = useState("");
@@ -39,7 +69,6 @@ export default function SitesPage() {
       setProjectClient("");
       setProjectCode("");
     },
-    onError: (err) => setError(err instanceof ApiRequestError ? err.body.message : "Failed to create project."),
   });
 
   // Site form
@@ -71,96 +100,131 @@ export default function SitesPage() {
       queryClient.invalidateQueries({ queryKey: ["sites"] });
       setSiteName("");
     },
-    onError: (err) => setError(err instanceof ApiRequestError ? err.body.message : "Failed to create site."),
   });
+
+  const canCreateProject = !createProject.isPending && !!projectName && !!projectCode;
+  const canCreateSite = !createSite.isPending && !!siteProjectId && !!siteName;
+
+  function submitProject(event: FormEvent) {
+    event.preventDefault();
+    if (canCreateProject) createProject.mutate();
+  }
+
+  function submitSite(event: FormEvent) {
+    event.preventDefault();
+    if (canCreateSite) createSite.mutate();
+  }
+
+  const projects = projectsQuery.data ?? [];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Sites &amp; Projects</h1>
-        <p className="text-sm text-slate-500">Projects, sites, and their geofences.</p>
-      </div>
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      <PageHeader title={t("title")} description={t("description")} />
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Projects</CardTitle>
+            <CardTitle>{t("projects.title")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {projectsQuery.isLoading && <LoadingState />}
-            {projectsQuery.isError && <ErrorState message={(projectsQuery.error as Error).message} />}
-            {projectsQuery.data && projectsQuery.data.length === 0 && <EmptyState title="No projects yet" />}
+            {projectsQuery.isError && <ErrorState error={projectsQuery.error} onRetry={() => void projectsQuery.refetch()} />}
+            {projectsQuery.data && projectsQuery.data.length === 0 && (
+              <EmptyState title={t("projects.empty.title")} description={t("projects.empty.description")} />
+            )}
             {projectsQuery.data && projectsQuery.data.length > 0 && (
-              <ul className="space-y-2 text-sm">
+              <ul aria-label={t("projects.listLabel")} className="space-y-2 text-sm">
                 {projectsQuery.data.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between border-b border-slate-100 pb-2 last:border-0">
-                    <div>
+                  <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 last:border-0">
+                    <div className="min-w-0">
                       <p className="font-medium text-slate-900">{p.name}</p>
                       <p className="text-xs text-slate-500">
-                        {p.projectCode} {p.client ? `· ${p.client}` : ""}
+                        <LtrText>{p.projectCode}</LtrText>
+                        {p.client ? <> · {t("projects.client", { client: p.client })}</> : null}
                       </p>
                     </div>
+                    {/* Budgets are Owner-only: the API strips them for a Field Manager, and the UI also hides them. */}
                     {isOwner && p.budgetAgorot != null && (
-                      <span className="text-xs text-slate-500">Budget ₪{(p.budgetAgorot / 100).toLocaleString()}</span>
+                      <span className="text-xs text-slate-500">{t.rich("projects.budget", { money: () => <Money agorot={p.budgetAgorot} /> })}</span>
                     )}
                   </li>
                 ))}
               </ul>
             )}
 
-            <div className="space-y-3 border-t border-slate-100 pt-4">
-              <p className="text-sm font-medium text-slate-700">New project</p>
-              <Input placeholder="Name" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
-              <Input placeholder="Client (optional)" value={projectClient} onChange={(e) => setProjectClient(e.target.value)} />
-              <Input placeholder="Project code" value={projectCode} onChange={(e) => setProjectCode(e.target.value)} />
-              <Button size="sm" onClick={() => createProject.mutate()} disabled={createProject.isPending || !projectName || !projectCode}>
-                {createProject.isPending ? "Creating…" : "Create project"}
+            <form noValidate onSubmit={submitProject} className="space-y-3 border-t border-slate-100 pt-4">
+              <h3 className="text-sm font-medium text-slate-700">{t("projects.form.title")}</h3>
+              <div>
+                <Label htmlFor="project-name">{t("projects.form.name")}</Label>
+                <Input id="project-name" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="project-client">{t("projects.form.client")}</Label>
+                <Input id="project-client" value={projectClient} onChange={(e) => setProjectClient(e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="project-code">{t("projects.form.code")}</Label>
+                <Input id="project-code" dir="ltr" className="text-start" value={projectCode} onChange={(e) => setProjectCode(e.target.value)} />
+              </div>
+              <Button type="submit" size="sm" disabled={!canCreateProject}>
+                {createProject.isPending ? t("projects.form.submitting") : t("projects.form.submit")}
               </Button>
-            </div>
+              <MutationFeedback error={createProject.error} success={createProject.isSuccess ? t("projects.messages.created") : null} />
+            </form>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Sites</CardTitle>
+            <CardTitle>{t("sites.title")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {sitesQuery.isLoading && <LoadingState />}
-            {sitesQuery.isError && <ErrorState message={(sitesQuery.error as Error).message} />}
-            {sitesQuery.data && sitesQuery.data.length === 0 && <EmptyState title="No sites yet" />}
+            {sitesQuery.isError && <ErrorState error={sitesQuery.error} onRetry={() => void sitesQuery.refetch()} />}
+            {sitesQuery.data && sitesQuery.data.length === 0 && (
+              <EmptyState title={t("sites.empty.title")} description={t("sites.empty.description")} />
+            )}
             {sitesQuery.data && sitesQuery.data.length > 0 && (
-              <ul className="space-y-2 text-sm">
+              <ul aria-label={t("sites.listLabel")} className="space-y-2 text-sm">
                 {sitesQuery.data.map((s) => (
                   <li key={s.id} className="border-b border-slate-100 pb-2 last:border-0">
                     <p className="font-medium text-slate-900">{s.name}</p>
                     <p className="text-xs text-slate-500">
-                      {s.latitude.toFixed(4)}, {s.longitude.toFixed(4)} · {s.defaultGeofenceRadiusMeters}m radius
+                      <LtrText>
+                        {format.number(s.latitude, COORDINATE_FORMAT)}, {format.number(s.longitude, COORDINATE_FORMAT)}
+                      </LtrText>{" "}
+                      · {t("sites.radius", { radius: format.number(s.defaultGeofenceRadiusMeters) })}
                     </p>
                   </li>
                 ))}
               </ul>
             )}
 
-            <div className="space-y-3 border-t border-slate-100 pt-4">
-              <p className="text-sm font-medium text-slate-700">New site</p>
+            <form noValidate onSubmit={submitSite} className="space-y-3 border-t border-slate-100 pt-4">
+              <h3 className="text-sm font-medium text-slate-700">{t("sites.form.title")}</h3>
               <div>
-                <Label htmlFor="site-project">Project</Label>
+                <Label htmlFor="site-project">{t("sites.form.project")}</Label>
                 <Select id="site-project" value={siteProjectId} onChange={(e) => setSiteProjectId(e.target.value)}>
-                  <option value="">Select a project…</option>
-                  {(projectsQuery.data ?? []).map((p) => (
+                  <option value="">{t("sites.form.projectPlaceholder")}</option>
+                  {projects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
                   ))}
                 </Select>
+                {projectsQuery.isSuccess && projects.length === 0 && <p className="mt-1 text-xs text-slate-500">{t("sites.form.noProjects")}</p>}
               </div>
-              <Input placeholder="Site name" value={siteName} onChange={(e) => setSiteName(e.target.value)} />
+              <div>
+                <Label htmlFor="site-name">{t("sites.form.name")}</Label>
+                <Input id="site-name" value={siteName} onChange={(e) => setSiteName(e.target.value)} />
+              </div>
 
               <div>
-                <Label>Geofence center (click the map or drag the pin)</Label>
+                <p id="site-map-label" className="mb-1 block text-sm font-medium text-slate-700">
+                  {t("sites.form.mapLabel")}
+                </p>
                 <GeofenceMapPicker
+                  labelId="site-map-label"
                   latitude={Number(siteLat) || 32.0853}
                   longitude={Number(siteLng) || 34.7818}
                   radiusMeters={Number(siteRadius) || 100}
@@ -171,28 +235,26 @@ export default function SitesPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label htmlFor="lat">Latitude</Label>
-                  <Input id="lat" type="number" step="0.0001" value={siteLat} onChange={(e) => setSiteLat(e.target.value)} />
+                  <Label htmlFor="lat">{t("sites.form.latitude")}</Label>
+                  <Input id="lat" type="number" step="0.0001" dir="ltr" className="text-start" value={siteLat} onChange={(e) => setSiteLat(e.target.value)} />
                 </div>
                 <div>
-                  <Label htmlFor="lng">Longitude</Label>
-                  <Input id="lng" type="number" step="0.0001" value={siteLng} onChange={(e) => setSiteLng(e.target.value)} />
+                  <Label htmlFor="lng">{t("sites.form.longitude")}</Label>
+                  <Input id="lng" type="number" step="0.0001" dir="ltr" className="text-start" value={siteLng} onChange={(e) => setSiteLng(e.target.value)} />
                 </div>
                 <div>
-                  <Label htmlFor="radius">Radius (m)</Label>
-                  <Input id="radius" type="number" value={siteRadius} onChange={(e) => setSiteRadius(e.target.value)} />
+                  <Label htmlFor="radius">{t("sites.form.radius")}</Label>
+                  <Input id="radius" type="number" dir="ltr" className="text-start" value={siteRadius} onChange={(e) => setSiteRadius(e.target.value)} />
                 </div>
               </div>
-              <Button
-                size="sm"
-                onClick={() => createSite.mutate()}
-                disabled={createSite.isPending || !siteProjectId || !siteName}
-              >
-                {createSite.isPending ? "Creating…" : "Create site + geofence"}
+              <p className="text-xs text-slate-500">{t("sites.form.coordinatesHint")}</p>
+              <Button type="submit" size="sm" disabled={!canCreateSite}>
+                {createSite.isPending ? t("sites.form.submitting") : t("sites.form.submit")}
               </Button>
-            </div>
+              <MutationFeedback error={createSite.error} success={createSite.isSuccess ? t("sites.messages.created") : null} />
+            </form>
           </CardContent>
         </Card>
       </div>

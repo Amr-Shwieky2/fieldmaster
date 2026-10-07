@@ -149,6 +149,33 @@ its origin (`http://localhost:8081` by default) to `CORS_ORIGINS` in
 > to avoid silently talking to the wrong database. See
 > `docs/technical-decisions.md` if you need to change this back.
 
+## Languages (admin web)
+
+The admin web app is **Arabic by default (right-to-left)**, with English as the
+second language. There is no Hebrew. The **العربية / English** switch sits in the header and on
+the login page. The choice is stored in the `fm_locale` cookie, and the server
+renders `<html lang dir>` from it, so the page arrives in the right direction.
+
+- All interface text lives in `apps/admin-web/src/i18n/messages/ar.json` and
+  `en.json` (same keys in both). Components read it with next-intl
+  (`useTranslations("namespace")`).
+- Numbers and dates always use Western digits (0-9) and the Asia/Jerusalem
+  time zone; money is shown as `₪ 1,234.50`.
+- Arabic must use the project glossary exactly (for example المالك, مدير ميدان,
+  وردية, بدء الدوام, إنهاء الدوام, الرواتب). The full list is in
+  `apps/admin-web/scripts/lib/i18n-check.mjs`.
+- `pnpm lint` (and so CI) runs `node apps/admin-web/scripts/check-i18n.mjs`,
+  which fails on:
+  - keys missing from either file or mismatched placeholders;
+  - keys used in code but not defined;
+  - glossary drift;
+  - Hebrew characters or Arabic-Indic digits;
+  - physical `left`/`right` Tailwind classes. Use `ms`/`me`, `ps`/`pe`,
+    `start`/`end`, `text-start`/`text-end`.
+
+  ESLint's `i18next/no-literal-string` blocks new hard-coded JSX text.
+- The mobile app is still English-only. Its translation is a later step.
+
 ## Environment variables
 
 See [`apps/api/.env.example`](apps/api/.env.example) for the complete,

@@ -18,6 +18,7 @@ import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { GeofenceValidationService } from "../sites/geofence-validation.service";
 import { TemporaryCheckInPointsService } from "../shifts/temporary-check-in-points.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { loadWorkerName, withoutFinancialData, type NotificationData } from "../notifications/notification-data";
 import { LocationValidationService } from "./location-validation.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { ClockInDto } from "./dto/clock-in.dto";
@@ -203,11 +204,21 @@ export class ClockEventsService {
       correlationId,
     });
 
+    const clockInData = {
+      timeEntryId: timeEntry.id,
+      shiftId: shift.id,
+      shiftTitle: shift.title,
+      workerProfileId: actor.workerProfileId,
+      workerName: await loadWorkerName(this.prisma, actor.workerProfileId),
+      clockInAt: effectiveAt.toISOString(),
+    };
     await this.notifyManagerAndOwners(organizationId, shift.managerId, {
       type: NotificationType.WORKER_CLOCKED_IN,
       title: "Worker clocked in",
       managerBody: `A worker clocked in for "${shift.title}".`,
       ownerBody: `A worker clocked in for "${shift.title}".`,
+      managerData: clockInData,
+      ownerData: clockInData,
     });
 
     return { status: 201, body: { timeEntry, clockEvent } };
@@ -318,7 +329,11 @@ export class ClockEventsService {
       correlationId,
     });
 
-    await this.notifyClockOut(organizationId, actor.workerProfileId, timeEntry.shift.managerId, timeEntry.shift.title, rawDurationMinutes);
+    await this.notifyClockOut(organizationId, actor.workerProfileId, timeEntry.shift.managerId, timeEntry.shift.title, rawDurationMinutes, {
+      timeEntryId: timeEntry.id,
+      shiftId: timeEntry.shiftId,
+      clockOutAt: effectiveAt.toISOString(),
+    });
 
     const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: timeEntry.id }, include: { dailySummary: true } });
     // `clockEvent` is exposed alongside `body` for internal callers (offline
@@ -327,34 +342,68 @@ export class ClockEventsService {
     return { status: 200, body: updated, clockEvent };
   }
 
+  /**
+   * The shift's manager gets `managerBody` / `managerData`; every other active
+   * Owner gets `ownerBody` / `ownerData`. Only `ownerData` may carry money
+   * (`*Agorot`): it is the Owner-only counterpart of `ownerBody`'s cost line.
+   */
   private async notifyManagerAndOwners(
     organizationId: string,
     managerUserId: string,
-    content: { type: NotificationType; title: string; managerBody: string; ownerBody: string },
+    content: {
+      type: NotificationType;
+      title: string;
+      managerBody: string;
+      ownerBody: string;
+      managerData: NotificationData;
+      ownerData: NotificationData;
+    },
   ) {
     const owners = await this.prisma.organizationMembership.findMany({
       where: { organizationId, role: OrgRole.OWNER, status: "ACTIVE", archivedAt: null },
     });
     const recipients = new Set<string>([managerUserId, ...owners.map((o) => o.userId)]);
     await this.notifications.notifyMany(
-      Array.from(recipients).map((recipientUserId) => ({
-        organizationId,
-        recipientUserId,
-        type: content.type,
-        title: content.title,
-        body: recipientUserId === managerUserId ? content.managerBody : content.ownerBody,
-      })),
+      Array.from(recipients).map((recipientUserId) => {
+        const isShiftManager = recipientUserId === managerUserId;
+        return {
+          organizationId,
+          recipientUserId,
+          type: content.type,
+          title: content.title,
+          body: isShiftManager ? content.managerBody : content.ownerBody,
+          data: isShiftManager ? withoutFinancialData(content.managerData) : content.ownerData,
+        };
+      }),
     );
   }
 
-  private async notifyClockOut(organizationId: string, workerProfileId: string, managerUserId: string, shiftTitle: string, rawDurationMinutes: number) {
+  private async notifyClockOut(
+    organizationId: string,
+    workerProfileId: string,
+    managerUserId: string,
+    shiftTitle: string,
+    rawDurationMinutes: number,
+    refs: { timeEntryId: string; shiftId: string; clockOutAt: string },
+  ) {
     const regularMinutes = Math.min(rawDurationMinutes, 540);
     const overtimeMinutes = Math.max(0, rawDurationMinutes - 540);
     const formatHm = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 
     const managerBody = `Worker clocked out of "${shiftTitle}".\nTotal: ${formatHm(rawDurationMinutes)}\nRegular: ${formatHm(regularMinutes)}\nOvertime: ${formatHm(overtimeMinutes)}\nApproval is required.`;
+    // No money here: this is what the shift's manager (a Field Manager) gets.
+    const managerData: NotificationData = {
+      ...refs,
+      shiftTitle,
+      workerProfileId,
+      workerName: await loadWorkerName(this.prisma, workerProfileId),
+      durationMinutes: rawDurationMinutes,
+      regularMinutes,
+      overtimeMinutes,
+    };
 
     let ownerBody = managerBody;
+    let ownerData: NotificationData = managerData;
     const activeCompensation = await this.prisma.compensationProfile.findFirst({
       where: {
         workerProfileId,
@@ -374,6 +423,8 @@ export class ClockEventsService {
       });
       const ils = (estimate.totalCompensationAgorot / 100).toFixed(2);
       ownerBody = `Worker clocked out of "${shiftTitle}".\nTotal: ${formatHm(rawDurationMinutes)}\nRegular: ${formatHm(regularMinutes)}\nOvertime: ${formatHm(overtimeMinutes)}\nEstimated cost: ₪${ils}`;
+      // Owner-only: the same estimate as the cost line in ownerBody.
+      ownerData = { ...managerData, estimatedCostAgorot: estimate.totalCompensationAgorot };
     }
 
     await this.notifyManagerAndOwners(organizationId, managerUserId, {
@@ -381,6 +432,8 @@ export class ClockEventsService {
       title: "Worker clocked out",
       managerBody,
       ownerBody,
+      managerData,
+      ownerData,
     });
   }
 }

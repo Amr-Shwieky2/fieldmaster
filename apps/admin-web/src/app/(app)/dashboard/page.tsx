@@ -1,26 +1,67 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { OrgRole } from "@fieldmaster/shared-types";
+import type { FinancialDashboard } from "@fieldmaster/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { currentYearMonth } from "@/lib/business-date";
-import { formatAgorot } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
+import { useEnumLabel } from "@/i18n/enums";
+import { LtrText, Money } from "@/components/formatted";
+import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LoadingState, ErrorState } from "@/components/ui/states";
+import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 
-function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function StatCard({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
   return (
     <Card>
       <CardContent className="py-5">
         <p className="text-sm text-slate-500">{label}</p>
         <p className="mt-1 text-2xl font-semibold text-slate-900">{value}</p>
-        {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+        {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
       </CardContent>
     </Card>
   );
 }
 
+/**
+ * Cost per project as a bar list. Each bar is a block inside a full-width
+ * track, so it starts at the inline-start edge: the right in Arabic, the left
+ * in English. Widths are relative to the most expensive project.
+ */
+function CostByProject({ items }: { items: FinancialDashboard["costByProject"] }) {
+  const t = useTranslations("dashboard");
+  if (items.length === 0) {
+    return <EmptyState title={t("costByProject.emptyTitle")} description={t("costByProject.emptyDescription")} />;
+  }
+  const max = Math.max(0, ...items.map((p) => p.totalAgorot));
+  return (
+    <ul className="space-y-3">
+      {items.map((p) => {
+        const percent = max > 0 ? Math.max(0, Math.min(100, Math.round((p.totalAgorot / max) * 100))) : 0;
+        return (
+          <li key={p.projectId ?? "unassigned"} className="space-y-1.5 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate text-slate-700">{p.projectId === null ? t("costByProject.unassigned") : p.projectName}</span>
+              <Money agorot={p.totalAgorot} className="font-medium text-slate-900" />
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden data-testid="cost-bar-track">
+              <div className="h-full rounded-full bg-brand-600" style={{ width: `${percent}%` }} />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export default function DashboardPage() {
+  const t = useTranslations("dashboard");
+  const fmt = useFormat();
+  const enumLabel = useEnumLabel();
   const { client, session } = useAuth();
   const isOwner = session?.role === OrgRole.OWNER;
   const yearMonth = currentYearMonth();
@@ -33,63 +74,110 @@ export default function DashboardPage() {
     enabled: isOwner,
   });
 
-  if (workersQuery.isLoading || pendingQuery.isLoading) return <LoadingState />;
-  if (workersQuery.isError) return <ErrorState message={(workersQuery.error as Error).message} />;
+  // Financial figures exist only for an Owner; a Field Manager never gets them
+  // (the query is disabled and the API answers 403 anyway).
+  const financials = isOwner ? dashboardQuery.data : undefined;
+
+  const header = (
+    <PageHeader
+      title={t("title")}
+      description={t("description", { month: fmt.month(yearMonth) })}
+      actions={session ? <Badge tone="info">{enumLabel("OrgRole", session.role)}</Badge> : null}
+    />
+  );
+
+  if (workersQuery.isLoading || pendingQuery.isLoading) {
+    return (
+      <div>
+        {header}
+        <LoadingState />
+      </div>
+    );
+  }
+
+  if (workersQuery.isError || pendingQuery.isError) {
+    return (
+      <div>
+        {header}
+        <Card>
+          <ErrorState
+            error={workersQuery.error ?? pendingQuery.error}
+            onRetry={() => {
+              if (workersQuery.isError) void workersQuery.refetch();
+              if (pendingQuery.isError) void pendingQuery.refetch();
+            }}
+          />
+        </Card>
+      </div>
+    );
+  }
 
   const activeWorkers = (workersQuery.data ?? []).filter((w) => w.accountStatus === "ACTIVE").length;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-sm text-slate-500">{isOwner ? "Owner view" : "Field Manager view"} — {yearMonth}</p>
-      </div>
+      {header}
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Active workers" value={String(activeWorkers)} />
-        <StatCard label="Pending approvals" value={String(pendingQuery.data?.length ?? 0)} />
-        {isOwner && dashboardQuery.data && (
+      {/* Two columns until xl: four columns next to the sidebar are too narrow for "₪ 123,456.78". */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("stats.activeWorkers")} value={fmt.number(activeWorkers)} />
+        <StatCard label={t("stats.pendingApprovals")} value={fmt.number(pendingQuery.data?.length ?? 0)} />
+        {financials && (
           <>
-            <StatCard label="Payroll this month" value={formatAgorot(dashboardQuery.data.totalCurrentMonthPayrollAgorot)} hint={`vs. ${formatAgorot(dashboardQuery.data.totalPreviousMonthPayrollAgorot)} last month`} />
-            <StatCard label="Overtime cost" value={formatAgorot(dashboardQuery.data.overtimeTotalAgorot)} />
+            <StatCard
+              label={t("stats.payrollThisMonth")}
+              value={<Money agorot={financials.totalCurrentMonthPayrollAgorot} />}
+              hint={t.rich("stats.previousMonth", {
+                amount: fmt.money(financials.totalPreviousMonthPayrollAgorot),
+                ltr: (chunks) => <LtrText>{chunks}</LtrText>,
+              })}
+            />
+            <StatCard label={t("stats.overtimeCost")} value={<Money agorot={financials.overtimeTotalAgorot} />} />
           </>
         )}
       </div>
 
-      {isOwner && dashboardQuery.data && (
-        <div className="grid gap-4 md:grid-cols-2">
+      {isOwner && dashboardQuery.isLoading && (
+        <Card>
+          <LoadingState label={t("financial.loading")} />
+        </Card>
+      )}
+
+      {isOwner && dashboardQuery.isError && (
+        <Card>
+          <ErrorState error={dashboardQuery.error} onRetry={() => void dashboardQuery.refetch()} />
+        </Card>
+      )}
+
+      {financials && (
+        <div className="grid gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle>Cost by project</CardTitle>
+              <CardTitle>{t("costByProject.title")}</CardTitle>
             </CardHeader>
             <CardContent>
-              {dashboardQuery.data.costByProject.length === 0 ? (
-                <p className="text-sm text-slate-500">No approved, costed shifts yet this month.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {dashboardQuery.data.costByProject.map((p) => (
-                    <li key={p.projectId ?? "unassigned"} className="flex items-center justify-between text-sm">
-                      <span className="text-slate-700">{p.projectName}</span>
-                      <span className="font-medium text-slate-900">{formatAgorot(p.totalAgorot)}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <CostByProject items={financials.costByProject} />
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Financial exposure</CardTitle>
+              <CardTitle>{t("exposure.title")}</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">Pending-approval estimate</span>
-                <span className="font-medium text-slate-900">{formatAgorot(dashboardQuery.data.pendingApprovalFinancialExposureAgorot)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-600">Forgotten-stamp deductions</span>
-                <span className="font-medium text-slate-900">{formatAgorot(dashboardQuery.data.forgottenStampDeductionsAgorot)}</span>
-              </div>
+            <CardContent>
+              <dl className="space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-600">{t("exposure.pendingApprovalEstimate")}</dt>
+                  <dd>
+                    <Money agorot={financials.pendingApprovalFinancialExposureAgorot} className="font-medium text-slate-900" />
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-600">{t("exposure.forgottenStampDeductions")}</dt>
+                  <dd>
+                    <Money agorot={financials.forgottenStampDeductionsAgorot} className="font-medium text-slate-900" />
+                  </dd>
+                </div>
+              </dl>
             </CardContent>
           </Card>
         </div>
@@ -97,9 +185,7 @@ export default function DashboardPage() {
 
       {!isOwner && (
         <Card>
-          <CardContent className="py-5 text-sm text-slate-500">
-            Financial figures are visible to Owners only.
-          </CardContent>
+          <CardContent className="py-5 text-sm text-slate-600">{t("financial.ownersOnly")}</CardContent>
         </Card>
       )}
     </div>

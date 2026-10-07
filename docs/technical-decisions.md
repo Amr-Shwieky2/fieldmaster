@@ -474,3 +474,121 @@ Turborepo 2 runs tasks in strict env mode: shell variables not declared in
 on the verification machine). The `dev` task now declares
 `passThroughEnv: [PORT, NEXT_PUBLIC_API_URL, CORS_ORIGINS, APP_ENV, DEV_LOGIN_ENABLED]`.
 It's pass-through rather than hashed `env` because `dev` isn't cached anyway.
+
+## Step 2: Arabic (default) + English with full RTL in the admin web app
+
+- **next-intl in cookie mode, no locale in the URL.** The language lives in the
+  `fm_locale` cookie (`ar` | `en`; anything else, including Hebrew, falls back
+  to Arabic). The root layout is a server component that reads the cookie and
+  renders `<html lang dir>` itself, so the first HTML byte is already
+  right-to-left for Arabic. Nothing on the client rewrites those attributes,
+  which keeps the Step 1 hydration fix intact. Switching language writes the
+  cookie and calls `router.refresh()`; the server tree re-renders with the new
+  attributes and messages, without a full reload. A unit test renders the
+  layout on the "server" for no cookie / `ar` / `en` / `he`, and the running
+  app was checked with `curl` for both cookies.
+- **Western digits everywhere via `-u-nu-latn`.** All `Intl` formatting uses
+  `ar-u-nu-latn` / `en-u-nu-latn`. next-intl itself also runs with those tags
+  (`src/i18n/request.ts`), because ICU formats numbers inside messages with the
+  provider locale, and some engines give Arabic-Indic digits for bare `ar`.
+  Code that needs the bare `"ar" | "en"` uses `useAppLocale()`, which strips
+  the extension. Dates are Gregorian and always in `Asia/Jerusalem`. Arabic
+  dates spell the month out (`15 يناير 2026 في 10:30`), because a numeric
+  date with RTL marks reads poorly. Money is integer agorot formatted with
+  integer arithmetic as `₪ 1,234.50` in both languages.
+- **Bidi isolation for left-to-right values.** Money, phone numbers, ids,
+  codes and times inside Arabic text are wrapped in `<bdi dir="ltr">`
+  (`src/components/formatted.tsx`). Otherwise the browser reorders
+  `+972500000001` into `972500000001+` in an RTL paragraph.
+- **Logical CSS only, enforced.** Tailwind 3.4 already has `ms/me`, `ps/pe`,
+  `start/end`, `text-start/end`, `border-s/e`, `rounded-s/e` and the `rtl:`
+  variant, so the Tailwind v4 / shadcn migration from the parked branch was
+  not needed and was not brought over. `scripts/check-i18n.mjs` fails on
+  physical `ml-`/`mr-`/`pl-`/`pr-`/`left-`/`right-`/`text-left`/... classes
+  (a line can opt out with an `rtl-ok` comment for genuinely physical cases).
+  Directional icons are SVGs that mirror with `rtl:-scale-x-100`. The Leaflet
+  map keeps `dir="ltr"` internally (its layout is physical); its zoom and
+  attribution controls move to the RTL-appropriate corners.
+- **API errors are translated by code, with details.** `getErrorMessage` maps
+  `body.code` to `errors.<CODE>` and fills in API `details` where the message
+  needs them (geofence distance and allowed radius, GPS accuracy, device clock
+  drift). If details are missing it uses `errors.<CODE>_NO_DETAILS`. For a
+  code the frontend doesn't know yet it shows the API's own message rather
+  than hiding what went wrong.
+- **Checks that keep it complete.** `pnpm lint` (and so CI) runs
+  `scripts/check-i18n.mjs`. It checks that `ar.json` and `en.json` have
+  identical keys and ICU placeholders, that every `t("key")` used in `src/`
+  exists, that the mandatory glossary terms are exact, that there are no
+  Hebrew characters or Arabic-Indic digits, and that no physical-direction
+  classes remain. ESLint's `i18next/no-literal-string` (JSX text plus
+  `placeholder`/`title`/`alt`/`aria-label`/`label`) blocks new hard-coded
+  text. A unit test fails if any value of any shared enum lacks an Arabic or
+  English label.
+- **What was reused from `wip/phase1-arabic-rtl`.** Ported and adapted to
+  Tailwind 3 and the existing UI kit:
+  - the locale config, request config, client-side locale switch and
+    `useAppLocale`;
+  - the enum-label module and its messages;
+  - the `common`/`states`/`errors`/`enums`/`units`/`language` translations;
+  - the error-code mapping (now with details and API-message fallback);
+  - the formatted-value components and the test helper `render-with-intl`.
+
+  Rewritten rather than ported: the formatting module (now plain `Intl` with
+  `-u-nu-latn`, as required) and the i18n check script (adds the
+  used-key, glossary and physical-class checks).
+
+  Left on the branch, out of scope: the Tailwind v4 upgrade, the shadcn/ui
+  migration, the design-tokens package, the Pino/health/users-me API changes,
+  Husky/Prettier/lint-staged, the Docker Mailpit/MinIO changes and the
+  language-preference API. The branch itself is untouched.
+
+## Step 2: notifications are rendered on the client from type + data
+
+The API stored notifications only as English `title`/`body` text, and
+`data_json` was empty for almost every type, so the Arabic UI had nothing to
+translate. Translating the stored English sentences was rejected (fragile, and
+it would lose names, times and amounts). This step instead made one small,
+additive API change:
+
+- Every `notify()` call site now also writes **raw values** to `data_json`:
+  ISO instants, `YYYY-MM-DD` business dates, `YYYY-MM` months, whole minutes,
+  counts, enum values and names, never pre-formatted text. The English
+  `title`/`body` are unchanged; the mobile app still reads them until Step 3.
+  No migration was needed; the column already existed.
+- The admin web renders `notifications.types.<TYPE>.title/body` (or
+  `bodyWithCost`) from that data (`src/lib/notification-text.ts`). It formats
+  dates, durations and money itself, so digits are Western and money is
+  `₪ 1,234.50`. Rows from before this change have no data and show the
+  generic `fallbackBody`; Arabic never falls back to the stored English text.
+- **Financial isolation.** Money appears in `data_json` only as integer agorot
+  under keys ending in `Agorot`, and only in an Owner recipient's row (cost
+  estimates on clock-out and emergency end). `NotificationsService.notify()`
+  also strips every `*Agorot` key unless the recipient is an active,
+  non-archived Owner of the organization, as a backstop. An e2e test
+  (`apps/api/test/notifications.e2e-spec.ts`) checks that a Field Manager's
+  rows never contain a money field.
+
+Data per type:
+
+| Type | Fields |
+|---|---|
+| `WORKER_CLOCKED_IN` | timeEntryId, shiftId, shiftTitle, workerProfileId, workerName, clockInAt |
+| `WORKER_CLOCKED_OUT` | the above with clockOutAt, durationMinutes, regularMinutes, overtimeMinutes; Owners also get `estimatedCostAgorot` when the worker has a compensation profile |
+| `EMERGENCY_SHIFT_STARTED` | timeEntryId, calloutId, workerProfileId, workerName, startedAt, compensatedStartAt, authorizationSource |
+| `EMERGENCY_SHIFT_ENDED` | timeEntryId, calloutId, workerProfileId, workerName, endedAt, compensatedDurationMinutes; Owners also get `estimatedCostAgorot` |
+| `SHIFT_APPROVED` | timeEntryId, shiftId, shiftTitle, businessDate, approvedRegularMinutes, approvedOvertimeMinutes |
+| `SHIFT_REJECTED` | timeEntryId, shiftId, shiftTitle, businessDate, reason (the manager's free text, shown as written) |
+| `ONBOARDING_SUBMITTED` | workerProfileId, workerName |
+| `WORKER_APPROVED` | workerProfileId (compensation is deliberately not included) |
+| `TURAN_ASSIGNMENT_CREATED` | assignmentKind `TURAN` (turanAssignmentId, turanType, startAt, endAt) or `SHIFT` (shiftId, shiftTitle, startAt, endAt): shift assignments reuse this type |
+| `TURAN_ASSIGNMENT_CHANGED` | change `CANCELLED`, turanAssignmentId, turanType, startAt, endAt |
+| `OFFLINE_EVENT_REJECTED` / `SUSPICIOUS_LOCATION_DETECTED` | workerProfileId, workerName, flaggedCount, rejectedCount |
+| `PAYROLL_FINALIZED` (seed) | yearMonth |
+| `SHIFT_AWAITING_APPROVAL` (seed) | timeEntryId, shiftId, shiftTitle, workerProfileId, workerName, clockOutAt, durationMinutes |
+
+`OVERTIME_THRESHOLD_CROSSED`, `TEMPORARY_CHECK_IN_POINT_OPENED` and
+`OFFLINE_EVENT_SYNCED` have no producer yet. Their translations expect
+shiftTitle and workerName, plus syncedCount for the last one. Arabic
+notification text uses a short sentence followed by "label: value" lines
+(e.g. `ساعات إضافية: 1 س 30 د`), which keeps the grammar correct for any
+inserted value.
