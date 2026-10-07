@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ApiRequestError, type ApiError, type TuranAssignment, type Worker } from "@fieldmaster/api-client";
-import type { Locale } from "@/i18n/config";
 import { renderWithIntl } from "@/test/render-with-intl";
 import TuranPage from "../page";
 
@@ -45,8 +44,8 @@ const DAY_DONE: TuranAssignment = {
   assignedWorkerProfileId: "wp-2",
 };
 
-function renderPage(locale: Locale = "ar") {
-  return renderWithIntl(<TuranPage />, { locale, queryClient: true });
+function renderPage() {
+  return renderWithIntl(<TuranPage />, { queryClient: true });
 }
 
 function rowOf(workerName: string): HTMLElement {
@@ -64,8 +63,8 @@ beforeEach(() => {
 });
 
 describe("Turan page", () => {
-  it("renders the form and the assignments table in Arabic", async () => {
-    renderPage("ar");
+  it("renders the form and the assignments table", async () => {
+    renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "المناوبات والطوارئ" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "الجدولة" }).getAttribute("href")).toBe("/shifts");
     expect(screen.getByRole("heading", { name: "مناوبة جديدة" })).toBeTruthy();
@@ -101,29 +100,19 @@ describe("Turan page", () => {
 
     expect(document.body.textContent ?? "").not.toMatch(/[٠-٩۰-۹]/);
     expect(document.body.textContent ?? "").not.toContain("NIGHT_TURAN");
-  });
-
-  it("renders in English", async () => {
-    renderPage("en");
-    expect(screen.getByRole("heading", { level: 1, name: "Turan & Emergency" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create assignment" })).toBeTruthy();
-    await screen.findByRole("cell", { name: "Eli Ramzani" });
-    const night = within(rowOf("Eli Ramzani"));
-    expect(night.getByText("Night Turan")).toBeTruthy();
-    expect(night.getByText("Scheduled")).toBeTruthy();
-    expect(night.getByRole("button", { name: "Cancel the assignment of Eli Ramzani" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "إنشاء المناوبة" })).toBeTruthy();
   });
 
   it("shows the page-specific empty state", async () => {
     client.listTuranAssignments.mockResolvedValue([]);
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("لا توجد مناوبات بعد")).toBeTruthy();
     expect(screen.getByText("أنشئ مناوبة نهارية أو ليلية من النموذج أعلاه.")).toBeTruthy();
   });
 
   it("shows a translated error with a working retry", async () => {
     client.listTuranAssignments.mockRejectedValueOnce(apiError(503, "SERVICE_UNAVAILABLE", "Service unavailable"));
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("الخدمة غير متاحة مؤقتًا. يُرجى المحاولة بعد قليل.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "إعادة المحاولة" }));
     expect(await screen.findByRole("cell", { name: "Eli Ramzani" })).toBeTruthy();
@@ -132,13 +121,13 @@ describe("Turan page", () => {
 
   it("shows access denied when the API answers 403", async () => {
     client.listTuranAssignments.mockRejectedValue(apiError(403, "FORBIDDEN", "Forbidden"));
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("creates an assignment with the same payload as before and announces it", async () => {
-    renderPage("ar");
+    renderPage();
     await screen.findByRole("option", { name: "Samir Haddad" });
     const submit = screen.getByRole("button", { name: "إنشاء المناوبة" }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
@@ -166,7 +155,7 @@ describe("Turan page", () => {
     client.createTuranAssignment.mockRejectedValueOnce(
       apiError(409, "CONFLICT", "This worker already has an overlapping Turan assignment. Set confirmOverlap to proceed anyway.", { conflictingAssignmentId: "ta-1" }),
     );
-    renderPage("ar");
+    renderPage();
     await screen.findByRole("cell", { name: "Eli Ramzani" });
     fireEvent.change(screen.getByLabelText("العامل"), { target: { value: "wp-1" } });
     fireEvent.click(screen.getByRole("button", { name: "إنشاء المناوبة" }));
@@ -184,20 +173,24 @@ describe("Turan page", () => {
 
   it("drops the overlap confirmation when the manager cancels it", async () => {
     client.createTuranAssignment.mockRejectedValueOnce(apiError(409, "CONFLICT", "overlap", { conflictingAssignmentId: "unknown-id" }));
-    renderPage("en");
+    renderPage();
     await screen.findByRole("cell", { name: "Eli Ramzani" });
-    fireEvent.change(screen.getByLabelText("Worker"), { target: { value: "wp-1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create assignment" }));
+    fireEvent.change(screen.getByLabelText("العامل"), { target: { value: "wp-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "إنشاء المناوبة" }));
 
-    expect(await screen.findByText("It overlaps another scheduled assignment for the same worker. Create this assignment anyway?")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText("This worker already has a Turan assignment at this time")).toBeNull();
-    expect(screen.getByRole("button", { name: "Create assignment" })).toBeTruthy();
+    // The conflicting assignment is not in the list, so the generic overlap wording is used.
+    expect(await screen.findByText("تتداخل هذه المناوبة مع مناوبة أخرى مجدولة للعامل نفسه. هل تريد إنشاءها رغم التداخل؟")).toBeTruthy();
+    expect(screen.getByText("لدى هذا العامل مناوبة أخرى في الوقت نفسه")).toBeTruthy();
+    expect(screen.queryByText("overlap")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "إلغاء" }));
+    expect(screen.queryByText("لدى هذا العامل مناوبة أخرى في الوقت نفسه")).toBeNull();
+    expect(screen.queryByText("تتداخل هذه المناوبة مع مناوبة أخرى مجدولة للعامل نفسه. هل تريد إنشاءها رغم التداخل؟")).toBeNull();
+    expect(screen.getByRole("button", { name: "إنشاء المناوبة" })).toBeTruthy();
     expect(client.createTuranAssignment).toHaveBeenCalledTimes(1);
   });
 
   it("validates that the end is after the start before calling the API", async () => {
-    renderPage("ar");
+    renderPage();
     await screen.findByRole("option", { name: "Eli Ramzani" });
     fireEvent.change(screen.getByLabelText("العامل"), { target: { value: "wp-1" } });
     fireEvent.change(screen.getByLabelText("البداية"), { target: { value: "2026-10-06T15:00" } });
@@ -209,7 +202,7 @@ describe("Turan page", () => {
 
   it("shows other create errors translated instead of the API's English message", async () => {
     client.createTuranAssignment.mockRejectedValueOnce(apiError(404, "NOT_FOUND", "Worker not found."));
-    renderPage("ar");
+    renderPage();
     await screen.findByRole("option", { name: "Eli Ramzani" });
     fireEvent.change(screen.getByLabelText("العامل"), { target: { value: "wp-1" } });
     fireEvent.click(screen.getByRole("button", { name: "إنشاء المناوبة" }));
@@ -219,7 +212,7 @@ describe("Turan page", () => {
   });
 
   it("cancels a scheduled assignment", async () => {
-    renderPage("ar");
+    renderPage();
     await screen.findByRole("cell", { name: "Eli Ramzani" });
     fireEvent.click(screen.getByRole("button", { name: "إلغاء مناوبة Eli Ramzani" }));
     await waitFor(() => expect(client.cancelTuranAssignment).toHaveBeenCalledWith("ta-1"));
@@ -228,7 +221,7 @@ describe("Turan page", () => {
 
   it("shows a translated error when cancelling fails", async () => {
     client.cancelTuranAssignment.mockRejectedValueOnce(apiError(403, "FORBIDDEN", "Forbidden"));
-    renderPage("ar");
+    renderPage();
     await screen.findByRole("cell", { name: "Eli Ramzani" });
     fireEvent.click(screen.getByRole("button", { name: "إلغاء مناوبة Eli Ramzani" }));
     expect(await screen.findByText("ليست لديك صلاحية لتنفيذ هذا الإجراء.")).toBeTruthy();

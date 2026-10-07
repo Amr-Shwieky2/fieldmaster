@@ -39,9 +39,9 @@ describe("Approve worker page", () => {
     auth.client = {};
   });
 
-  it("renders in Arabic with LTR amount inputs", () => {
+  it("renders the approval form with LTR amount inputs", () => {
     setClient();
-    renderWorkersPage(<ApproveWorkerPage />, "ar");
+    renderWorkersPage(<ApproveWorkerPage />);
 
     expect(screen.getByRole("heading", { level: 1, name: "الموافقة على العامل" })).toBeTruthy();
     expect(screen.getByText("حدّد الأجر لتفعيل حساب هذا العامل.")).toBeTruthy();
@@ -51,25 +51,14 @@ describe("Approve worker page", () => {
     const daily = screen.getByLabelText("أجر اليوم (بالشيكل)");
     expect(daily.getAttribute("dir")).toBe("ltr");
     expect(screen.getByLabelText("أجر الساعات الإضافية (بالشيكل للساعة)").getAttribute("dir")).toBe("ltr");
+    expect(screen.getByText("أدخل المبالغ بالشيكل، مثل 400 أو 45.50.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "الموافقة على العامل" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "رفض" })).toBeTruthy();
   });
 
-  it("renders in English", () => {
-    setClient();
-    renderWorkersPage(<ApproveWorkerPage />, "en");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Approve worker" })).toBeTruthy();
-    expect(screen.getByLabelText("Compensation type")).toBeTruthy();
-    expect(screen.getByLabelText("Daily rate (ILS)")).toBeTruthy();
-    expect(screen.getByLabelText("Overtime rate (ILS/hr)")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Approve worker" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
-  });
-
   it("sends a daily rate entered in shekels as integer agorot, then returns to the list", async () => {
     const client = setClient();
-    renderWorkersPage(<ApproveWorkerPage />, "ar");
+    renderWorkersPage(<ApproveWorkerPage />);
 
     fireEvent.change(screen.getByLabelText("أجر اليوم (بالشيكل)"), { target: { value: "450.5" } });
     fireEvent.change(screen.getByLabelText("أجر الساعات الإضافية (بالشيكل للساعة)"), { target: { value: "62.25" } });
@@ -92,25 +81,33 @@ describe("Approve worker page", () => {
 
   it("sends an hourly rate as integer agorot when hourly is chosen", async () => {
     const client = setClient();
-    renderWorkersPage(<ApproveWorkerPage />, "en");
+    renderWorkersPage(<ApproveWorkerPage />);
 
-    fireEvent.change(screen.getByLabelText("Compensation type"), { target: { value: "HOURLY" } });
-    fireEvent.change(screen.getByLabelText("Hourly rate (ILS)"), { target: { value: "52.5" } });
-    fireEvent.click(screen.getByRole("button", { name: "Approve worker" }));
+    fireEvent.change(screen.getByLabelText("نوع الأجر"), { target: { value: "HOURLY" } });
+    expect(screen.queryByLabelText("أجر اليوم (بالشيكل)")).toBeNull();
+    const hourly = screen.getByLabelText("أجر الساعة (بالشيكل)");
+    expect(hourly.getAttribute("dir")).toBe("ltr");
+    fireEvent.change(hourly, { target: { value: "52.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "الموافقة على العامل" }));
 
     await waitFor(() => expect(client.approveWorker).toHaveBeenCalledTimes(1));
-    expect(client.approveWorker.mock.calls[0][1]).toMatchObject({
+    const [id, body] = client.approveWorker.mock.calls[0];
+    expect(id).toBe("w-pending");
+    expect(body).toEqual({
       compensationType: "HOURLY",
       dailyBaseRateAgorot: undefined,
       baseHourlyRateAgorot: 5250,
       overtimeHourlyRateAgorot: 6000,
+      effectiveStartDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      changeReason: "موافقة أولية عند الانضمام",
     });
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith("/workers"));
   });
 
   it("disables both actions and shows a pending label while approving", async () => {
     const pending = deferred();
     setClient({ approveWorker: vi.fn().mockReturnValue(pending.promise) });
-    renderWorkersPage(<ApproveWorkerPage />, "ar");
+    renderWorkersPage(<ApproveWorkerPage />);
 
     fireEvent.click(screen.getByRole("button", { name: "الموافقة على العامل" }));
     const approving = await screen.findByRole("button", { name: "جارٍ الموافقة…" });
@@ -122,7 +119,7 @@ describe("Approve worker page", () => {
 
   it("shows a translated 403 (for example a Field Manager approving compensation) and stays on the page", async () => {
     setClient({ approveWorker: vi.fn().mockRejectedValue(apiError(403, "FORBIDDEN", "Missing permission MANAGE_COMPENSATION")) });
-    renderWorkersPage(<ApproveWorkerPage />, "ar");
+    renderWorkersPage(<ApproveWorkerPage />);
 
     fireEvent.click(screen.getByRole("button", { name: "الموافقة على العامل" }));
     const alert = await screen.findByRole("alert");
@@ -133,19 +130,23 @@ describe("Approve worker page", () => {
     expect((screen.getByRole("button", { name: "الموافقة على العامل" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("falls back to the API message for an unknown error code", async () => {
+  it("shows the generic Arabic message, never the API's English message, for an unknown error code", async () => {
     setClient({ approveWorker: vi.fn().mockRejectedValue(apiError(422, "SOME_NEW_CODE", "Effective date is in a closed period")) });
-    renderWorkersPage(<ApproveWorkerPage />, "en");
+    renderWorkersPage(<ApproveWorkerPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Approve worker" }));
+    fireEvent.click(screen.getByRole("button", { name: "الموافقة على العامل" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Could not approve the worker.");
-    expect(alert.textContent).toContain("Effective date is in a closed period");
+    expect(alert.textContent).toContain("تعذّرت الموافقة على العامل.");
+    // 422 has no status-level message, so the unknown-error text is shown.
+    expect(alert.textContent).toContain("حدث خطأ غير متوقع. يُرجى المحاولة مرة أخرى.");
+    expect(alert.textContent).not.toContain("Effective date is in a closed period");
+    expect(alert.textContent).not.toContain("SOME_NEW_CODE");
+    expect(nav.replace).not.toHaveBeenCalled();
   });
 
   it("translates a known API error such as an overlapping compensation profile", async () => {
     setClient({ approveWorker: vi.fn().mockRejectedValue(apiError(409, "OVERLAPPING_COMPENSATION_PROFILE", "overlap")) });
-    renderWorkersPage(<ApproveWorkerPage />, "ar");
+    renderWorkersPage(<ApproveWorkerPage />);
 
     fireEvent.click(screen.getByRole("button", { name: "الموافقة على العامل" }));
     expect((await screen.findByRole("alert")).textContent).toContain("تتداخل فترة هذا الأجر مع فترة أجر أخرى لنفس العامل.");
@@ -153,7 +154,7 @@ describe("Approve worker page", () => {
 
   it("rejects with the review reason and returns to the list", async () => {
     const client = setClient();
-    renderWorkersPage(<ApproveWorkerPage />, "ar");
+    renderWorkersPage(<ApproveWorkerPage />);
 
     fireEvent.click(screen.getByRole("button", { name: "رفض" }));
     await waitFor(() => expect(nav.replace).toHaveBeenCalledWith("/workers"));
@@ -163,12 +164,14 @@ describe("Approve worker page", () => {
 
   it("shows a translated error when rejecting fails", async () => {
     setClient({ rejectWorker: vi.fn().mockRejectedValue(new TypeError("Failed to fetch")) });
-    renderWorkersPage(<ApproveWorkerPage />, "en");
+    renderWorkersPage(<ApproveWorkerPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "رفض" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Could not reject the worker application.");
-    expect(alert.textContent).toContain("Could not reach the server. Check your internet connection and try again.");
+    expect(alert.textContent).toContain("تعذّر رفض طلب العامل.");
+    expect(alert.textContent).toContain("تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت وحاول مرة أخرى.");
+    expect(alert.textContent).not.toContain("Failed to fetch");
     expect(nav.replace).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "رفض" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

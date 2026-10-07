@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ApiRequestError, type ApiError, type TimeEntry, type Worker } from "@fieldmaster/api-client";
-import type { Locale } from "@/i18n/config";
 import { renderWithIntl } from "@/test/render-with-intl";
 import AttendancePage from "../page";
 
@@ -57,8 +56,8 @@ const CREDITED_SHIFT = {
   dailySummary: null,
 } as unknown as TimeEntry;
 
-function renderPage(locale: Locale = "ar") {
-  return renderWithIntl(<AttendancePage />, { locale, queryClient: true });
+function renderPage() {
+  return renderWithIntl(<AttendancePage />, { queryClient: true });
 }
 
 function cardOf(workerName: string): HTMLElement {
@@ -77,8 +76,8 @@ beforeEach(() => {
 });
 
 describe("Attendance approval page", () => {
-  it("renders the pending shifts in Arabic with Western digits and no money", async () => {
-    renderPage("ar");
+  it("renders the pending shifts with Western digits and no money", async () => {
+    renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "الموافقة على الحضور" })).toBeTruthy();
     await screen.findByText("Eli Ramzani");
 
@@ -105,30 +104,16 @@ describe("Attendance approval page", () => {
     expect(text).not.toContain("450");
   });
 
-  it("renders in English", async () => {
-    renderPage("en");
-    expect(screen.getByRole("heading", { level: 1, name: "Attendance approval" })).toBeTruthy();
-    await screen.findByText("Eli Ramzani");
-    expect(screen.getByText("2 shifts pending approval")).toBeTruthy();
-    const card = within(cardOf("Eli Ramzani"));
-    expect(card.getByText("Clock in")).toBeTruthy();
-    expect(card.getByText("Clock out")).toBeTruthy();
-    expect(card.getByText("8h 0m")).toBeTruthy();
-    expect(card.getByText("Daily summary")).toBeTruthy();
-    expect(card.getByRole("button", { name: "Credit as Full Day" })).toBeTruthy();
-    expect(within(cardOf("Samir Haddad")).getByText("Credited as Full Day")).toBeTruthy();
-  });
-
   it("shows the page-specific empty state", async () => {
     client.listPendingAttendanceApprovals.mockResolvedValue([]);
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("لا توجد ورديات بانتظار الموافقة")).toBeTruthy();
     expect(screen.getByText("تمت مراجعة كل الورديات المسجّلة.")).toBeTruthy();
   });
 
   it("shows a translated error with a working retry", async () => {
     client.listPendingAttendanceApprovals.mockRejectedValueOnce(apiError(500, "INTERNAL_ERROR", "Internal server error"));
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.")).toBeTruthy();
     expect(screen.queryByText("Internal server error")).toBeNull();
 
@@ -139,13 +124,13 @@ describe("Attendance approval page", () => {
 
   it("shows access denied when the API answers 403", async () => {
     client.listPendingAttendanceApprovals.mockRejectedValue(apiError(403, "FORBIDDEN", "Forbidden"));
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
     expect(screen.queryByText("Eli Ramzani")).toBeNull();
   });
 
   it("approves a shift and announces it", async () => {
-    renderPage("ar");
+    renderPage();
     await screen.findByText("Eli Ramzani");
     fireEvent.click(within(cardOf("Eli Ramzani")).getByRole("button", { name: "موافقة" }));
 
@@ -155,7 +140,7 @@ describe("Attendance approval page", () => {
   });
 
   it("asks for a reason before rejecting and sends the reason the manager wrote", async () => {
-    renderPage("ar");
+    renderPage();
     await screen.findByText("Eli Ramzani");
     const card = within(cardOf("Eli Ramzani"));
     fireEvent.click(card.getByRole("button", { name: "رفض" }));
@@ -176,30 +161,34 @@ describe("Attendance approval page", () => {
   });
 
   it("can close the reason prompt without sending anything", async () => {
-    renderPage("en");
+    renderPage();
     await screen.findByText("Eli Ramzani");
     const card = within(cardOf("Eli Ramzani"));
-    fireEvent.click(card.getByRole("button", { name: "Reject" }));
-    expect(card.getByLabelText("Reason for rejection")).toBeTruthy();
-    fireEvent.click(card.getByRole("button", { name: "Cancel" }));
-    expect(card.queryByLabelText("Reason for rejection")).toBeNull();
+    fireEvent.click(card.getByRole("button", { name: "رفض" }));
+    expect(card.getByLabelText("سبب الرفض")).toBeTruthy();
+    fireEvent.click(card.getByRole("button", { name: "إلغاء" }));
+    expect(card.queryByLabelText("سبب الرفض")).toBeNull();
     expect(client.rejectTimeEntry).not.toHaveBeenCalled();
   });
 
-  it("applies Credit as Full Day with the default reason in English", async () => {
-    renderPage("en");
+  it("applies Credit as Full Day with the default reason and announces it", async () => {
+    renderPage();
     await screen.findByText("Eli Ramzani");
     const card = within(cardOf("Eli Ramzani"));
-    fireEvent.click(card.getByRole("button", { name: "Credit as Full Day" }));
-    expect((card.getByLabelText("Reason for Credit as Full Day") as HTMLTextAreaElement).value).toBe("Weather stopped work");
-    fireEvent.click(card.getByRole("button", { name: "Confirm Credit as Full Day" }));
-    await waitFor(() => expect(client.applyFullDayCredit).toHaveBeenCalledWith("te-1", "Weather stopped work"));
-    expect(await screen.findByText("Credit as Full Day applied to the shift of Eli Ramzani.")).toBeTruthy();
+    fireEvent.click(card.getByRole("button", { name: "احتساب يوم كامل" }));
+    expect((card.getByLabelText("سبب احتساب يوم كامل") as HTMLTextAreaElement).value).toBe("توقّف العمل بسبب الطقس");
+    expect(card.getByText("يُحفظ هذا السبب في سجل التدقيق.")).toBeTruthy();
+    fireEvent.click(card.getByRole("button", { name: "تأكيد احتساب يوم كامل" }));
+    await waitFor(() => expect(client.applyFullDayCredit).toHaveBeenCalledWith("te-1", "توقّف العمل بسبب الطقس"));
+    expect(await screen.findByText("تم احتساب يوم كامل لوردية Eli Ramzani.")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("تم احتساب يوم كامل لوردية Eli Ramzani.");
+    expect(client.approveTimeEntry).not.toHaveBeenCalled();
+    expect(client.rejectTimeEntry).not.toHaveBeenCalled();
   });
 
   it("shows the translated PAYROLL_PERIOD_FINALIZED message, not the API's English text", async () => {
     client.applyFullDayCredit.mockRejectedValue(apiError(409, "PAYROLL_PERIOD_FINALIZED", "The payroll period for this date is finalized."));
-    renderPage("ar");
+    renderPage();
     await screen.findByText("Eli Ramzani");
     const card = within(cardOf("Eli Ramzani"));
     fireEvent.click(card.getByRole("button", { name: "احتساب يوم كامل" }));
@@ -213,10 +202,23 @@ describe("Attendance approval page", () => {
     expect(card.getByLabelText("سبب احتساب يوم كامل")).toBeTruthy();
   });
 
+  it("shows the status-level message for an unknown error code, never the API's English text", async () => {
+    client.approveTimeEntry.mockRejectedValue(apiError(409, "SOME_FUTURE_CODE", "Time entry is locked by another process."));
+    renderPage();
+    await screen.findByText("Eli Ramzani");
+    const card = within(cardOf("Eli Ramzani"));
+    fireEvent.click(card.getByRole("button", { name: "موافقة" }));
+
+    const alert = await card.findByText("يتعارض هذا الإجراء مع الحالة الحالية للسجل. حدّث الصفحة وحاول مرة أخرى.");
+    expect(alert.getAttribute("role")).toBe("alert");
+    expect(screen.queryByText("Time entry is locked by another process.")).toBeNull();
+    expect(screen.queryByText(/SOME_FUTURE_CODE/)).toBeNull();
+  });
+
   it("shows a pending label and disables the card's actions while approving", async () => {
     let resolve: (value: unknown) => void = () => {};
     client.approveTimeEntry.mockReturnValue(new Promise((r) => (resolve = r)));
-    renderPage("ar");
+    renderPage();
     await screen.findByText("Eli Ramzani");
     const card = within(cardOf("Eli Ramzani"));
     fireEvent.click(card.getByRole("button", { name: "موافقة" }));

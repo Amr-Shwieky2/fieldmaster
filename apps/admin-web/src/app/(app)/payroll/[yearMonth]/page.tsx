@@ -20,7 +20,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 
-/** Outcome of the last finalize / reopen click, rendered in the current UI language. */
+/** Outcome of the last finalize / reopen click, translated while rendering. */
 type ActionFeedback = { type: "finalized" } | { type: "reopened" } | { type: "error"; error: unknown } | null;
 
 // Wide table: the worker column sticks to the inline-start edge while the figures scroll.
@@ -61,7 +61,7 @@ function PayrollPeriodContent() {
     onError: (err) => setFeedback({ type: "error", error: err }),
   });
   const reopen = useMutation({
-    // The reason is stored as sent and shown later in the audit log, so it is sent in the Owner's language.
+    // The reason is stored as sent and shown later in the audit log, so it is sent in Arabic.
     mutationFn: () => client.reopenPayroll(yearMonth, t("period.reopenReason")),
     onMutate: () => setFeedback(null),
     onSuccess: () => {

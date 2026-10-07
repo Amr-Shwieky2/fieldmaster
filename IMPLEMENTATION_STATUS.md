@@ -1,6 +1,94 @@
 # FieldMaster — Implementation Status
 
+## Admin web is Arabic only (2026-10-07, after Step 2)
+
+At the product owner's request, English was removed from the admin web. It now
+works only in Arabic, right-to-left. Details and reasoning are in
+`docs/technical-decisions.md` ("Admin web is Arabic only").
+
+- Removed:
+  - `en.json`, the العربية/English switcher (header, login, worker notice,
+    404/error pages), the `fm_locale` cookie and `useAppLocale`;
+  - the English branches in formatting and in the notification renderer
+    (stored English text is never shown).
+- The root layout always renders `<html lang="ar" dir="rtl">` and no longer
+  reads cookies.
+- API errors: an unknown code now shows the Arabic message for its HTTP status
+  instead of the API's English message.
+- `scripts/check-i18n.mjs` was rewritten for one language. It now fails when:
+  - any messages file other than `ar.json` appears;
+  - a message is not Arabic;
+  - the API has an error code without an Arabic message.
+- Tests: every test now renders Arabic only. Tests that only checked English
+  text or the language switch were removed. Every behavior they checked
+  (payloads, navigation, filtering, financial isolation, LTR isolation of
+  money/phones/ids) is still asserted in Arabic. A coverage audit compared
+  each converted test file with the previous version.
+- Also fixed:
+  - the map credit is now Arabic;
+  - empty login fields show Arabic messages instead of the browser bubble;
+  - a translated `global-error` page;
+  - the emergency title is shown in Arabic inside notifications;
+  - old English default reasons are shown in Arabic in the audit log;
+  - an unknown enum value shows its raw code instead of made-up English.
+- New guards:
+  - a test that every message in `ar.json` is valid ICU;
+  - lint fails on any API error code without an Arabic message.
+- Not changed, known gaps:
+  - the mobile app is still English-only (Step 3);
+  - the Worker Attendance Ledger PDF from the API is English (later step);
+  - seed demo data is English;
+  - native date/time pickers follow the browser's language.
+
+**Tests** (runtime counts):
+
+| | Before Step 2 (9be8f9d) | After this change |
+|---|---|---|
+| shared-validation (unit) | 35 | 35 |
+| API unit | 21 | 25 |
+| admin-web | 16 | 227 |
+| API e2e | 35 | 39 |
+| **Total** | **107** | **326** |
+
+No count went down. Removing English deleted tests that only checked
+English text or the language switch: 13 "renders … in English" page tests, plus the
+English cases inside the root-layout, error-page, format, errors, enum and
+notification tests. New Arabic tests replaced them, so admin-web went from
+225 to 227. Two independent audits compared every test with the Step 1 and
+Step 2 versions and found no weakened assertion and no lost behavior. The
+API financial-isolation tests are byte-identical to Step 1, and the
+admin-web ones are the same or stronger.
+
+**Browser check** (dev server; a fresh tab per role; console read after
+every page):
+- **As Owner:**
+  - login;
+  - dashboard;
+  - workers, a worker's page, the approve page;
+  - sites (map);
+  - scheduling, an emergency shift, new shift;
+  - Turan;
+  - attendance;
+  - payroll and September 2026;
+  - reports;
+  - notifications;
+  - audit log;
+  - a 404 URL.
+- **As Field Manager:** the same pages. Payroll, the payroll period and the
+  audit log redirect to the dashboard, and no ₪ appears on any page.
+
+On every page: `lang="ar" dir="rtl"`, no horizontal overflow, no raw keys,
+no Arabic-Indic digits, and no English interface text. The only Latin text
+is the brand name and seed data such as names and sites. There were no
+hydration warnings in either role. A stale `fm_locale=en` cookie is ignored.
+
+`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 287 · `pnpm test:e2e` ✅ 39 ·
+`pnpm build` ✅
+
 ## Step 2 of 10 — Arabic + RTL for the admin web (2026-10-07)
+
+> English was removed after this step; see the section above. The language
+> switch described below no longer exists.
 
 Scope: `apps/admin-web` only (mobile is Step 3, PDF reports later). One small
 API change was needed for notifications (see below).
