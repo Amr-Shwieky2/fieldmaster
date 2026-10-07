@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LtrText } from "@/components/formatted";
-import { LocaleSwitcher } from "@/components/locale-switcher";
 import { DevQuickLogin, TestModeBanner, useDevLoginUsers } from "@/components/dev-quick-login";
 
 type Step = "phone" | "code";
@@ -28,9 +27,10 @@ export default function LoginPage() {
   const [step, setStep] = useState<Step>("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [code, setCode] = useState("");
-  // The cause is kept (not the translated text) so the message follows a language switch.
-  const [failure, setFailure] = useState<{ cause: unknown } | null>(null);
-  const error = failure ? errorMessage(failure.cause) : null;
+  // The cause is kept and translated while rendering. The forms use noValidate,
+  // so an empty field gets this Arabic message instead of the browser's own bubble.
+  const [failure, setFailure] = useState<{ cause: unknown } | { missing: "phoneRequired" | "codeRequired" } | null>(null);
+  const error = failure ? ("missing" in failure ? t(failure.missing) : errorMessage(failure.cause)) : null;
   const [submitting, setSubmitting] = useState(false);
   const [organizations, setOrganizations] = useState<{ organizationId: string; role: string }[] | null>(null);
   // Non-null only while the API runs in dev login (test) mode; otherwise every test option stays hidden.
@@ -44,6 +44,10 @@ export default function LoginPage() {
 
   async function handleRequestOtp(e: React.FormEvent) {
     e.preventDefault();
+    if (phoneNumber.trim() === "") {
+      setFailure({ missing: "phoneRequired" });
+      return;
+    }
     setFailure(null);
     setSubmitting(true);
     try {
@@ -58,6 +62,10 @@ export default function LoginPage() {
 
   async function handleVerify(e: React.FormEvent, organizationId?: string) {
     e.preventDefault();
+    if (code.trim() === "") {
+      setFailure({ missing: "codeRequired" });
+      return;
+    }
     setFailure(null);
     setSubmitting(true);
     try {
@@ -76,9 +84,6 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-100 px-4 py-10">
-      <div className="flex w-full max-w-xl justify-end">
-        <LocaleSwitcher />
-      </div>
       {devMode && (
         <div className="w-full max-w-xl">
           <TestModeBanner />
@@ -91,7 +96,7 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           {step === "phone" && (
-            <form onSubmit={handleRequestOtp} className="space-y-4">
+            <form noValidate onSubmit={handleRequestOtp} className="space-y-4">
               <div>
                 <Label htmlFor="phone">{t("phoneLabel")}</Label>
                 <Input
@@ -118,7 +123,7 @@ export default function LoginPage() {
           )}
 
           {step === "code" && !organizations && (
-            <form onSubmit={(e) => handleVerify(e)} className="space-y-4">
+            <form noValidate onSubmit={(e) => handleVerify(e)} className="space-y-4">
               <p className="text-sm text-slate-600">
                 {t.rich("codeSentTo", { phone: () => <LtrText className="font-medium">{phoneNumber}</LtrText> })}
               </p>

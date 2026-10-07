@@ -34,7 +34,7 @@ const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[] }[] = [
   { href: "/audit-log", key: "auditLog", roles: [OrgRole.OWNER] },
 ];
 
-/** Sidebar on the inline-start side (right in Arabic, left in English). */
+/** Sidebar on the inline-start side (the right, since the app is RTL). */
 export function Nav() {
   const pathname = usePathname();
   const { session } = useAuth();

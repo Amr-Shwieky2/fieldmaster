@@ -32,7 +32,7 @@ interface ActionTarget {
 
 type SuccessMessageKey = "approved" | "rejected" | "fullDayCreditApplied";
 
-/** Kept as data, not as a translated string, so it follows a language switch. */
+/** Kept as data and translated while rendering. */
 type Feedback =
   | { entryId: string; tone: "success"; messageKey: SuccessMessageKey; name: string }
   | { entryId: string; tone: "error"; error: unknown };

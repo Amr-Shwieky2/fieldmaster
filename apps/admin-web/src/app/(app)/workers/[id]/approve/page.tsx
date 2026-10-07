@@ -42,7 +42,7 @@ export default function ApproveWorkerPage() {
         baseHourlyRateAgorot: compensationType === "HOURLY" ? Math.round(Number(hourlyRate) * 100) : undefined,
         overtimeHourlyRateAgorot: Math.round(Number(overtimeRate) * 100),
         effectiveStartDate: new Date().toISOString().slice(0, 10),
-        // Reasons are stored as sent and shown later in the audit log, so they are sent in the user's language.
+        // Reasons are stored as sent and shown later in the audit log, so they are sent in Arabic.
         changeReason: t("approve.reasons.initialApproval"),
       }),
     onMutate: () => setFailure(null),
