@@ -1,5 +1,107 @@
 # FieldMaster — Implementation Status
 
+## Step 3 of 10 — mobile app in Arabic only + Arabic seed data (2026-10-09)
+
+Scope: `apps/mobile` and the seed data. PDF templates were not touched (later
+step).
+
+- **One shared i18n package**, `packages/i18n` (`@fieldmaster/i18n`), used by
+  both apps instead of copying. It holds:
+  - the shared Arabic messages: common/glossary, states, errors, enums, auth,
+    test-mode login;
+  - the formatter;
+  - the API error → Arabic mapping;
+  - enum labels;
+  - the translation-check library.
+
+  The admin web moved to it with no visible change except the requested
+  geofence wording. The notification renderer stays in the admin web,
+  because mobile has no notifications screen. The decision is in
+  `docs/technical-decisions.md`.
+- **Mobile is Arabic only and right-to-left:**
+  - there is no switcher and no English file;
+  - `src/i18n/messages/ar.json` (110 keys) plus the 295 shared keys, read
+    with use-intl;
+  - every screen and state was converted: login (test-mode banner,
+    quick-login list, OTP, organization choice), home, clock-in, clock-out,
+    history and offline queue, with loading, empty, error + retry, offline,
+    pending sync, and success / offline receipts.
+- **RTL in every environment:**
+  - Expo Go: `extra.forcesRTL`;
+  - development / production builds: the expo-localization plugin;
+  - web: `dir="rtl"` on `<html>` and the root view;
+  - a one-time reload safety net that cannot loop.
+
+  Only start/end styles are used (lint fails on left/right), the back arrow
+  is mirrored, and phone numbers and coordinates are isolated LTR. The
+  details of Expo Go vs. builds are in `docs/technical-decisions.md`.
+- **Font:** IBM Plex Sans Arabic, loaded before the first frame. Text is
+  large for workers (body 18, buttons 20, 56-point touch targets) with an
+  Arabic line height of 1.6×.
+- **Digits and time:** Western digits, Asia/Jerusalem, durations like
+  "1 س 30 د". The shared formatter does not rely on Hermes' Intl; it was
+  proven against Intl in tests.
+- **Geofence error:** "أنت خارج نطاق الموقع. المسافة: 184 م، المسموح: 100 م."
+  (same wording on the web).
+- **Checks:** mobile `pnpm lint` runs ESLint `i18next/no-literal-string`
+  (Text/TextInput must come from AppText/AppTextInput) and
+  `scripts/check-i18n.mjs`. The script checks for a single ar.json, no
+  English values, used keys that exist, every API error code translated,
+  the glossary, Hebrew/Arabic-Indic digits, and no left/right styles.
+- **Seed data in Arabic:**
+  - people, the organization, projects, clients, sites, shift titles, daily
+    summaries and reasons;
+  - phone numbers, amounts, coordinates and every business rule are
+    unchanged;
+  - `docs/seed-accounts.md` was updated.
+
+  No test depended on the old names: the API and admin-web tests use their
+  own fixtures.
+- **Found and handed off as a separate task (not fixed here):** the API
+  marks an OTP code as used before the organization is chosen, so a user in
+  two organizations cannot finish OTP sign-in
+  (`apps/api/src/modules/auth/auth.service.ts`).
+
+**Checked:**
+- **Web target** (375×812, every screen, real API):
+  - login: test-mode banner and quick login, empty-field message, code step
+    with the LTR phone number, sign-in;
+  - home: no active shift, active shift, a clock-out pending sync, the error
+    + retry state;
+  - clock-in: the geofence error from the real server ("المسافة: 1996 م،
+    المسموح: 150 م"), then the success receipt;
+  - clock-out: summary required, offline receipt;
+  - offline queue: pending, then accepted after "مزامنة الآن";
+  - history.
+
+  Everything was right-aligned, with Western digits and no English UI text
+  (only the brand name).
+- **Native bundles:** `expo export` built the Android and iOS bundles to
+  Hermes bytecode.
+- **Not run on a phone, emulator or simulator:** this machine has no Xcode
+  and no Android SDK. The Expo Go steps are in the README.
+
+**Tests** (runtime counts):
+
+| | Before Step 3 (249ea81) | After |
+|---|---|---|
+| shared-validation | 35 | 35 |
+| @fieldmaster/i18n (new) | — | 69 |
+| admin-web | 227 | 172 |
+| API unit | 25 | 25 |
+| mobile | 0 | 131 |
+| API e2e | 39 | 39 |
+| **Total** | **326** | **471** |
+
+Admin-web went down by 58 because its format, error, enum and check-library
+tests moved with the code into `@fieldmaster/i18n`; none were deleted. The
+package added 11 more, and admin-web gained 3 (its own messages file).
+
+`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 432 · `pnpm test:e2e` ✅ 39 ·
+`pnpm build` ✅ · `expo export` (Android + iOS) ✅
+
+---
+
 ## Admin web is Arabic only (2026-10-07, after Step 2)
 
 At the product owner's request, English was removed from the admin web. It now

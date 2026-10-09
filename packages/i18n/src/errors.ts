@@ -12,11 +12,11 @@ import { ApiRequestError, NetworkError } from "@fieldmaster/api-client";
  * the API has an error code without an `errors.<CODE>` translation, so that
  * fallback is only a safety net.
  *
- *   const errorMessage = useErrorMessage();
- *   <ErrorState message={errorMessage(error)} />
+ * Shared by the admin web and the mobile app (`@fieldmaster/i18n`); each app
+ * passes its own translator for the `errors` namespace.
  */
 
-/** The slice of a next-intl translator this module needs (namespace "errors"). */
+/** The slice of a next-intl / use-intl translator this module needs (namespace "errors"). */
 export interface ErrorTranslator {
   (key: string, values?: Record<string, string>): string;
   has(key: string): boolean;
@@ -45,8 +45,11 @@ function asApiRequestError(error: unknown): ApiRequestError | null {
   return null;
 }
 
+/** The server was never reached: the api-client's NetworkError, or a raw fetch failure (browser "Failed to fetch", React Native "Network request failed"). */
 export function isNetworkError(error: unknown): boolean {
-  return error instanceof NetworkError || (error instanceof TypeError && /fetch/i.test(error.message));
+  if (error instanceof NetworkError) return true;
+  if (error instanceof Error && error.name === "NetworkError") return true;
+  return error instanceof TypeError && /fetch|network request failed/i.test(error.message);
 }
 
 /** The server's stable error code (e.g. `"OTP_INVALID_OR_EXPIRED"`), if the error came from the API. */
@@ -76,6 +79,19 @@ function detailValues(code: string, details: unknown): Record<string, string> | 
     values[param] = String(Math.round(raw));
   }
   return values;
+}
+
+/**
+ * Arabic message for an API error code on its own (for example the reason the
+ * server gives for a rejected offline event), with `details` filled in when
+ * the message needs them. Null when there is no translation for the code.
+ */
+export function getCodeMessage(t: ErrorTranslator, code: string, details?: unknown): string | null {
+  if (!t.has(code)) return null;
+  const values = detailValues(code, details);
+  if (values) return t(code, values);
+  const fallbackKey = `${code}_NO_DETAILS`;
+  return t.has(fallbackKey) ? t(fallbackKey) : null;
 }
 
 /** The code the API's exception filter uses for errors that have no domain code. */
@@ -117,11 +133,9 @@ export function getErrorMessage(t: ErrorTranslator, error: unknown): string {
     const statusKey = keyForStatus(apiError.status);
     if (statusKey && t.has(statusKey)) return t(statusKey);
   }
-  if (code && t.has(code)) {
-    const values = detailValues(code, apiError.body.details);
-    if (values) return t(code, values);
-    const fallbackKey = `${code}_NO_DETAILS`;
-    if (t.has(fallbackKey)) return t(fallbackKey);
+  if (code) {
+    const message = getCodeMessage(t, code, apiError.body.details);
+    if (message) return message;
   }
 
   const statusKey = keyForStatus(apiError.status);

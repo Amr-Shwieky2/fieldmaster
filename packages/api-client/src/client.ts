@@ -187,8 +187,11 @@ export class FieldMasterClient {
   }
 
   // ── Clock events ────────────────────────────────────────────────────
+  /** The API answers with the new time entry and the clock event that opened it. */
   clockIn(input: Record<string, unknown>, idempotencyKey: string) {
-    return this.request<TimeEntry>("POST", "/clock-events/clock-in", input, { "Idempotency-Key": idempotencyKey });
+    return this.request<{ timeEntry: TimeEntry; clockEvent: { id: string; eventType: string } }>("POST", "/clock-events/clock-in", input, {
+      "Idempotency-Key": idempotencyKey,
+    });
   }
   clockOut(input: Record<string, unknown>, idempotencyKey: string) {
     return this.request<TimeEntry>("POST", "/clock-events/clock-out", input, { "Idempotency-Key": idempotencyKey });

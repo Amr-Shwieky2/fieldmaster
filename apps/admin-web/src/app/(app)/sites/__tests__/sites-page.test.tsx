@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ApiRequestError, type Project, type Site } from "@fieldmaster/api-client";
-import ar from "@/i18n/messages/ar.json";
+import ar from "@/i18n/messages";
 import { renderWithIntl } from "@/test/render-with-intl";
 import SitesPage from "../page";
 

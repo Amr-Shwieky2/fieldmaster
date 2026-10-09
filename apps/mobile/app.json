@@ -11,8 +11,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.fieldmaster.mobile",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "FieldMaster needs your location to verify you're at the job site when you clock in or out.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "FieldMaster needs your location to verify you're at the job site when you clock in or out."
+        "NSLocationWhenInUseUsageDescription": "يحتاج FieldMaster إلى موقعك للتأكد من أنك في موقع العمل عند بدء الدوام وإنهائه.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "يحتاج FieldMaster إلى موقعك للتأكد من أنك في موقع العمل عند بدء الدوام وإنهائه."
       }
     },
     "android": {
@@ -24,19 +24,38 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "lang": "ar"
     },
     "plugins": [
       "expo-secure-store",
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "FieldMaster needs your location to verify you're at the job site when you clock in or out."
+          "locationWhenInUsePermission": "يحتاج FieldMaster إلى موقعك للتأكد من أنك في موقع العمل عند بدء الدوام وإنهائه."
         }
-      ]
-    ]
+      ],
+      [
+        "expo-localization",
+        {
+          "supportsRTL": true,
+          "forcesRTL": true,
+          "supportedLocales": [
+            "ar"
+          ]
+        }
+      ],
+      "expo-splash-screen"
+    ],
+    "extra": {
+      "supportsRTL": true,
+      "forcesRTL": true
+    }
   }
 }

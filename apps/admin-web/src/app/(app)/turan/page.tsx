@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { TuranType } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
-import { getErrorCode } from "@/lib/errors";
+import { getErrorCode } from "@fieldmaster/i18n";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useFormat } from "@/lib/use-format";
 import { useEnumLabel } from "@/i18n/enums";

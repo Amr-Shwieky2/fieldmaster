@@ -2,8 +2,8 @@ import type { ReactElement, ReactNode } from "react";
 import { render, renderHook, type RenderHookResult, type RenderResult } from "@testing-library/react";
 import { NextIntlClientProvider, type AbstractIntlMessages } from "next-intl";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { APP_DIRECTION, APP_LOCALE, BUSINESS_TIME_ZONE, INTL_LOCALE } from "@/i18n/config";
-import ar from "@/i18n/messages/ar.json";
+import { APP_DIRECTION, APP_LOCALE, BUSINESS_TIME_ZONE, INTL_LOCALE } from "@fieldmaster/i18n";
+import ar from "@/i18n/messages";
 
 /**
  * Test helpers for components that use next-intl (the app is Arabic only).

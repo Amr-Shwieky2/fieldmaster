@@ -2,39 +2,46 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  SHARED_GLOSSARY,
   apiErrorCodes,
+  apiErrorCodesFromDir,
   arabicOnlyProblems,
   emptyValueProblems,
   flatten,
   glossaryProblems,
+  mergeTrees,
+  messageFileProblems,
+  overlapProblems,
   physicalClassProblems,
+  physicalStyleProblems,
   scriptProblems,
   untranslatedErrorCodes,
   usedKeys,
   visibleText,
-} from "../lib/i18n-check.mjs";
+} from "../i18n-check.mjs";
 
-// Vitest runs with apps/admin-web as the working directory.
-const messagesDir = join(process.cwd(), "src/i18n/messages");
+// Vitest runs with packages/i18n as the working directory.
+const messagesDir = join(process.cwd(), "src/messages");
 const load = () => JSON.parse(readFileSync(join(messagesDir, "ar.json"), "utf8"));
 
-describe("the real translation file", () => {
+describe("the real shared translation file", () => {
   const ar = flatten(load());
 
-  it("is the only messages file (the app is Arabic only)", () => {
+  it("is the only messages file (the apps are Arabic only)", () => {
     expect(readdirSync(messagesDir)).toEqual(["ar.json"]);
+    expect(messageFileProblems(messagesDir)).toEqual([]);
   });
 
   it("has no empty values and reads in Arabic everywhere", () => {
-    expect([...emptyValueProblems(ar), ...arabicOnlyProblems(ar)]).toEqual([]);
+    expect([...emptyValueProblems(ar), ...arabicOnlyProblems(ar, new Set())]).toEqual([]);
   });
 
   it("contains no Hebrew and no Arabic-Indic digits", () => {
     expect(scriptProblems(ar)).toEqual([]);
   });
 
-  it("uses the mandatory Arabic glossary exactly", () => {
-    expect(glossaryProblems(ar)).toEqual([]);
+  it("uses the shared part of the mandatory Arabic glossary exactly", () => {
+    expect(glossaryProblems(ar, SHARED_GLOSSARY)).toEqual([]);
   });
 });
 
@@ -85,7 +92,7 @@ describe("API error codes", () => {
   });
 
   it("finds every code the real API sends translated in ar.json", () => {
-    const apiDir = join(process.cwd(), "../api/src");
+    const apiDir = join(process.cwd(), "../../apps/api/src");
     const files = [];
     const walk = (dir) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -103,7 +110,7 @@ describe("API error codes", () => {
 
 describe("glossary, script and RTL checks", () => {
   it("flags a glossary term that drifted", () => {
-    expect(glossaryProblems({ ...flatten(load()), "enums.OrgRole.OWNER": "صاحب العمل" })).toEqual([
+    expect(glossaryProblems({ ...flatten(load()), "enums.OrgRole.OWNER": "صاحب العمل" }, SHARED_GLOSSARY)).toEqual([
       'enums.OrgRole.OWNER: must be exactly "المالك" (glossary), found "صاحب العمل"',
     ]);
   });
@@ -134,5 +141,46 @@ describe("usedKeys", () => {
       't("title"); tc("save"); t.rich("intro", {}); t(`status.${s}`);',
     ].join("\n");
     expect(usedKeys(source).map((k) => `${k.key}${k.prefix ? "*" : ""}`)).toEqual(["workers.title", "workers.intro", "workers.status*", "common.save"]);
+  });
+});
+
+describe("shared + app messages", () => {
+  it("flags an app key that redefines a shared one, and merges the rest", () => {
+    const shared = { auth: { phoneLabel: "رقم الهاتف" } };
+    const app = { auth: { subtitle: "تسجيل دخول العامل", phoneLabel: "الهاتف" } };
+    expect(overlapProblems(flatten(shared), flatten(app), "mobile app")).toEqual([
+      "auth.phoneLabel: defined in both @fieldmaster/i18n and the mobile app's ar.json -- keep it in one place",
+    ]);
+    expect(mergeTrees(shared, { auth: { subtitle: "تسجيل دخول العامل" } })).toEqual({ auth: { phoneLabel: "رقم الهاتف", subtitle: "تسجيل دخول العامل" } });
+  });
+
+  it("reads the API error codes from the API source directory", () => {
+    expect(apiErrorCodesFromDir(join(process.cwd(), "../../apps/api/src"))).toEqual(expect.arrayContaining(["GEOFENCE_OUTSIDE_ALLOWED_RADIUS", "NOT_FOUND"]));
+  });
+});
+
+describe("physicalStyleProblems (React Native)", () => {
+  it("flags left/right styles that do not flip in RTL, and accepts start/end", () => {
+    const source = [
+      "const styles = StyleSheet.create({",
+      "  a: { marginLeft: 4, paddingRight: 2 },",
+      "  b: { position: 'absolute', left: 0, top: 0 },",
+      "  c: { textAlign: \"left\" },",
+      "  d: { marginStart: 4, paddingEnd: 2, start: 0, textAlign: \"center\" },",
+      "  e: { borderTopLeftRadius: 4, borderRightWidth: 1 },",
+      "  f: { right: 8 }, // rtl-ok (genuinely physical)",
+      "  g: { writingDirection: \"ltr\" },",
+      "});",
+      "const left = 3; // a variable, not a style",
+    ].join("\n");
+    expect(physicalStyleProblems(source)).toEqual([
+      { line: 2, style: "marginLeft" },
+      { line: 2, style: "paddingRight" },
+      { line: 3, style: "left" },
+      { line: 4, style: 'textAlign: "left"' },
+      { line: 6, style: "borderTopLeftRadius" },
+      { line: 6, style: "borderRightWidth" },
+      { line: 8, style: 'writingDirection: "ltr"' },
+    ]);
   });
 });

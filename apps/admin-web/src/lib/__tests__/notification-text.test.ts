@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createTranslator } from "next-intl";
 import { NotificationType } from "@fieldmaster/shared-types";
-import { createFormatter } from "@/lib/format";
-import { INTL_LOCALE } from "@/i18n/config";
-import ar from "@/i18n/messages/ar.json";
+import { createFormatter } from "@fieldmaster/i18n";
+import { INTL_LOCALE } from "@fieldmaster/i18n";
+import ar from "@/i18n/messages";
 import { RENDERED_NOTIFICATION_TYPES, renderNotificationText, type NotificationTranslator } from "../notification-text";
 
 const MESSAGES: Record<string, unknown> = ar.notifications;
