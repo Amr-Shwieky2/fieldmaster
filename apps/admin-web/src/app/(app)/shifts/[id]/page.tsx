@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useAuth } from "@/lib/auth-context";
-import { getErrorCode } from "@/lib/errors";
+import { getErrorCode } from "@fieldmaster/i18n";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useEnumLabel } from "@/i18n/enums";
 import { useShiftTitle } from "@/lib/shift-title";

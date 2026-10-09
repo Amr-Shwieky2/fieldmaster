@@ -652,3 +652,116 @@ should work **only in Arabic**. English was removed rather than hidden:
     data, not interface text.
   - Native `date`/`datetime-local` pickers use the browser's own language
     and cannot be forced to Arabic without a custom picker.
+
+## Step 3: one shared i18n package (`@fieldmaster/i18n`) for the admin web and the mobile app
+
+Step 3 makes the mobile app Arabic only too. Copying the admin web's
+translations and helpers would have meant two error-code maps, two glossaries
+and two formatters drifting apart, so the parts both apps need moved to
+`packages/i18n`:
+
+- **Messages:** `src/messages/ar.json` holds:
+  - `common` (including the glossary terms), `states` and `units`;
+  - `errors`, with one message per API error code;
+  - `enums`, with a label for every shared-types enum value;
+  - `auth` (the login form) and `devLogin` (test-mode banner and quick login).
+
+  Each app keeps only its own screens' text in its own
+  `src/i18n/messages/ar.json` and deep-merges it with `mergeMessages`. The
+  apps' checks fail if an app redefines a shared key, so a wording change is
+  made once.
+- **Code (pure TypeScript, no React):**
+  - formatting (`format.ts`);
+  - API error → Arabic message (`getErrorMessage`, plus `getCodeMessage` for
+    a bare code such as an offline-sync rejection reason);
+  - enum labels (`getEnumLabel`) and the emergency placeholder title;
+  - the locale constants.
+
+  Each app wraps these in small hooks bound to its own translator: next-intl
+  on the web; use-intl, next-intl's core and the same ICU message format, on
+  mobile.
+- **Checks:**
+  - `scripts/i18n-check.mjs` is the checker library both apps' `lint`
+    scripts use. It adds a React Native style check, `physicalStyleProblems`,
+    next to the Tailwind class check.
+  - The package's own `lint` checks the shared file: Arabic only, glossary,
+    and every API error code translated.
+- **Formatting is now engine-independent.** The admin web formatted with
+  `Intl` in `ar-u-nu-latn`. That is not safe on Hermes, whose locale data and
+  numbering-system support differ between iOS and Android. The shared
+  formatter never asks `Intl` for Arabic text:
+  - month names come from a fixed table;
+  - `Intl` is only used, in `en-US`, to read the Asia/Jerusalem date/time
+    parts;
+  - that use is self-checked once against two known instants, and an engine
+    that fails falls back to Israel's DST rules computed in code (a unit test
+    proves the rules match `Intl` for every hour of 2024-2030);
+  - any Arabic-Indic digit is converted to 0-9 as a last safety net.
+
+  The admin web's output is unchanged (same strings in its tests).
+- **One wording change:** the geofence error now reads "أنت خارج نطاق
+  الموقع. المسافة: 184 م، المسموح: 100 م." in both apps, the format the
+  product owner asked for.
+- **Not shared (yet):** the notification renderer stays in the admin web,
+  because the mobile app has no notifications screen. It can move to the
+  package when one is added.
+- **Package shape:** like `@fieldmaster/api-client`, the package exports its
+  TypeScript source, so there is no build step:
+  - Next.js compiles it via `transpilePackages`;
+  - Metro, Vitest and Jest compile it directly.
+
+## Step 3: RTL on mobile (Expo SDK 57): Expo Go vs development/production builds vs web
+
+The mobile app is Arabic only and always right-to-left. React Native can only
+switch layout direction when the app starts, and the three places the app runs
+do it differently. Each setting below exists for one of them.
+
+| Where | What makes it RTL | When it applies |
+|---|---|---|
+| **Expo Go** (your phone, `pnpm --filter @fieldmaster/mobile start`) | `app.json` → `expo.extra.supportsRTL` + `expo.extra.forcesRTL` | Expo Go reads these from the project manifest every time the project opens and sets RTL before React starts. JS `I18nManager.forceRTL()` does not work there; Expo Go overwrites it on the next load. |
+| **Development build / production (EAS Build, `expo prebuild`)** | `app.json` → `plugins: [["expo-localization", { "supportsRTL": true, "forcesRTL": true, "supportedLocales": ["ar"] }]]` | Written into the native project at build time (iOS Info.plist, Android strings.xml; the Android manifest already has `supportsRtl="true"`). The expo-localization native module forces RTL before React loads. Needs a native rebuild after changing it. |
+| **Web** (`expo start --web`) | `public/index.html` (`<html dir="rtl">`), `web.lang: "ar"`, and `src/components/RtlRoot.web.tsx` (root `<View dir="rtl" lang="ar">`) | react-native-web ignores I18nManager. Start/end styles are mirrored only inside an RTL locale context, which the root view provides. |
+
+- **Both keys are set** (`extra` and the plugin options): Expo Go SDK 57 reads
+  only `extra`, while builds read the plugin options.
+- **One-time safety net** (`src/lib/rtl.ts`, `ensureRtl`): if a native build
+  ever starts left-to-right (for example the plugin was added without a
+  rebuild), it calls `allowRTL(true)` + `forceRTL(true)` and reloads once with
+  `reloadAppAsync` from `expo`. A stored flag prevents a reload loop.
+  - It never reloads in Expo Go (it would never stick) or on the web (where
+    `I18nManager.isRTL` is undefined).
+  - `Updates.reloadAsync` is not used: it rejects in development and Expo Go.
+  - `DevSettings.reload` is not used: it does nothing in production.
+  - The splash screen stays up until RTL is confirmed and the Arabic font is
+    loaded, so the first frame is already Arabic and right-to-left.
+- **Styles work the same in all three, even if RTL were off.** Only
+  start/end properties are used (`marginStart/End`, `paddingStart/End`,
+  `start/end`, `flexDirection: "row"`, which runs right-to-left under RTL).
+  `scripts/check-i18n.mjs` fails `pnpm lint` on any `marginLeft`,
+  `paddingRight`, `left:`/`right:`, `borderLeft*` or `textAlign: "left"`.
+  - Native RN would flip physical left/right too, but react-native-web does
+    not, so they are banned.
+  - Text alignment is set once in `AppText`: `textAlign: "left"` on native,
+    which iOS and Android turn into the start (right) edge under RTL. It is
+    left unset on web, where the default is `start`.
+- **Mirroring:** native RTL never mirrors drawings or transforms. The back
+  chevron (`ChevronIcon`) is drawn pointing left and mirrored with
+  `scaleX: -1` in RTL. Arrows such as "→" between times were replaced with
+  Arabic words ("من 07:00 إلى 15:00").
+- **Bidi:** phone numbers, coordinates and codes are wrapped in left-to-right
+  isolates (`LtrText`), so "+972…" never becomes "…972+". Times and money
+  keep their order on their own.
+- **React Navigation** gets `direction="rtl"` and an Arabic-font theme
+  explicitly, because on web it would read LTR from react-native-web.
+- **Font:** IBM Plex Sans Arabic (`@expo-google-fonts/ibm-plex-sans-arabic`)
+  is loaded at runtime with `useFonts`, so it also works in Expo Go; the
+  expo-font build plugin does not. Details:
+  - Only the 400/600/700 weights are bundled, and there is one family per
+    weight. `fontWeight` is never used: Android would fall back to the system
+    font for bold.
+  - Line height is 1.6× the font size, so Arabic letters are not clipped on
+    Android.
+- **Digits and plurals on Hermes:** Hermes has no `Intl.PluralRules`; it is
+  polyfilled with `@formatjs/intl-pluralrules`, Arabic only. Hermes ignores
+  `-u-nu-latn` on iOS, so numbers, dates and money come from the shared
+  engine-independent formatter in `@fieldmaster/i18n`, not from `Intl`.

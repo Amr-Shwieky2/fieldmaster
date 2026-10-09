@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { DevLoginUser } from "@fieldmaster/api-client";
 import { AuthProvider } from "@/lib/auth-context";
 import { createIntlWrapper } from "@/test/render-with-intl";
-import ar from "@/i18n/messages/ar.json";
+import ar from "@/i18n/messages";
 import { sessionStore } from "@/lib/session-store";
 import LoginPage from "../page";
 

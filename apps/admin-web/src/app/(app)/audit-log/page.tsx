@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { CorrectionReason } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
 import { useErrorMessage } from "@/lib/use-error-message";
-import { EM_DASH } from "@/lib/format";
+import { EM_DASH } from "@fieldmaster/i18n";
 import { useEnumLabel } from "@/i18n/enums";
 import { OwnerOnly } from "@/components/owner-only";
 import { PageHeader } from "@/components/page-header";

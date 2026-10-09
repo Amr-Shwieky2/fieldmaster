@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { currentYearMonth } from "@/lib/business-date";
 import { useErrorMessage } from "@/lib/use-error-message";
-import { EM_DASH } from "@/lib/format";
+import { EM_DASH } from "@fieldmaster/i18n";
 import { useFormat } from "@/lib/use-format";
 import { PageHeader } from "@/components/page-header";
 import { DateTimeText, LtrText } from "@/components/formatted";

@@ -209,7 +209,7 @@ describe("Attendance approval page", () => {
     const card = within(cardOf("Eli Ramzani"));
     fireEvent.click(card.getByRole("button", { name: "موافقة" }));
 
-    const alert = await card.findByText("يتعارض هذا الإجراء مع الحالة الحالية للسجل. حدّث الصفحة وحاول مرة أخرى.");
+    const alert = await card.findByText("لا يمكن تنفيذ هذا الإجراء الآن لأن البيانات تغيّرت. حدّث البيانات وحاول مرة أخرى.");
     expect(alert.getAttribute("role")).toBe("alert");
     expect(screen.queryByText("Time entry is locked by another process.")).toBeNull();
     expect(screen.queryByText(/SOME_FUTURE_CODE/)).toBeNull();

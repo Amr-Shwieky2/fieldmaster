@@ -1,10 +1,14 @@
 # Seed accounts and how to log in
 
 `pnpm db:seed` wipes the development database and recreates one fictional
-organization, **FieldMaster Demo Co.**, with the 16 accounts below. Re-run it
-any time an account ends up in an odd state from manual testing.
+organization, **شركة الميدان للمقاولات وأعمال الطرق**, with the 16 accounts
+below. Re-run it any time an account ends up in an odd state from manual
+testing.
 
-All data is fictional. The phone numbers are not real subscribers.
+All data is fictional. The phone numbers are not real subscribers. Names,
+projects, sites, shift titles and other human-readable seed text are in Arabic
+to match the Arabic-only UI; project codes, enum values and notification
+title/body text stay in English.
 
 ## Accounts
 
@@ -12,32 +16,32 @@ All data is fictional. The phone numbers are not real subscribers.
 
 | Name | Phone |
 |---|---|
-| Dana Owner-Levi | `+972500000001` |
-| Amit Owner-Katz | `+972500000002` |
+| سلمى منصور | `+972500000001` |
+| إلياس رمضان | `+972500000002` |
 
 ### Field Managers (operations only — every financial route returns 403)
 
 | Name | Phone | Notes |
 |---|---|---|
-| Yossi Manager-Ben David | `+972500000011` | Also time-trackable (has a worker profile, can clock in) |
-| Noa Manager-Peretz | `+972500000012` | |
+| يوسف الخطيب | `+972500000011` | Also time-trackable (has a worker profile, can clock in) |
+| رنا عودة | `+972500000012` | |
 
 ### Workers (mobile app: clock in/out, own shifts and history)
 
 | Name | Phone | Pay | Notable seed data |
 |---|---|---|---|
-| Eli Ramzani | `+972500010001` | Hourly | Day Turan assignment |
-| Moshe Traffic | `+972500010002` | Daily | Night Turan assignment + a completed emergency call-out |
-| Avi Signman | `+972500010003` | Daily | Backup on the Night Turan |
-| Ronen Lightfix | `+972500010004` | Hourly | Temporary Supervisor (opened an expired temporary check-in point) |
-| Gil Construct | `+972500010005` | Daily | |
-| Tal Roadcrew | `+972500010006` | Daily | |
-| Omer Signal | `+972500010007` | Hourly | Short day credited as a full day |
-| Yair Concrete | `+972500010008` | Daily | A time entry pending approval |
-| Boaz Asphalt | `+972500010009` | Daily | A rejected time entry |
-| Nir Barrier | `+972500010010` | Hourly | Three forgotten-stamp infractions (the third deducts ₪10) |
-| Doron Cable | `+972500010011` | Daily | Included in the finalized payroll period |
-| Ido Cone | `+972500010012` | Daily | |
+| خالد ناصر | `+972500010001` | Hourly | Day Turan assignment |
+| محمود جبارين | `+972500010002` | Daily | Night Turan assignment + a completed emergency call-out |
+| أنس دراوشة | `+972500010003` | Daily | Backup on the Night Turan |
+| باسل عازر | `+972500010004` | Hourly | Temporary Supervisor (opened an expired temporary check-in point) |
+| كريم حمدان | `+972500010005` | Daily | |
+| وسيم عيسى | `+972500010006` | Daily | |
+| فادي النجار | `+972500010007` | Hourly | Short day credited as a full day |
+| مهند صالح | `+972500010008` | Daily | A time entry pending approval |
+| زياد يونس | `+972500010009` | Daily | A rejected time entry |
+| نادر مصالحة | `+972500010010` | Hourly | Three forgotten-stamp infractions (the third deducts ₪10) |
+| رامي طه | `+972500010011` | Daily | Included in the finalized payroll period |
+| إياد سعدي | `+972500010012` | Daily | |
 
 Hourly workers are seeded at ₪55/hour, daily workers at ₪450/day.
 

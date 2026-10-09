@@ -14,9 +14,18 @@ pnpm --filter @fieldmaster/api test:e2e   # integration tests against a real dat
 - `packages/shared-validation` — 35 pure-function unit tests (Jest)
 - `apps/api` — 25 unit tests (Jest: RBAC, location validation, app
   environment, notification money stripping)
-- `apps/admin-web` — 227 tests (Vitest + React Testing Library), all in
-  Arabic: every page, formatting, error mapping, notification text, the
-  translation check script, and the financial-isolation guards
+- `packages/i18n` — 69 tests (Vitest): the shared Arabic formatter (including a
+  check that its built-in Israel time-zone rules match Intl for every hour of
+  2024-2030), error-code mapping, enum labels, ICU validity of the shared
+  messages and the translation-check library
+- `apps/admin-web` — 172 tests (Vitest + React Testing Library), all in
+  Arabic: every page, notification text, the admin messages and the
+  financial-isolation guards
+- `apps/mobile` — 131 tests (Jest + jest-expo + React Native Testing Library),
+  all in Arabic: every screen and state (login with test mode, home, clock-in
+  and clock-out with success / offline receipts and the geofence error with
+  numbers, history, offline queue), the RTL bootstrap and the mirrored back
+  arrow
 
 `apps/api`'s `test:e2e` (not part of `pnpm test` — it's slower and needs a
 live database) runs 39 integration tests (Jest + Supertest) against a real
@@ -63,7 +72,7 @@ Against a real running NestJS app + Postgres, covering (see
   attendance record; unregistered-device rejection; duplicate-submission
   detection; Owner-revoked-key rejection
 
-### Admin web (`apps/admin-web`, 227 tests)
+### Admin web (`apps/admin-web`, 172 tests)
 
 The app is Arabic only, so every test renders the real `ar.json`
 (`src/test/render-with-intl.tsx`). Each page has tests for its content,

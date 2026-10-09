@@ -3,17 +3,23 @@
   "version": "0.1.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo-google-fonts/ibm-plex-sans-arabic": "^0.4.2",
     "@fieldmaster/api-client": "workspace:*",
+    "@fieldmaster/i18n": "workspace:*",
     "@fieldmaster/shared-types": "workspace:*",
     "@fieldmaster/shared-validation": "workspace:*",
+    "@formatjs/intl-pluralrules": "^6.3.15",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "^12.0.1",
     "@react-navigation/native": "^7.3.14",
     "@react-navigation/native-stack": "^7.18.6",
     "expo": "~57.0.9",
     "expo-crypto": "~57.0.1",
+    "expo-font": "~57.0.4",
+    "expo-localization": "~57.0.2",
     "expo-location": "~57.0.7",
     "expo-secure-store": "~57.0.1",
+    "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -21,12 +27,20 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-web": "~0.21.1",
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "^1.0.3",
+    "use-intl": "4.14.9"
   },
   "devDependencies": {
     "@fieldmaster/eslint-config": "workspace:*",
+    "@react-native/jest-preset": "0.86.2",
+    "@testing-library/react-native": "^14.0.1",
+    "@types/jest": "29.5.14",
     "@types/react": "~19.2.2",
     "eslint": "^9.17.0",
+    "eslint-plugin-i18next": "^6.1.5",
+    "jest": "~29.7.0",
+    "jest-expo": "57.0.4",
+    "test-renderer": "~1.2.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -34,8 +48,10 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "eslint \"src/**/*.{ts,tsx}\" App.tsx",
-    "typecheck": "tsc --noEmit"
+    "lint": "eslint \"src/**/*.{ts,tsx}\" App.tsx && node scripts/check-i18n.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "i18n:check": "node scripts/check-i18n.mjs"
   },
   "private": true
 }

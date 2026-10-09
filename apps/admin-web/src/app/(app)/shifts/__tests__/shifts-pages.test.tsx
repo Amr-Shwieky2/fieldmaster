@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ApiRequestError, type Project, type Shift, type Site, type Worker } from "@fieldmaster/api-client";
 import { AccountStatus, CheckInMethod, OrgRole, ShiftStatus, ShiftType } from "@fieldmaster/shared-types";
-import ar from "@/i18n/messages/ar.json";
+import ar from "@/i18n/messages";
 import { renderWithIntl } from "@/test/render-with-intl";
 import ShiftsPage from "../page";
 import ShiftDetailPage from "../[id]/page";

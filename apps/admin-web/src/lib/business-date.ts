@@ -1,4 +1,4 @@
-import { BUSINESS_TIME_ZONE } from "@/i18n/config";
+import { BUSINESS_TIME_ZONE } from "@fieldmaster/i18n";
 
 export function currentYearMonth(): string {
   // "en-CA" only builds the machine string YYYY-MM from ISO-ordered parts; it is never shown.

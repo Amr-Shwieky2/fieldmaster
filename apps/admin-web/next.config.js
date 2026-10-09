@@ -6,7 +6,7 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["@fieldmaster/api-client", "@fieldmaster/shared-types"],
+  transpilePackages: ["@fieldmaster/api-client", "@fieldmaster/i18n", "@fieldmaster/shared-types"],
   reactStrictMode: true,
 };
 

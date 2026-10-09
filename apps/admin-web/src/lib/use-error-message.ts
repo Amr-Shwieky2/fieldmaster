@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { getErrorMessage } from "./errors";
+import { getErrorMessage } from "@fieldmaster/i18n";
 
 /** `(error) => Arabic message` (see `getErrorMessage`). */
 export function useErrorMessage(): (error: unknown) => string {

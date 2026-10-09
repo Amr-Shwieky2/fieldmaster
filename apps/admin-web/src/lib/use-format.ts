@@ -1,4 +1,4 @@
-import { createFormatter, type Formatter } from "./format";
+import { createFormatter, type Formatter } from "@fieldmaster/i18n";
 
 const FORMATTER = createFormatter();
 

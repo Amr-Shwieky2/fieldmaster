@@ -8,7 +8,7 @@ import { useTranslations } from "next-intl";
 import type { Worker } from "@fieldmaster/api-client";
 import { AccountStatus, CompensationType } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
-import { isNotFound } from "@/lib/errors";
+import { isNotFound } from "@fieldmaster/i18n";
 import { useEnumLabel } from "@/i18n/enums";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";

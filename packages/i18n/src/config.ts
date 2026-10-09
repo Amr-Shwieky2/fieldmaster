@@ -1,17 +1,15 @@
 /**
- * Locale configuration shared by the server (request config, root layout) and
- * the client (formatters).
+ * Locale configuration shared by the admin web and the mobile app.
  *
- * The admin web is Arabic only. There is no language choice, no locale cookie
- * and no URL prefix: every page is rendered right-to-left in Arabic. English
- * was removed at the product owner's request (2026-10-07). There is
- * intentionally no Hebrew either.
+ * Both apps are Arabic only: no language choice, no locale cookie and no URL
+ * prefix; every screen is right-to-left Arabic. English was removed at the
+ * product owner's request (2026-10-07). There is intentionally no Hebrew.
  */
 
-/** The only UI language (`<html lang>`). */
+/** The only UI language (`<html lang>` on the web). */
 export const APP_LOCALE = "ar";
 
-/** Text direction of the whole app (`<html dir>`). */
+/** Text direction of both apps (`<html dir>` on the web, forced RTL on mobile). */
 export const APP_DIRECTION = "rtl";
 
 /**
