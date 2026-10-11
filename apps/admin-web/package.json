@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@fieldmaster/api-client": "workspace:*",
+    "@fieldmaster/i18n": "workspace:*",
     "@fieldmaster/shared-types": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "clsx": "^2.1.1",

@@ -1,0 +1,28 @@
+{
+  "name": "@fieldmaster/i18n",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Arabic UI text and formatting shared by the admin web and the mobile app.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./messages/ar.json": "./src/messages/ar.json",
+    "./check": "./scripts/i18n-check.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "node scripts/check-shared.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fieldmaster/api-client": "workspace:*",
+    "@fieldmaster/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@fieldmaster/typescript-config": "workspace:*",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8",
+    "use-intl": "4.14.9"
+  }
+}

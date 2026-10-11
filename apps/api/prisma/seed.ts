@@ -115,7 +115,7 @@ async function main() {
   `);
 
   console.log("Creating organization...");
-  const org = await prisma.organization.create({ data: { id: id(), name: "FieldMaster Demo Co." } });
+  const org = await prisma.organization.create({ data: { id: id(), name: "شركة الميدان للمقاولات وأعمال الطرق" } });
   await prisma.organizationSettings.create({ data: { id: id(), organizationId: org.id } });
 
   // ── Users & memberships ──────────────────────────────────────────────
@@ -132,23 +132,24 @@ async function main() {
   }
 
   console.log("Creating Owners and Field Managers...");
-  const owner1User = await createUser("+972500000001", "Dana Owner-Levi", "Dana");
+  const owner1User = await createUser("+972500000001", "سلمى منصور", "سلمى");
   const owner1Membership = await createMembership(owner1User.id, OrgRole.OWNER, false);
-  const owner2User = await createUser("+972500000002", "Amit Owner-Katz", "Amit");
+  const owner2User = await createUser("+972500000002", "إلياس رمضان", "إلياس");
   const owner2Membership = await createMembership(owner2User.id, OrgRole.OWNER, false);
 
-  const fm1User = await createUser("+972500000011", "Yossi Manager-Ben David", "Yossi");
+  const fm1User = await createUser("+972500000011", "يوسف الخطيب", "يوسف");
   const fm1Membership = await createMembership(fm1User.id, OrgRole.FIELD_MANAGER, true);
   const fm1WorkerProfile = await prisma.workerProfile.create({ data: { id: id(), membershipId: fm1Membership.id, organizationId: org.id } });
 
-  const fm2User = await createUser("+972500000012", "Noa Manager-Peretz", "Noa");
+  const fm2User = await createUser("+972500000012", "رنا عودة", "رنا");
   const fm2Membership = await createMembership(fm2User.id, OrgRole.FIELD_MANAGER, false);
 
   console.log("Creating 12 workers...");
+  // Order matters: index-based logic below (workers[1], workers[7], workers[9], ...) relies on it.
   const workerNames = [
-    "Eli Ramzani", "Moshe Traffic", "Avi Signman", "Ronen Lightfix", "Gil Construct",
-    "Tal Roadcrew", "Omer Signal", "Yair Concrete", "Boaz Asphalt", "Nir Barrier",
-    "Doron Cable", "Ido Cone",
+    "خالد ناصر", "محمود جبارين", "أنس دراوشة", "باسل عازر", "كريم حمدان",
+    "وسيم عيسى", "فادي النجار", "مهند صالح", "زياد يونس", "نادر مصالحة",
+    "رامي طه", "إياد سعدي",
   ];
   const workers: { user: any; membership: any; profile: any }[] = [];
   for (let i = 0; i < workerNames.length; i++) {
@@ -165,7 +166,7 @@ async function main() {
         privacyNoticeVersion: "v1.0",
       },
     });
-    const bank = encryptBankInfo(JSON.stringify({ bankName: "Bank Hapoalim", branchNumber: "123", accountNumber: `${1000000 + i}`, accountHolderName: workerNames[i] }));
+    const bank = encryptBankInfo(JSON.stringify({ bankName: "بنك هبوعليم", branchNumber: "123", accountNumber: `${1000000 + i}`, accountHolderName: workerNames[i] }));
     await prisma.encryptedBankAccount.create({
       data: { id: id(), workerProfileId: profile.id, ciphertext: bank.ciphertext, iv: bank.iv, authTag: bank.authTag, encryptionKeyId: bank.encryptionKeyId },
     });
@@ -180,7 +181,7 @@ async function main() {
         baseHourlyRateAgorot: compensationType === CompensationType.HOURLY ? 5500 : null,
         overtimeHourlyRateAgorot: 7000,
         effectiveStartDate: new Date("2026-01-01"),
-        changeReason: "Initial onboarding compensation",
+        changeReason: "الأجر المعتمد عند الانضمام",
         createdBy: owner1User.id,
       },
     });
@@ -192,9 +193,9 @@ async function main() {
   // ── Projects, sites, geofences ────────────────────────────────────────
   console.log("Creating projects, sites, geofences...");
   const projectDefs = [
-    { name: "Highway 6 Traffic Control", client: "Netivei Israel", code: "HWY6-2026" },
-    { name: "Tel Aviv Traffic Light Upgrade", client: "Tel Aviv Municipality", code: "TLV-TL-2026" },
-    { name: "Herzliya Construction Signage", client: "Herzliya Municipality", code: "HRZ-SGN-2026" },
+    { name: "تنظيم حركة السير على شارع 6", client: "شركة الطرق الوطنية", code: "HWY6-2026" },
+    { name: "تحديث الإشارات الضوئية في تل أبيب", client: "بلدية تل أبيب - يافا", code: "TLV-TL-2026" },
+    { name: "لافتات مواقع البناء في هرتسليا", client: "بلدية هرتسليا", code: "HRZ-SGN-2026" },
   ];
   const projects = [];
   for (const p of projectDefs) {
@@ -206,12 +207,12 @@ async function main() {
   }
 
   const siteCoords = [
-    { lat: 32.0853, lng: 34.7818, name: "Tel Aviv Central Junction" },
-    { lat: 32.1093, lng: 34.8555, name: "Ramat Gan Overpass" },
-    { lat: 32.166, lng: 34.844, name: "Herzliya North Site" },
-    { lat: 32.0679, lng: 34.7789, name: "Jaffa Interchange" },
-    { lat: 32.0234, lng: 34.7503, name: "Bat Yam Coastal Road" },
-    { lat: 32.1848, lng: 34.87, name: "Herzliya Pituach Site" },
+    { lat: 32.0853, lng: 34.7818, name: "تقاطع تل أبيب المركزي" },
+    { lat: 32.1093, lng: 34.8555, name: "جسر رمات غان العلوي" },
+    { lat: 32.166, lng: 34.844, name: "موقع هرتسليا الشمالي" },
+    { lat: 32.0679, lng: 34.7789, name: "مفترق يافا" },
+    { lat: 32.0234, lng: 34.7503, name: "الطريق الساحلي في بات يام" },
+    { lat: 32.1848, lng: 34.87, name: "موقع هرتسليا بيتوح" },
   ];
   const sites: { site: Awaited<ReturnType<typeof prisma.site.create>>; geofence: Awaited<ReturnType<typeof prisma.geofence.create>> }[] = [];
   for (let i = 0; i < siteCoords.length; i++) {
@@ -224,7 +225,7 @@ async function main() {
         latitude: siteCoords[i].lat,
         longitude: siteCoords[i].lng,
         defaultGeofenceRadiusMeters: 150,
-        instructions: "Wear high-visibility vest. Check in with the site supervisor on arrival.",
+        instructions: "يجب ارتداء السترة العاكسة ومراجعة مشرف الموقع فور الوصول.",
         emergencyContact: "+972500000099",
       },
     });
@@ -253,6 +254,14 @@ async function main() {
     return d;
   }
 
+  // Arabic shift-type labels (same wording as the admin web) used to build readable shift titles.
+  const shiftTypeLabel: Record<ShiftType, string> = {
+    [ShiftType.STANDARD]: "وردية عادية",
+    [ShiftType.DAY_TURAN]: "مناوبة نهارية",
+    [ShiftType.NIGHT_TURAN]: "مناوبة ليلية",
+    [ShiftType.EMERGENCY_CALLOUT]: "استدعاء طوارئ",
+  };
+
   async function createShift(shiftType: ShiftType, siteIdx: number, start: Date, end: Date, managerId: string) {
     return prisma.shift.create({
       data: {
@@ -262,7 +271,7 @@ async function main() {
         siteId: sites[siteIdx].site.id,
         geofenceId: sites[siteIdx].geofence.id,
         shiftType,
-        title: `${shiftType.replace("_", " ")} @ ${sites[siteIdx].site.name}`,
+        title: `${shiftTypeLabel[shiftType]} — ${sites[siteIdx].site.name}`,
         scheduledStart: start,
         scheduledEnd: end,
         checkInMethod: CheckInMethod.GEOFENCED,
@@ -325,7 +334,7 @@ async function main() {
   });
   await prisma.temporaryCheckInPoint.create({
     data: {
-      id: id(), organizationId: org.id, shiftId: standardShifts[0].id, name: "Mobile crew rally point",
+      id: id(), organizationId: org.id, shiftId: standardShifts[0].id, name: "نقطة تجمّع الطاقم المتنقّل",
       latitude: sites[0].site.latitude + 0.001, longitude: sites[0].site.longitude + 0.001, radiusMeters: 100,
       status: TemporaryPointStatus.EXPIRED, createdBy: workers[3].user.id, managerAuthorizedBy: fm1User.id,
       expiresAt: standardShifts[0].scheduledEnd,
@@ -359,9 +368,9 @@ async function main() {
       });
     }
     await prisma.dailySummary.create({
-      data: { id: id(), timeEntryId: entry.id, text: "Completed scheduled traffic-control setup and inspection.", taskCategory: TaskCategory.TRAFFIC_CONTROL },
+      data: { id: id(), timeEntryId: entry.id, text: "تم الانتهاء من تركيب معدّات تنظيم السير المقرّرة وفحصها.", taskCategory: TaskCategory.TRAFFIC_CONTROL },
     });
-    await prisma.attendanceApproval.create({ data: { id: id(), timeEntryId: entry.id, action: ApprovalAction.APPROVE, actedBy: fm1User.id, notes: "Looks good." } });
+    await prisma.attendanceApproval.create({ data: { id: id(), timeEntryId: entry.id, action: ApprovalAction.APPROVE, actedBy: fm1User.id, notes: "تمت المراجعة ولا توجد ملاحظات." } });
     return entry;
   }
 
@@ -370,7 +379,7 @@ async function main() {
   }
   // A short day with manual full-day credit
   const shortDayEntry = await approvedEntry(standardShifts[6], workers[6], 6, true);
-  await recordAudit(org.id, fm1User.id, "FULL_DAY_CREDIT_APPLIED", "TimeEntry", shortDayEntry.id, { field: "fullDayCredit", oldValue: "false", newValue: "true", reason: "Weather stopped work" });
+  await recordAudit(org.id, fm1User.id, "FULL_DAY_CREDIT_APPLIED", "TimeEntry", shortDayEntry.id, { field: "fullDayCredit", oldValue: "false", newValue: "true", reason: "توقّف العمل بسبب الطقس" });
 
   // Pending approval entry
   const pendingShift = standardShifts[7];
@@ -384,7 +393,7 @@ async function main() {
       rawDurationMinutes: Math.round((pendingClockOut.getTime() - pendingClockIn.getTime()) / 60_000),
     },
   });
-  await prisma.dailySummary.create({ data: { id: id(), timeEntryId: pendingEntry.id, text: "Overtime work replacing damaged signage.", taskCategory: TaskCategory.TRAFFIC_SIGN } });
+  await prisma.dailySummary.create({ data: { id: id(), timeEntryId: pendingEntry.id, text: "عمل إضافي لاستبدال لافتات مرورية تالفة.", taskCategory: TaskCategory.TRAFFIC_SIGN } });
 
   // Rejected entry
   const rejectedShift = standardShifts[0];
@@ -395,10 +404,10 @@ async function main() {
       id: id(), organizationId: org.id, workerProfileId: workers[8].profile.id, shiftId: rejectedShift.id,
       status: TimeEntryStatus.REJECTED, businessDate: toBusinessDate(rejectedClockIn),
       clockInAt: rejectedClockIn, clockOutAt: rejectedClockOut, rawDurationMinutes: 30, checkInMethod: CheckInMethod.GEOFENCED,
-      rejectedReason: "Duration too short to be plausible; worker confirmed accidental double clock-in.",
+      rejectedReason: "المدة أقصر من أن تكون منطقية؛ وأكّد العامل أنه سجّل بدء الدوام مرتين عن طريق الخطأ.",
     },
   });
-  await prisma.attendanceApproval.create({ data: { id: id(), timeEntryId: rejectedEntry.id, action: ApprovalAction.REJECT, actedBy: fm1User.id, notes: "Rejected: implausible duration." } });
+  await prisma.attendanceApproval.create({ data: { id: id(), timeEntryId: rejectedEntry.id, action: ApprovalAction.REJECT, actedBy: fm1User.id, notes: "مرفوض: المدة غير منطقية." } });
 
   // ── Forgotten-stamp infractions for worker[9] (2 free + 1 deduction) ──
   console.log("Creating forgotten-stamp infractions...");
@@ -447,7 +456,7 @@ async function main() {
 
   const emergencyShift = await prisma.shift.create({
     data: {
-      id: id(), organizationId: org.id, shiftType: ShiftType.EMERGENCY_CALLOUT, title: "Emergency Call-out",
+      id: id(), organizationId: org.id, shiftType: ShiftType.EMERGENCY_CALLOUT, title: shiftTypeLabel[ShiftType.EMERGENCY_CALLOUT],
       scheduledStart: emergencyComp.compensatedStart, scheduledEnd: new Date(emergencyActualEnd.getTime() + 8 * 3_600_000),
       checkInMethod: CheckInMethod.FLEXI_CHECK, businessDate: toBusinessDate(emergencyComp.compensatedStart),
       managerId: fm1User.id, status: ShiftStatus.CLOSED, createdBy: fm1User.id,
@@ -467,7 +476,7 @@ async function main() {
     },
   });
   await prisma.dailySummary.create({
-    data: { id: id(), timeEntryId: emergencyEntry.id, text: "Repaired traffic light controller after power surge.", taskCategory: TaskCategory.EMERGENCY_REPAIR },
+    data: { id: id(), timeEntryId: emergencyEntry.id, text: "إصلاح وحدة التحكم بالإشارة الضوئية بعد ارتفاع مفاجئ في التيار الكهربائي.", taskCategory: TaskCategory.EMERGENCY_REPAIR },
   });
   await prisma.emergencyCallout.create({
     data: {
@@ -518,7 +527,7 @@ async function main() {
   // ── Notifications ─────────────────────────────────────────────────────
   // Same shape as the API writes them: English title/body (still read as-is
   // by the mobile app) plus data_json with the raw values the admin web
-  // renders in Arabic or English. Money (estimatedCostAgorot) is only ever in
+  // renders in Arabic. Money (estimatedCostAgorot) is only ever in
   // an Owner's data -- never a Field Manager's.
   console.log("Creating notifications...");
   const formatHm = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`;

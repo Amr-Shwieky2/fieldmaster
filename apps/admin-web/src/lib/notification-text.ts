@@ -1,6 +1,6 @@
 import type { NotificationItem } from "@fieldmaster/api-client";
-import type { Formatter } from "./format";
-import { SYSTEM_EMERGENCY_CALLOUT_TITLE } from "./shift-title";
+import type { Formatter } from "@fieldmaster/i18n";
+import { SYSTEM_EMERGENCY_CALLOUT_TITLE } from "@fieldmaster/i18n";
 
 /**
  * Arabic notification text.

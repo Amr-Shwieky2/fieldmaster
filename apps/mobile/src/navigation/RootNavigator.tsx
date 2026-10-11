@@ -1,8 +1,9 @@
-import { NavigationContainer } from "@react-navigation/native";
+import { DefaultTheme, NavigationContainer, type Theme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { ActivityIndicator, View } from "react-native";
 import { useAuth } from "../lib/auth-context";
-import { colors } from "../lib/theme";
+import { isLayoutRTL } from "../lib/rtl";
+import { colors, fonts } from "../lib/theme";
+import { LoadingView } from "../components/StateViews";
 import { LoginScreen } from "../screens/LoginScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { ClockInScreen } from "../screens/ClockInScreen";
@@ -13,20 +14,27 @@ import type { RootStackParamList } from "./types";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+// Navigation chrome in the Arabic font (one family per weight, no fontWeight).
+const theme: Theme = {
+  ...DefaultTheme,
+  colors: { ...DefaultTheme.colors, background: colors.background, primary: colors.primary, text: colors.text, card: colors.card, border: colors.border },
+  fonts: {
+    regular: { fontFamily: fonts.regular, fontWeight: "normal" },
+    medium: { fontFamily: fonts.semibold, fontWeight: "normal" },
+    bold: { fontFamily: fonts.bold, fontWeight: "normal" },
+    heavy: { fontFamily: fonts.bold, fontWeight: "normal" },
+  },
+};
+
 export function RootNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
 
-  if (isLoading) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background }}>
-        <ActivityIndicator color={colors.primary} />
-      </View>
-    );
-  }
+  if (isLoading) return <LoadingView />;
 
+  // React Navigation reads RTL from I18nManager, which react-native-web never sets: pass it explicitly.
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <NavigationContainer theme={theme} direction={isLayoutRTL() ? "rtl" : "ltr"}>
+      <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
         {isAuthenticated ? (
           <>
             <Stack.Screen name="Home" component={HomeScreen} />

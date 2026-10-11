@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as sharedTypes from "@fieldmaster/shared-types";
-import ar from "@/i18n/messages/ar.json";
-import { createTranslator } from "next-intl";
-import { INTL_LOCALE } from "@/i18n/config";
+import { createTranslator } from "use-intl";
+import ar from "../messages/ar.json";
+import { INTL_LOCALE } from "../config";
 import { ENUM_NAMES, getEnumLabel, MISSING_LABEL, type EnumTranslator } from "../enums";
 
 type Labels = Record<string, Record<string, string>>;

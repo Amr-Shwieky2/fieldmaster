@@ -213,7 +213,7 @@ describe("Payroll list page", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^احتساب رواتب / }));
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toBe("يتعارض هذا الإجراء مع الحالة الحالية للسجل. حدّث الصفحة وحاول مرة أخرى."),
+      expect(screen.getByRole("alert").textContent).toBe("لا يمكن تنفيذ هذا الإجراء الآن لأن البيانات تغيّرت. حدّث البيانات وحاول مرة أخرى."),
     );
     expect(screen.queryByText(/calculated elsewhere/)).toBeNull();
   });

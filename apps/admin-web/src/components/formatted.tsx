@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import { EM_DASH } from "@/lib/format";
+import { EM_DASH } from "@fieldmaster/i18n";
 import { useFormat } from "@/lib/use-format";
 
 /**
