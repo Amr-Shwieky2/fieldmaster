@@ -149,7 +149,11 @@ export default function AttendancePage() {
                         </p>
                       ) : null}
                     </div>
-                    {entry.fullDayCredit && <Badge tone="info">{t("fullDayCreditApplied")}</Badge>}
+                    <div className="flex flex-wrap gap-2">
+                      {entry.fullDayCredit && <Badge tone="info">{t("fullDayCreditApplied")}</Badge>}
+                      {/* Clock-in moved back by the test-mode rewind (dev login only); the change is in the audit log as DEV_REWIND. */}
+                      {entry.devRewoundAt ? <Badge tone="warning">{t("devRewound")}</Badge> : null}
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
                     <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">

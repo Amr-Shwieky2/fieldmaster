@@ -27,6 +27,7 @@ Everything is under `/api/v1`. Implemented route groups:
 /reports                worker attendance ledger PDF generation
 /notifications          in-app list, mark-read, WebSocket/SSE streams
 /audit-logs              paginated list + chain verification
+/dev                     test-mode tools for the worker simulator (dev login only; 404 otherwise)
 ```
 
 Not implemented as separate route groups (see `IMPLEMENTATION_STATUS.md`):

@@ -2,7 +2,10 @@ import type {
   ApiError,
   AuditLogEntry,
   AuthSession,
+  ClockInResult,
   DevLoginUser,
+  EmergencyCalloutEndResult,
+  EmergencyCalloutStartResult,
   FinancialDashboard,
   Geofence,
   GeneratedReport,
@@ -13,9 +16,12 @@ import type {
   Project,
   Shift,
   Site,
+  TemporaryCheckInPoint,
+  TemporarySupervisorAssignment,
   TimeEntry,
   TuranAssignment,
   Worker,
+  WorkerSimulatorContext,
 } from "./types";
 
 export class ApiRequestError extends Error {
@@ -109,6 +115,10 @@ export class FieldMasterClient {
   devLogin(input: { membershipId: string; deviceId?: string; platform?: "WEB" | "IOS" | "ANDROID" }) {
     return this.request<AuthSession>("POST", "/auth/dev/login", input);
   }
+  /** Ends one session server-side (revokes its refresh-token family); other sessions are unaffected. */
+  logout(refreshToken: string) {
+    return this.request<void>("POST", "/auth/logout", { refreshToken });
+  }
 
   // ── Workers ─────────────────────────────────────────────────────────
   listWorkers() {
@@ -167,6 +177,16 @@ export class FieldMasterClient {
   assignWorkerToShift(shiftId: string, workerProfileId: string) {
     return this.request("POST", `/shifts/${shiftId}/assignments`, { workerProfileId });
   }
+  assignTemporarySupervisor(shiftId: string, input: { workerProfileId: string; activatedAt?: string; expiresAt?: string }) {
+    return this.request<TemporarySupervisorAssignment>("POST", `/shifts/${shiftId}/temporary-supervisors`, input);
+  }
+  /** Allowed for Owners, Field Managers and the shift's active Temporary Supervisor. */
+  createTemporaryCheckInPoint(input: { shiftId: string; name: string; latitude: number; longitude: number; radiusMeters?: number }) {
+    return this.request<TemporaryCheckInPoint>("POST", "/shifts/temporary-check-in-points", input);
+  }
+  listTemporaryCheckInPoints(shiftId: string) {
+    return this.request<TemporaryCheckInPoint[]>("GET", `/shifts/${shiftId}/temporary-check-in-points`);
+  }
 
   // ── Attendance ──────────────────────────────────────────────────────
   listPendingAttendanceApprovals() {
@@ -185,11 +205,14 @@ export class FieldMasterClient {
     const qs = new URLSearchParams(filters as Record<string, string>).toString();
     return this.request<TimeEntry[]>("GET", `/time-entries${qs ? `?${qs}` : ""}`);
   }
+  getTimeEntry(id: string) {
+    return this.request<TimeEntry>("GET", `/time-entries/${id}`);
+  }
 
   // ── Clock events ────────────────────────────────────────────────────
   /** The API answers with the new time entry and the clock event that opened it. */
   clockIn(input: Record<string, unknown>, idempotencyKey: string) {
-    return this.request<{ timeEntry: TimeEntry; clockEvent: { id: string; eventType: string } }>("POST", "/clock-events/clock-in", input, {
+    return this.request<ClockInResult>("POST", "/clock-events/clock-in", input, {
       "Idempotency-Key": idempotencyKey,
     });
   }
@@ -246,6 +269,22 @@ export class FieldMasterClient {
   }
   cancelTuranAssignment(id: string) {
     return this.request("POST", `/turan-assignments/${id}/cancel`);
+  }
+  startEmergencyCallout(input: Record<string, unknown>, idempotencyKey: string) {
+    return this.request<EmergencyCalloutStartResult>("POST", "/emergency-callouts/start", input, { "Idempotency-Key": idempotencyKey });
+  }
+  endEmergencyCallout(input: Record<string, unknown>, idempotencyKey: string) {
+    return this.request<EmergencyCalloutEndResult>("POST", "/emergency-callouts/end", input, { "Idempotency-Key": idempotencyKey });
+  }
+
+  // ── Dev tools (test mode only; the API answers 404 when dev login is off) ──
+  /** Moves an open time entry's clock-in back by `minutes` (max 24 h). Audited as DEV_REWIND; Owners and Field Managers only. */
+  rewindTimeEntry(id: string, minutes: number) {
+    return this.request<TimeEntry>("POST", `/dev/time-entries/${id}/rewind`, { minutes });
+  }
+  /** The signed-in worker's Turan and temporary-supervisor assignments (call with the worker's own session). */
+  getWorkerSimulatorContext() {
+    return this.request<WorkerSimulatorContext>("GET", "/dev/worker-simulator/me");
   }
 
   // ── Audit logs ──────────────────────────────────────────────────────

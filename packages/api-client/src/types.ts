@@ -8,6 +8,7 @@ import type {
   PayrollPeriodStatus,
   ShiftStatus,
   ShiftType,
+  TemporaryPointStatus,
   TimeEntryStatus,
   TuranStatus,
   TuranType,
@@ -104,6 +105,9 @@ export interface Shift {
   assignments?: { id: string; workerProfileId: string }[];
   site?: Site | null;
   project?: Project | null;
+  /** Only on GET /shifts/:id. */
+  geofence?: Geofence | null;
+  temporaryCheckInPoints?: TemporaryCheckInPoint[];
 }
 
 export interface TimeEntry {
@@ -119,8 +123,93 @@ export interface TimeEntry {
   approvedRegularMinutes: number | null;
   approvedOvertimeMinutes: number | null;
   fullDayCredit: boolean;
+  isEmergency?: boolean;
+  /** Set when the test-mode rewind (dev login only) moved clockInAt back; shown as a "test edit" badge. */
+  devRewoundAt?: string | null;
   shift?: Shift;
   dailySummary?: { text: string | null; taskCategory: string } | null;
+  clockEvents?: ClockEvent[];
+}
+
+export interface ClockEvent {
+  id: string;
+  timeEntryId: string;
+  eventType: string;
+  origin: string;
+  deviceId: string;
+  clientEventId: string;
+  deviceTimestamp: string;
+  serverReceivedAt: string;
+  deviceTimeDeviationSeconds: number | null;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  mockLocationSuspected: boolean;
+  distanceFromSiteMeters: number | null;
+  locationValidationStatus: string;
+}
+
+/** Response of POST /clock-events/clock-in. */
+export interface ClockInResult {
+  timeEntry: TimeEntry;
+  clockEvent: ClockEvent;
+}
+
+export interface TemporaryCheckInPoint {
+  id: string;
+  shiftId: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  status: TemporaryPointStatus;
+  expiresAt: string;
+  revokedAt: string | null;
+}
+
+export interface TemporarySupervisorAssignment {
+  id: string;
+  shiftId: string;
+  workerProfileId: string;
+  activatedAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+}
+
+/** Response of POST /emergency-callouts/start: the compensated start is 60 minutes before the actual click. */
+export interface EmergencyCalloutStartResult {
+  timeEntryId: string;
+  calloutId: string;
+  actualStartClick: string;
+  compensatedStart: string;
+  retroactiveMinutes: number;
+  explanation: string;
+}
+
+/** Response of POST /emergency-callouts/end: the compensated end is 15 minutes after the actual click. */
+export interface EmergencyCalloutEndResult {
+  timeEntryId: string;
+  actualEndClick: string;
+  compensatedEnd: string;
+  actualWorkedMinutes: number;
+  retroactiveMinutes: number;
+  returnBufferMinutes: number;
+  compensatedDurationMinutes: number;
+}
+
+/** GET /dev/worker-simulator/me (test mode only): what the worker-facing API does not expose. */
+export interface WorkerSimulatorContext {
+  workerProfileId: string | null;
+  turanAssignments: {
+    id: string;
+    turanType: TuranType;
+    status: TuranStatus;
+    startAt: string;
+    endAt: string;
+    role: "ASSIGNED" | "BACKUP";
+  }[];
+  emergencyEligibleTuranAssignmentId: string | null;
+  temporarySupervisorAssignments: { id: string; shiftId: string; shiftTitle: string; activatedAt: string; expiresAt: string }[];
 }
 
 export interface PayrollPeriod {

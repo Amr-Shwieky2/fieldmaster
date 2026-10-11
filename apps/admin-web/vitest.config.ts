@@ -23,6 +23,7 @@ export default defineConfig({
       // Tests run against the TypeScript source of the shared enums so a stale
       // `dist/` build can never hide a missing enum or label.
       "@fieldmaster/shared-types": path.resolve(__dirname, "../../packages/shared-types/src/index.ts"),
+      "@fieldmaster/shared-validation": path.resolve(__dirname, "../../packages/shared-validation/src/index.ts"),
       "@": path.resolve(__dirname, "./src"),
     },
   },

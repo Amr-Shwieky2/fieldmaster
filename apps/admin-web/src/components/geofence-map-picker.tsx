@@ -20,6 +20,17 @@ const markerIcon = new L.Icon({
   iconAnchor: [12, 41],
 });
 
+/** A fixed (not editable) circle drawn under the marker, e.g. a geofence or a temporary check-in point. */
+export interface MapCircle {
+  key: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  color: string;
+}
+
+const GEOFENCE_BLUE = "#2563eb";
+
 interface GeofenceMapPickerProps {
   latitude: number;
   longitude: number;
@@ -27,6 +38,14 @@ interface GeofenceMapPickerProps {
   onChange: (lat: number, lng: number) => void;
   /** Id of a visible element naming the map; without it the map gets its own aria-label. */
   labelId?: string;
+  /** Extra fixed circles (the worker simulator draws the shift's geofence and temporary points this way). */
+  circles?: MapCircle[];
+  /** Colour of the circle around the marker (default: the geofence blue). */
+  markerCircleColor?: string;
+  /** Replaces the default help text and marker label (both say the marker is the geofence center). */
+  help?: string;
+  markerLabel?: string;
+  heightPx?: number;
 }
 
 function ClickToMove({ onChange }: { onChange: (lat: number, lng: number) => void }) {
@@ -66,7 +85,18 @@ function RecenterOnChange({ latitude, longitude }: { latitude: number; longitude
  * inline-start corner (top right) and the attribution on the opposite bottom
  * corner (bottom left).
  */
-export function GeofenceMapPicker({ latitude, longitude, radiusMeters, onChange, labelId }: GeofenceMapPickerProps) {
+export function GeofenceMapPicker({
+  latitude,
+  longitude,
+  radiusMeters,
+  onChange,
+  labelId,
+  circles = [],
+  markerCircleColor = GEOFENCE_BLUE,
+  help,
+  markerLabel,
+  heightPx = 280,
+}: GeofenceMapPickerProps) {
   const t = useTranslations("geofenceMap");
   const format = useFormat();
   const helpId = useId();
@@ -87,7 +117,7 @@ export function GeofenceMapPicker({ latitude, longitude, radiusMeters, onChange,
           zoom={16}
           zoomControl={false}
           attributionControl={false}
-          style={{ height: "280px", width: "100%" }}
+          style={{ height: `${heightPx}px`, width: "100%" }}
         >
           <TileLayer attribution={t.raw("attribution") as string} url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <ZoomControl position="topright" zoomInTitle={t("zoomIn")} zoomOutTitle={t("zoomOut")} />
@@ -97,8 +127,8 @@ export function GeofenceMapPicker({ latitude, longitude, radiusMeters, onChange,
             position={[latitude, longitude]}
             icon={markerIcon}
             draggable
-            alt={t("markerAlt")}
-            title={t("markerTitle")}
+            alt={markerLabel ?? t("markerAlt")}
+            title={markerLabel ?? t("markerTitle")}
             eventHandlers={{
               dragend: (e) => {
                 const marker = e.target as L.Marker;
@@ -107,13 +137,21 @@ export function GeofenceMapPicker({ latitude, longitude, radiusMeters, onChange,
               },
             }}
           />
-          <Circle center={[latitude, longitude]} radius={radiusMeters} pathOptions={{ color: "#2563eb", fillOpacity: 0.1 }} />
+          {circles.map((circle) => (
+            <Circle
+              key={circle.key}
+              center={[circle.latitude, circle.longitude]}
+              radius={circle.radiusMeters}
+              pathOptions={{ color: circle.color, fillOpacity: 0.1 }}
+            />
+          ))}
+          <Circle center={[latitude, longitude]} radius={radiusMeters} pathOptions={{ color: markerCircleColor, fillOpacity: 0.1 }} />
           <ClickToMove onChange={onChange} />
           <RecenterOnChange latitude={latitude} longitude={longitude} />
         </MapContainer>
       </div>
       <p id={helpId} className="text-xs text-slate-500">
-        {t("help", { radius: format.number(radiusMeters) })}
+        {help ?? t("help", { radius: format.number(radiusMeters) })}
       </p>
     </div>
   );

@@ -6,6 +6,7 @@ import { ModulesContainer } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { v7 as uuidv7 } from "uuid";
 import { createTestApp, resetDatabase, request } from "./test-app";
+import { useEnv } from "./use-env";
 import { addFieldManager, addWorker, createOrgWithOwner } from "./fixtures";
 import { PrismaService } from "../src/common/prisma/prisma.service";
 import { AppConfigModule } from "../src/common/config/app-config.module";
@@ -15,24 +16,6 @@ import { FINANCIAL_PERMISSIONS, type Permission } from "../src/common/auth/permi
 const OWNER_PHONE = "+972500000001";
 const MANAGER_PHONE = "+972500000011";
 const WORKER_PHONE = "+972500010001";
-
-/** Sets env vars for the duration of a describe block (the API reads them when the app module is created). */
-function useEnv(vars: Record<string, string | undefined>) {
-  const previous: Record<string, string | undefined> = {};
-  beforeAll(() => {
-    for (const [key, value] of Object.entries(vars)) {
-      previous[key] = process.env[key];
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  });
-  afterAll(() => {
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  });
-}
 
 async function seedMembers(app: INestApplication) {
   await resetDatabase(app);

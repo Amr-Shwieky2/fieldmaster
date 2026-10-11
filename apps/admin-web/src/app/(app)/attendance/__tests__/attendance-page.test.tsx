@@ -104,6 +104,14 @@ describe("Attendance approval page", () => {
     expect(text).not.toContain("450");
   });
 
+  it("marks an entry whose clock-in was moved by the test-mode rewind", async () => {
+    client.listPendingAttendanceApprovals.mockResolvedValue([{ ...SHORT_SHIFT, devRewoundAt: "2026-10-04T12:00:00.000Z" }, CREDITED_SHIFT]);
+    renderPage();
+    await screen.findByText("Eli Ramzani");
+    expect(within(cardOf("Eli Ramzani")).getByText("تعديل تجريبي")).toBeTruthy();
+    expect(within(cardOf("Samir Haddad")).queryByText("تعديل تجريبي")).toBeNull();
+  });
+
   it("shows the page-specific empty state", async () => {
     client.listPendingAttendanceApprovals.mockResolvedValue([]);
     renderPage();

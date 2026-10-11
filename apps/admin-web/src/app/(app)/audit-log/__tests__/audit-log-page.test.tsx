@@ -143,6 +143,19 @@ describe("Audit log page", () => {
     expect(within(table).queryByText("INVALID_OFFLINE_SIGNATURE")).toBeNull();
   });
 
+  it("names the test-mode rewind in Arabic", async () => {
+    setup(OrgRole.OWNER, {
+      listAuditLogs: vi.fn(async () => ({
+        items: [entry({ id: "r1", action: "DEV_REWIND", field: "clockInAt", oldValue: "2026-01-15T08:00:00.000Z", newValue: "2026-01-14T23:00:00.000Z" })],
+        nextCursor: null,
+      })),
+    });
+    renderPage();
+    const table = await screen.findByRole("table", { name: "أحداث سجل التدقيق" });
+    expect(within(table).getByText("إرجاع وقت بدء الدوام (تعديل تجريبي)")).toBeTruthy();
+    expect(within(table).queryByText("DEV_REWIND")).toBeNull();
+  });
+
   it("shows an unknown action code and entity type as-is, left to right", async () => {
     setup(OrgRole.OWNER);
     renderPage();

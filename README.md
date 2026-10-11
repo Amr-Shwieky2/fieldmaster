@@ -271,6 +271,17 @@ There are two ways to log in:
 `APP_ENV=production` with `DEV_LOGIN_ENABLED=true` is refused at startup. Never
 enable dev login on a deployment that holds real data.
 
+**Worker simulator (test mode only).** While dev login is on, Owners and Field
+Managers get a **محاكي العامل (تجريبي)** item in the admin web
+(`/dev/worker-simulator`). Pick a seeded worker and act as them through the
+real API: place the phone on the map, change GPS accuracy, the phone's clock,
+mock location and connectivity, start/end a shift or an emergency call-out,
+open a temporary check-in point, queue signed offline events and sync them,
+and move an open shift's start back 6 h / 9 h / 10 h 30 m to test the
+540-minute rule. A checklist of the 14 attendance scenarios has a "prepare"
+button for each. With dev login off the page and its API endpoints are 404.
+Run `pnpm db:seed` afterwards to reset the data.
+
 > If accounts end up in an unexpected state from manual testing/exploring
 > the API directly, re-run `pnpm db:seed` — it wipes and repopulates
 > everything from scratch every time.

@@ -1,5 +1,146 @@
 # FieldMaster — Implementation Status
 
+## Step 4 of 10 — worker simulator, a test tool in the admin web (2026-10-11)
+
+Scope: one test-only page in `apps/admin-web` plus the minimum dev-only API
+support. No business rule was changed. Design and reasoning are in
+`docs/technical-decisions.md` ("Step 4: worker simulator ...").
+
+- **`/dev/worker-simulator`** (Arabic, RTL; nav item **محاكي العامل
+  (تجريبي)** with a "وضع الاختبار" badge; Owners and Field Managers only).
+  It exists only while the API is in dev login mode, using the same signal as
+  the login page. Otherwise the route is a real 404 (Next middleware + a
+  server-side check), the nav item is not rendered, and every new API endpoint
+  answers 404.
+- **Act as any seeded worker** through `POST /auth/dev/login`:
+  - The worker session is kept in memory only. It has its own API client and
+    its own React Query cache, and it never touches the admin's session or
+    cache.
+  - Ending it, or a 401 on a worker request, never signs the admin out.
+  - Signing the admin out drops it.
+- **Page:**
+  - **Worker panel:** searchable worker list; status (on shift or not, with
+    the "تعديل تجريبي" badge); today's and upcoming shifts (plus earlier
+    ones still open); Turan assignments and emergency eligibility; current
+    temporary-supervisor role.
+  - **Map:** the existing Leaflet component, extended with optional fixed
+    circles. It shows the geofence and the active temporary points, and a
+    click places the phone. The live distance to the edge is shown.
+  - **Device:** GPS accuracy, clock offset (±), mock location, online/offline.
+  - **Actions:** start/end shift (full summary form), start/end emergency,
+    open a temporary point by clicking the map (temporary supervisors only),
+    and rewind 6 h / 9 h / 10 h 30 m.
+  - **Results:** the mobile receipt word for word (a test compares the text
+    with the mobile `ar.json`); the emergency's four times and total
+    compensated minutes; collapsible raw JSON with every money field removed.
+  - **Session log** with timestamps.
+- **Offline (real protocol):** events are signed in the browser with the
+  mobile app's `@fieldmaster/shared-validation` functions and a
+  per-simulated-device key registered through `POST /devices/public-key`.
+  They are queued in memory as "بانتظار المزامنة" and synced with the real
+  batch endpoint. "Send the same batch again" exercises the server's duplicate
+  detection.
+- **API (dev only, 404 when dev login is off):**
+  - `POST /api/v1/dev/time-entries/:id/rewind { minutes }`:
+    - open entries only, not emergencies, non-finalized periods only;
+    - at most 24 h;
+    - Owner or Field Manager;
+    - recomputes the business date;
+    - marks `time_entries.dev_rewound_at` (new column, migration
+      `20261011120000_time_entry_dev_rewound`);
+    - writes a `DEV_REWIND` audit event with the old and new clock-in.
+  - `GET /api/v1/dev/worker-simulator/me`: the worker's Turan and
+    temporary-supervisor assignments, which no worker-facing endpoint exposes.
+  - A Nest middleware makes both 404 before authentication when dev login is
+    off.
+  - New error codes, translated in the shared `ar.json`:
+    `TIME_ENTRY_NOT_OPEN`, `DEV_REWIND_EMERGENCY_NOT_SUPPORTED`,
+    `DEV_REWIND_LIMIT_EXCEEDED`.
+- **Admin pages:** the attendance page shows "تعديل تجريبي" on rewound
+  entries, and the audit log names `DEV_REWIND` in Arabic.
+- **Scenario checklist:** 14 scenarios, each with a one-click "prepare"
+  where it makes sense. Prepare goes through the admin's own session and the
+  real management endpoints (create/assign a shift, add a Night Turan, assign
+  a temporary supervisor) and sets the device.
+- **Also fixed:** `pnpm-lock.yaml` was out of sync with
+  `apps/mobile/package.json` after Step 3, so `pnpm install
+  --frozen-lockfile` failed.
+- **Found, not fixed here (handed off as a separate task):** the worker-scoped
+  `GET /shifts` returns `project.budgetAgorot`. The simulator never shows it.
+
+**All 14 scenarios, run through the page in the browser against the real API:**
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | Inside the geofence | ✅ Accepted, receipt "تم بدء الدوام" |
+| 2 | Outside the geofence | ✅ 400 `GEOFENCE_OUTSIDE_ALLOWED_RADIUS`: "المسافة: 229 م، المسموح: 150 م" |
+| 3 | Poor GPS accuracy | ✅ 400 `GPS_ACCURACY_TOO_LOW` (100 m, limit 50 m) |
+| 4 | Device clock +5 min | ✅ 400 `DEVICE_TIME_DEVIATION_EXCEEDED` (300 s) |
+| 5 | Mock location | ✅ 403 `MOCK_LOCATION_BLOCKED` |
+| 6 | Flexi-Check shift 3 km from the site | ✅ Accepted; GPS saved, distance 2,992 m saved, status PASSED |
+| 7 | Empty summary | ✅ 400 `SUMMARY_REQUIRED` |
+| 8 | 9 h | ✅ 540 min, approved as 540 regular / 0 overtime |
+| 9 | 10 h 30 m | ✅ 630 min, approved as 540 regular / 90 overtime |
+| 10 | Night Turan emergency | ✅ 12:26 actual / 11:26 compensated start; 12:26 actual / 12:41 compensated end; 75 compensated minutes |
+| 11 | Emergency, worker not eligible | ✅ 403 `EMERGENCY_NOT_ELIGIBLE` |
+| 12 | Temporary point | ✅ Point opened by clicking the map; clock-in accepted at the point (63 m from its center) while 300 m outside the geofence |
+| 13 | Offline clock-in, then sync | ✅ Queued as "بانتظار المزامنة", synced `VERIFIED` |
+| 14 | Same batch synced twice | ✅ `DUPLICATE` |
+
+**Also checked in the browser:**
+- A Field Manager session shows no ₪, no `*Agorot` and no budget, in the page
+  or in the raw JSON.
+- The attendance page shows the badge.
+- The audit log shows both `DEV_REWIND` events in Arabic, and the database
+  rows hold the old and new values.
+- With `DEV_LOGIN_ENABLED=false`:
+  - the page is an HTTP 404 with the Arabic not-found page;
+  - the nav item is gone;
+  - `/api/v1/dev/*` answers 404 with and without a token;
+  - the quick-login session ended.
+- No console errors other than the expected 4xx answers.
+
+`pnpm db:seed` was run afterwards to reset the data.
+
+**Tests** (runtime counts):
+
+| | Before Step 4 | After |
+|---|---|---|
+| shared-validation | 35 | 35 |
+| @fieldmaster/i18n | 69 | 69 |
+| admin-web | 172 | 208 |
+| API unit | 25 | 25 |
+| mobile | 131 | 131 |
+| API e2e | 41 | 50 |
+| **Total** | **473** | ****518**** |
+
+"Before" is the Step 3 base plus the OTP-fix PR, which added 2 e2e tests.
+No test was removed or weakened. The only edit to an existing test file
+moved the `useEnv` helper of `dev-login.e2e-spec.ts` into `test/use-env.ts`,
+unchanged, so the new spec can share it.
+
+`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 468 · `pnpm test:e2e` ✅ 50 ·
+`pnpm build` ✅
+
+Admin-web gained 36 tests:
+- simulator component: 8;
+- route gate: 3;
+- middleware: 4;
+- nav: 4;
+- offline signing: 3;
+- helpers (geo, clock, money stripping, prepare): 10;
+- mobile wording parity: 2;
+- attendance badge: 1;
+- audit label: 1.
+
+The API e2e suite gained 9 (`test/dev-tools.e2e-spec.ts`).
+
+One of the first full e2e runs got 200 instead of 201 on `POST /auth/refresh`
+in an existing dev-login test. It did not happen again in 7 more runs (3 of
+that spec, 4 of the full suite); the cause was not found.
+
+---
+
 ## Step 3 of 10 — mobile app in Arabic only + Arabic seed data (2026-10-09)
 
 Scope: `apps/mobile` and the seed data. PDF templates were not touched (later
