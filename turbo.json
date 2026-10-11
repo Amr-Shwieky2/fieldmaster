@@ -20,7 +20,22 @@
       "dependsOn": ["^build"]
     },
     "test:e2e": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "JWT_*",
+        "LOCAL_ENCRYPTION_KEY_BASE64",
+        "FIELDMASTER_TEST_OTP",
+        "OTP_*",
+        "DEVICE_TIME_DEVIATION_SECONDS",
+        "CORS_ORIGINS",
+        "NODE_ENV",
+        "APP_ENV",
+        "DEV_LOGIN_ENABLED",
+        "S3_*"
+      ]
     }
   }
 }

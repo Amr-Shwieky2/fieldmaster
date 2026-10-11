@@ -1,12 +1,32 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import { PayrollAdjustmentSource, PayrollAdjustmentType } from "@fieldmaster/shared-types";
+import { OrgRole, PayrollAdjustmentSource, PayrollAdjustmentType } from "@fieldmaster/shared-types";
 import { evaluateForgottenStampInfraction, toBusinessYearMonth } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+
+/**
+ * Every infraction column except the deduction, which is money and Owner-only
+ * (spec section 6.2 / 23.5). Field Managers see the infractions they manage,
+ * never what they cost the worker.
+ */
+const INFRACTION_FIELDS_WITHOUT_DEDUCTION = {
+  id: true,
+  organizationId: true,
+  workerProfileId: true,
+  timeEntryId: true,
+  correctionId: true,
+  businessMonth: true,
+  monthlySequenceNumber: true,
+  reversedAt: true,
+  reversedBy: true,
+  reversalReason: true,
+  reversalAdjustmentId: true,
+  createdAt: true,
+} satisfies Prisma.ForgottenStampInfractionSelect;
 
 /**
  * Two-strike rule (spec section 14): the first two forgotten clock-stamp
@@ -133,9 +153,10 @@ export class ForgottenStampService {
     return result;
   }
 
-  async listForOrganization(organizationId: string, workerProfileId?: string) {
+  async listForOrganization(organizationId: string, viewer: AuthenticatedUser, workerProfileId?: string) {
     return this.prisma.forgottenStampInfraction.findMany({
       where: { organizationId, ...(workerProfileId ? { workerProfileId } : {}) },
+      select: viewer.role === OrgRole.OWNER ? undefined : INFRACTION_FIELDS_WITHOUT_DEDUCTION,
       orderBy: { createdAt: "desc" },
     });
   }
