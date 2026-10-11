@@ -8,7 +8,7 @@
     "sourceMap": false,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "types": []
+    "types": ["node"]
   },
   "include": ["src"]
 }
