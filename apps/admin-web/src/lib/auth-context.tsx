@@ -7,6 +7,7 @@ import { FieldMasterClient } from "@fieldmaster/api-client";
 import type { OrgRole } from "@fieldmaster/shared-types";
 import { sessionStore, type StoredSession } from "./session-store";
 import { decodeJwtPayload } from "./jwt";
+import { API_URL } from "./api-url";
 
 interface AccessTokenPayload {
   sub: string;
@@ -26,8 +27,6 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api/v1";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();

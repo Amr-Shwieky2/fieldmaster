@@ -765,3 +765,115 @@ do it differently. Each setting below exists for one of them.
   polyfilled with `@formatjs/intl-pluralrules`, Arabic only. Hermes ignores
   `-u-nu-latn` on iOS, so numbers, dates and money come from the shared
   engine-independent formatter in `@fieldmaster/i18n`, not from `Intl`.
+
+## Step 4: worker simulator (test tool) and a dev-only time rewind
+
+`/dev/worker-simulator` in the admin web lets an Owner or Field Manager act as
+any seeded worker and exercise every attendance rule through the real API.
+It is a test tool: it adds no business rule and bypasses none.
+
+### Visibility: same signal as the login page, real 404 when off
+
+- The API answers `GET /auth/dev/users` with 200 only while dev login is on
+  (`DEV_LOGIN_ENABLED=true`, refused at boot with `APP_ENV=production`). The
+  login page already uses that answer; the simulator uses the same one in
+  three places, so nothing can drift from the API's real state:
+  - a Next **middleware** for `/dev/*` asks the API before rendering and
+    rewrites to an unmatched path when the answer is not 200, so the route
+    is a real 404 with the app's own Arabic not-found page, exactly like an
+    unknown URL;
+  - the page (a server component) checks again and calls `notFound()`. That
+    alone was not enough: with Next 15.5 the response is already streaming
+    (streamed metadata) when an async page calls `notFound()`, so the status
+    went out as 200;
+  - the nav item and the client component use the login page's own query.
+- Owners and Field Managers only: the nav item is filtered by role, a Worker
+  never gets the signed-in shell at all, and the component shows "access
+  denied" for any other role.
+- Every new API route (`/api/v1/dev/*`) answers 404 when dev login is off.
+  These routes need a signed-in user, and the global `JwtAuthGuard` runs
+  before any controller guard, so with only a guard an anonymous request
+  would get 401 and reveal the route. A Nest **middleware**
+  (`DevRoutesGateMiddleware`) runs before every guard and answers like an
+  unknown route; `DevLoginEnabledGuard` and a service-level check stay as
+  defense in depth.
+
+### The simulated worker's session is completely separate
+
+The Step 1 cache leak (an Owner's cached responses briefly visible to a Field
+Manager) came from one shared React Query cache. The simulator therefore:
+
+- gets the worker session from `POST /auth/dev/login`, exactly like quick
+  login, and keeps the tokens **in memory only** -- never in the admin session
+  store (`localStorage`) or any other browser storage;
+- uses its **own `FieldMasterClient`**: a 401 on a worker request ends only
+  the simulator session (the admin's client would sign the admin out);
+- uses its **own `QueryClient`**, passed explicitly to every worker query, so
+  no worker response can enter the admin's cache and no admin response can
+  enter the worker's;
+- revokes only the worker's refresh-token family (`POST /auth/logout`) when
+  the simulator session ends, the worker is switched, or the page unmounts
+  (which is also what happens when the admin signs out).
+
+Tests cover each point, including mutation checks: putting worker queries in
+the admin cache, or saving the worker session in the admin store, fails them.
+
+### Real protocols only
+
+- Clock-in/out, emergency start/end, temporary check-in points and offline
+  sync all go through the real endpoints with the worker's token.
+- **Offline:** events are canonicalized and signed in the browser with the
+  same `@fieldmaster/shared-validation` functions the mobile app uses, with a
+  per-simulated-device Ed25519 key (from `crypto.getRandomValues`) registered
+  through `POST /devices/public-key`, and synced with
+  `POST /offline-sync/batches`. "Send the same batch again" resends the same
+  signed events with a new Idempotency-Key. With the same key the
+  idempotency layer would replay the first answer, so a new key is what
+  exercises the server's own duplicate detection (`DUPLICATE`).
+- **Scenario "prepare"** steps use the admin's own session and the normal
+  management endpoints: create and assign a shift, add a Night Turan, assign
+  a temporary supervisor. Clock-in does not check a shift's scheduled
+  window, so a prepared shift that has to start after the worker's other open
+  shift (the API refuses overlapping assignments) still works.
+- **Regular / overtime split:** the clock-out response has no split; the
+  540-minute rule is applied when a manager approves. The simulator's
+  "approve as manager" button calls the real approve endpoint with the
+  admin's session and shows the approved minutes (540 + 0 for 9 h,
+  540 + 90 for 10 h 30 m).
+- Raw JSON is shown with every `*Agorot` field and `compensation` object
+  removed, because a Field Manager may be at the keyboard. While testing this
+  we found that the worker-scoped `GET /shifts` itself returns
+  `project.budgetAgorot`. The simulator never shows it; fixing the API is a
+  separate task.
+
+### Time travel: `POST /api/v1/dev/time-entries/:id/rewind { minutes }`
+
+Clocking in and out a minute apart cannot test the 540-minute rule, so one
+dev-only endpoint moves an **open** entry's clock-in back:
+
+- Gated like dev login (404 when off, impossible in production) and limited
+  to Owners and Field Managers (`CORRECT_TIME_ENTRIES`).
+- Only an `ACTIVE` entry (`TIME_ENTRY_NOT_OPEN` otherwise). Not an emergency
+  call-out (`DEV_REWIND_EMERGENCY_NOT_SUPPORTED`): its times come from the
+  callout's own start/end clicks (-60 / +15), not from the entry's clock-in.
+- 1-1440 minutes per call, and the entry may not end up open for more than
+  24 hours in total (`DEV_REWIND_LIMIT_EXCEEDED`).
+- The business date is recomputed from the new clock-in, exactly as a real
+  clock-in computes it. Both the old and the new date's payroll periods must
+  be open (`PAYROLL_PERIOD_FINALIZED` otherwise).
+- **Never silent:** the entry gets `devRewoundAt` (new nullable column; the
+  admin web shows a "تعديل تجريبي" badge on it), and a `DEV_REWIND` audit
+  event records the old and new clock-in, the minutes, `APP_ENV` and the
+  business-date change. The clock-in `ClockEvent` (the evidence of what
+  really happened) is not touched.
+- The update is conditional on the entry still being open with the same
+  clock-in, so a concurrent clock-out can't be overwritten.
+- The simulator's buttons (6 h, 9 h, 10 h 30 m) compute the minutes needed
+  for the entry's elapsed time to reach the target, so clocking out right
+  after gives exactly 360 / 540 / 630 minutes.
+
+A second dev-only read, `GET /api/v1/dev/worker-simulator/me` (called with
+the worker's own session), returns what the worker-facing API does not
+expose: the worker's Turan assignments, whether one makes them eligible for
+an emergency call-out now (the same check the emergency endpoint runs), and
+their active temporary-supervisor assignments.

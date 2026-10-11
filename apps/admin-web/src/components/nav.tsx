@@ -7,6 +7,8 @@ import { OrgRole } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
 import { useEnumLabel } from "@/i18n/enums";
 import { cn } from "@/lib/cn";
+import { useDevLoginUsers } from "@/components/dev-quick-login";
+import { Badge } from "@/components/ui/badge";
 
 type NavKey =
   | "dashboard"
@@ -18,9 +20,11 @@ type NavKey =
   | "payroll"
   | "reports"
   | "notifications"
-  | "auditLog";
+  | "auditLog"
+  | "workerSimulator";
 
-const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[] }[] = [
+/** `devOnly` items exist only while the API is in dev login (test) mode; with it off they are not rendered at all. */
+const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[]; devOnly?: boolean }[] = [
   { href: "/dashboard", key: "dashboard", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/workers", key: "workers", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/sites", key: "sitesProjects", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
@@ -32,6 +36,7 @@ const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[] }[] = [
   { href: "/reports", key: "reports", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/notifications", key: "notifications", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/audit-log", key: "auditLog", roles: [OrgRole.OWNER] },
+  { href: "/dev/worker-simulator", key: "workerSimulator", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER], devOnly: true },
 ];
 
 /** Sidebar on the inline-start side (the right, since the app is RTL). */
@@ -41,6 +46,8 @@ export function Nav() {
   const t = useTranslations("nav");
   const tShell = useTranslations("shell");
   const enumLabel = useEnumLabel();
+  // Same signal as the login page: the API answers 404 (-> null) when dev login is off.
+  const devMode = useDevLoginUsers().data != null;
   if (!session) return null;
 
   return (
@@ -50,7 +57,7 @@ export function Nav() {
         <p className="text-xs text-slate-500">{enumLabel("OrgRole", session.role)}</p>
       </div>
       <ul className="space-y-1">
-        {NAV_ITEMS.filter((item) => item.roles.includes(session.role)).map((item) => {
+        {NAV_ITEMS.filter((item) => item.roles.includes(session.role) && (!item.devOnly || devMode)).map((item) => {
           const active = pathname?.startsWith(item.href) ?? false;
           return (
             <li key={item.href}>
@@ -63,6 +70,11 @@ export function Nav() {
                 )}
               >
                 {t(item.key)}
+                {item.devOnly ? (
+                  <Badge tone="warning" className="ms-2">
+                    {t("testModeBadge")}
+                  </Badge>
+                ) : null}
               </Link>
             </li>
           );

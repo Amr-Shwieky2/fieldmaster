@@ -802,6 +802,10 @@ model TimeEntry {
 
   isEmergency Boolean @default(false) @map("is_emergency")
 
+  /// Set when the test-mode rewind (POST /dev/time-entries/:id/rewind, dev
+  /// login only) moved clockInAt back; admin pages show a "test edit" badge.
+  devRewoundAt DateTime? @map("dev_rewound_at")
+
   approvedBy     String?   @map("approved_by") @db.Uuid
   approvedAt     DateTime? @map("approved_at")
   rejectedReason String?   @map("rejected_reason")

@@ -15,6 +15,7 @@
     "@fieldmaster/api-client": "workspace:*",
     "@fieldmaster/i18n": "workspace:*",
     "@fieldmaster/shared-types": "workspace:*",
+    "@fieldmaster/shared-validation": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "clsx": "^2.1.1",
     "leaflet": "^1.9.4",
