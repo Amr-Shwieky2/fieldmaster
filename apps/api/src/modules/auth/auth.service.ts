@@ -127,8 +127,6 @@ export class AuthService {
       throw new AppException(401, "OTP_INVALID_OR_EXPIRED", "Incorrect verification code.");
     }
 
-    await this.prisma.otpChallenge.update({ where: { id: challenge.id }, data: { consumedAt: new Date() } });
-
     const user = await this.prisma.user.findUnique({ where: { phoneNumber: dto.phoneNumber } });
     if (!user || user.status !== AccountStatus.ACTIVE) {
       throw new NotFoundException("No active account found for this phone number.");
@@ -153,6 +151,18 @@ export class AuthService {
         throw new AppException(403, "FORBIDDEN", "You are not a member of the requested organization.");
       }
       membership = selected;
+    }
+
+    // Consume the code only now that sign-in will succeed, so the client can
+    // retry with the same code after ORGANIZATION_SELECTION_REQUIRED. The
+    // conditional update keeps the code single-use even if two requests
+    // verify it concurrently.
+    const consumed = await this.prisma.otpChallenge.updateMany({
+      where: { id: challenge.id, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+    if (consumed.count === 0) {
+      throw new AppException(401, "OTP_INVALID_OR_EXPIRED", "This verification code is invalid or has expired.");
     }
 
     // A session started with the fixed test code is a test-mode session:

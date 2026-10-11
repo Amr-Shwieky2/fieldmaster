@@ -2,7 +2,7 @@ import type { INestApplication } from "@nestjs/common";
 import { OrgRole } from "@fieldmaster/shared-types";
 import { createTestApp, resetDatabase, loginAs, request } from "./test-app";
 import { PrismaService } from "../src/common/prisma/prisma.service";
-import { createOrgWithOwner, addFieldManager, addWorker } from "./fixtures";
+import { createOrgWithOwner, addFieldManager, addWorker, addMembership } from "./fixtures";
 
 
 
@@ -95,6 +95,56 @@ describe("Auth + RBAC + financial isolation (e2e)", () => {
       .post("/api/v1/auth/otp/verify")
       .send({ phoneNumber: "+972500000001", code: "000000", deviceId: "d1", platform: "WEB" })
       .expect(404);
+  });
+
+  describe("Multi-organization sign-in", () => {
+    const phoneNumber = "+972500000001";
+    const verify = (body: Record<string, string> = {}) =>
+      request(app.getHttpServer())
+        .post("/api/v1/auth/otp/verify")
+        .send({ phoneNumber, code: "000000", deviceId: "d1", platform: "WEB", ...body });
+
+    async function createUserInTwoOrgs() {
+      const { org: orgA, user } = await createOrgWithOwner(prisma, phoneNumber, "Multi Org User");
+      const { org: orgB } = await createOrgWithOwner(prisma, "+972500000002", "Other Owner");
+      await addMembership(prisma, orgB.id, user.id, OrgRole.FIELD_MANAGER);
+      await request(app.getHttpServer()).post("/api/v1/auth/otp/request").send({ phoneNumber }).expect(204);
+      return { orgA, orgB };
+    }
+
+    it("keeps the code usable after ORGANIZATION_SELECTION_REQUIRED, then rejects its reuse", async () => {
+      const { orgA, orgB } = await createUserInTwoOrgs();
+
+      const selection = await verify().expect(400);
+      expect(selection.body.code).toBe("ORGANIZATION_SELECTION_REQUIRED");
+      expect(selection.body.details.organizations).toHaveLength(2);
+      expect(selection.body.details.organizations).toEqual(
+        expect.arrayContaining([
+          { organizationId: orgA.id, role: OrgRole.OWNER },
+          { organizationId: orgB.id, role: OrgRole.FIELD_MANAGER },
+        ]),
+      );
+
+      const session = await verify({ organizationId: orgB.id }).expect(201);
+      expect(session.body.accessToken).toBeTruthy();
+      expect(session.body.organizationId).toBe(orgB.id);
+      expect(session.body.role).toBe(OrgRole.FIELD_MANAGER);
+
+      const reuse = await verify({ organizationId: orgB.id }).expect(401);
+      expect(reuse.body.code).toBe("OTP_INVALID_OR_EXPIRED");
+    });
+
+    it("keeps the code usable after choosing an organization the user is not a member of", async () => {
+      const { orgA } = await createUserInTwoOrgs();
+      const { org: foreignOrg } = await createOrgWithOwner(prisma, "+972500000003", "Foreign Owner");
+
+      const forbidden = await verify({ organizationId: foreignOrg.id }).expect(403);
+      expect(forbidden.body.code).toBe("FORBIDDEN");
+
+      const session = await verify({ organizationId: orgA.id }).expect(201);
+      expect(session.body.organizationId).toBe(orgA.id);
+      expect(session.body.role).toBe(OrgRole.OWNER);
+    });
   });
 
   describe("Financial isolation (spec scenario 12)", () => {

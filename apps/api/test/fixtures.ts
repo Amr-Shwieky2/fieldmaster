@@ -27,6 +27,13 @@ export async function addFieldManager(prisma: PrismaService, organizationId: str
   return { user, membership, workerProfile };
 }
 
+/** Gives an existing user an additional membership, e.g. to belong to a second organization. */
+export async function addMembership(prisma: PrismaService, organizationId: string, userId: string, role: OrgRole) {
+  return prisma.organizationMembership.create({
+    data: { id: id(), organizationId, userId, role, status: AccountStatus.ACTIVE },
+  });
+}
+
 export async function addWorker(
   prisma: PrismaService,
   organizationId: string,
