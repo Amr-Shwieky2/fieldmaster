@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { ApiRequestError, NetworkError } from "@fieldmaster/api-client";
-import ar from "@/i18n/messages/ar.json";
-import { INTL_LOCALE } from "@/i18n/config";
-import { getErrorMessage, isForbidden, type ErrorTranslator } from "../errors";
+import ar from "../messages/ar.json";
+import { INTL_LOCALE } from "../config";
+import { getCodeMessage, getErrorMessage, isForbidden, isNetworkError, type ErrorTranslator } from "../errors";
 
 // createTranslator's fully typed key union is narrower than the plain-string
 // ErrorTranslator the helper accepts; the runtime shape is the same.
@@ -21,7 +21,7 @@ describe("getErrorMessage", () => {
       distanceMeters: 412.6,
       allowedRadiusMeters: 150,
     });
-    expect(getErrorMessage(t, error)).toBe("أنت خارج نطاق الموقع: المسافة 413 م، والحد المسموح 150 م.");
+    expect(getErrorMessage(t, error)).toBe("أنت خارج نطاق الموقع. المسافة: 413 م، المسموح: 150 م.");
   });
 
   it("falls back to the detail-free message when details are missing", () => {
@@ -60,5 +60,23 @@ describe("getErrorMessage", () => {
   it("detects 403 for the access-denied state", () => {
     expect(isForbidden(apiError(403, "FORBIDDEN"))).toBe(true);
     expect(isForbidden(apiError(404, "NOT_FOUND"))).toBe(false);
+  });
+
+  it("recognizes React Native's and the browser's raw fetch failures as network errors", () => {
+    expect(isNetworkError(new TypeError("Network request failed"))).toBe(true);
+    expect(isNetworkError(new TypeError("Failed to fetch"))).toBe(true);
+    expect(isNetworkError(new TypeError("x is not a function"))).toBe(false);
+    expect(getErrorMessage(t, new TypeError("Network request failed"))).toBe(ar.errors.network);
+  });
+});
+
+describe("getCodeMessage (a code on its own, e.g. a rejected offline event)", () => {
+  it("fills in details, falls back to the detail-free wording, and returns null for an unknown code", () => {
+    expect(getCodeMessage(t, "GEOFENCE_OUTSIDE_ALLOWED_RADIUS", { distanceMeters: 184, allowedRadiusMeters: 100 })).toBe(
+      "أنت خارج نطاق الموقع. المسافة: 184 م، المسموح: 100 م.",
+    );
+    expect(getCodeMessage(t, "GEOFENCE_OUTSIDE_ALLOWED_RADIUS")).toBe(ar.errors.GEOFENCE_OUTSIDE_ALLOWED_RADIUS_NO_DETAILS);
+    expect(getCodeMessage(t, "INVALID_OFFLINE_SIGNATURE")).toBe(ar.errors.INVALID_OFFLINE_SIGNATURE);
+    expect(getCodeMessage(t, "BRAND_NEW_CODE")).toBeNull();
   });
 });

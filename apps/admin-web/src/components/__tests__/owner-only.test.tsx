@@ -3,7 +3,7 @@ import { cleanup, render as rtlRender, screen, waitFor } from "@testing-library/
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createIntlWrapper } from "../../test/render-with-intl";
-import ar from "../../i18n/messages/ar.json";
+import ar from "../../i18n/messages";
 import { OrgRole } from "@fieldmaster/shared-types";
 import { OwnerOnly } from "../owner-only";
 import { AuthProvider } from "../../lib/auth-context";

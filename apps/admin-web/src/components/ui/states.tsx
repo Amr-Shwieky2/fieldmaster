@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { isForbidden } from "@/lib/errors";
+import { isForbidden } from "@fieldmaster/i18n";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { AccessDenied } from "@/components/access-denied";
 import { Button } from "./button";

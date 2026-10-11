@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { createFormatter, formatAgorot, formatBusinessDate, formatDate, formatDateTime, formatMinutes, formatMonth, formatNumber, formatTime } from "../format";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  __useBuiltInTimeZoneRulesForTests,
+  createFormatter,
+  formatAgorot,
+  formatBusinessDate,
+  formatDate,
+  formatDateTime,
+  formatMinutes,
+  formatMonth,
+  formatNumber,
+  formatTime,
+  israelOffsetMinutes,
+  toBusinessDay,
+  toWesternDigits,
+} from "../format";
 
 const ARABIC_INDIC = /[٠-٩۰-۹]/;
 
@@ -81,5 +95,39 @@ describe("createFormatter", () => {
     expect(fmt.minutes(615)).toBe("10 س 15 د");
     expect(fmt.month("2026-09")).toBe("سبتمبر 2026");
     expect(fmt.dateTime("2026-01-15T08:30:00.000Z")).toBe("15 يناير 2026 في 10:30");
+  });
+});
+
+describe("engine independence (Hermes on iOS/Android, browsers, Node)", () => {
+  afterEach(() => __useBuiltInTimeZoneRulesForTests(false));
+
+  it("the built-in Israel time-zone rules agree with Intl for every hour of 2024-2030, including each DST switch", () => {
+    const intl = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Jerusalem", timeZoneName: "longOffset" });
+    const mismatches: string[] = [];
+    for (let t = Date.UTC(2024, 0, 1); t < Date.UTC(2031, 0, 1); t += 3_600_000) {
+      const date = new Date(t);
+      const name = intl.formatToParts(date).find((p) => p.type === "timeZoneName")?.value ?? "";
+      const expected = name === "GMT+03:00" ? 180 : name === "GMT+02:00" ? 120 : NaN;
+      if (israelOffsetMinutes(date) !== expected) mismatches.push(date.toISOString());
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it("formats the same text with the built-in rules as with Intl", () => {
+    const samples = ["2026-01-15T08:30:00.000Z", "2026-07-15T21:30:00.000Z", "2026-03-27T00:30:00.000Z", "2026-10-24T22:30:00.000Z"];
+    const withIntl = samples.map((s) => [formatDateTime(s), formatTime(s), toBusinessDay(s)]);
+    __useBuiltInTimeZoneRulesForTests(true);
+    expect(samples.map((s) => [formatDateTime(s), formatTime(s), toBusinessDay(s)])).toEqual(withIntl);
+    expect(withIntl[1]).toEqual(["16 يوليو 2026 في 00:30", "00:30", "2026-07-16"]);
+  });
+
+  it("converts Arabic-Indic digits to Western digits", () => {
+    expect(toWesternDigits("١٢٣٤٥٦٧٨٩٠ و ۱۲۳")).toBe("1234567890 و 123");
+    expect(toWesternDigits("10:30")).toBe("10:30");
+  });
+
+  it("gives the business day of an instant in Asia/Jerusalem", () => {
+    expect(toBusinessDay("2026-07-15T21:30:00.000Z")).toBe("2026-07-16");
+    expect(toBusinessDay(null)).toBeNull();
   });
 });
