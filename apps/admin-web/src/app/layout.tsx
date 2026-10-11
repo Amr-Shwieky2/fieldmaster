@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans_Arabic } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getTranslations } from "next-intl/server";
-import { APP_DIRECTION, APP_LOCALE } from "@/i18n/config";
+import { APP_DIRECTION, APP_LOCALE } from "@fieldmaster/i18n";
 import "./globals.css";
 import { Providers } from "./providers";
 

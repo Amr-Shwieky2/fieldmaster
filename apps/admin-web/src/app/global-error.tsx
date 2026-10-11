@@ -2,8 +2,8 @@
 
 import { useEffect } from "react";
 import { NextIntlClientProvider, useTranslations } from "next-intl";
-import { APP_DIRECTION, APP_LOCALE, BUSINESS_TIME_ZONE, INTL_LOCALE } from "@/i18n/config";
-import ar from "@/i18n/messages/ar.json";
+import { APP_DIRECTION, APP_LOCALE, BUSINESS_TIME_ZONE, INTL_LOCALE } from "@fieldmaster/i18n";
+import ar from "@/i18n/messages";
 import { Button } from "@/components/ui/button";
 import { FullPageMessage } from "@/components/full-page-message";
 import "./globals.css";

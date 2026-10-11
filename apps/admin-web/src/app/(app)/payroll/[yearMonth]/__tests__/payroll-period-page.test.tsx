@@ -263,7 +263,7 @@ describe("Payroll period page", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "إعادة فتح" }));
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toBe("يتعارض هذا الإجراء مع الحالة الحالية للسجل. حدّث الصفحة وحاول مرة أخرى."),
+      expect(screen.getByRole("alert").textContent).toBe("لا يمكن تنفيذ هذا الإجراء الآن لأن البيانات تغيّرت. حدّث البيانات وحاول مرة أخرى."),
     );
     const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/reopen"));
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ reason: "يلزم تصحيح بعد المراجعة" });

@@ -149,34 +149,50 @@ its origin (`http://localhost:8081` by default) to `CORS_ORIGINS` in
 > to avoid silently talking to the wrong database. See
 > `docs/technical-decisions.md` if you need to change this back.
 
-## Language (admin web)
+## Language (Arabic only, admin web and mobile)
 
-The admin web app works **only in Arabic, right-to-left**. There is no
-language switch, no English and no Hebrew; every page is rendered with
-`<html lang="ar" dir="rtl">`.
+Both apps work **only in Arabic, right-to-left**. There is no language switch,
+no English and no Hebrew.
 
-- All interface text lives in `apps/admin-web/src/i18n/messages/ar.json`.
-  Components read it with next-intl (`useTranslations("namespace")`).
-- Numbers and dates always use Western digits (0-9) and the Asia/Jerusalem
-  time zone; money is shown as `₪ 1,234.50`.
-- API errors are shown in Arabic from their code. The API's English message is
-  never shown.
+- Text shared by both apps lives in `packages/i18n/src/messages/ar.json`
+  (`@fieldmaster/i18n`):
+  - `common` (glossary terms), `states`, `units`;
+  - `errors` (one message per API error code);
+  - `enums` (every enum value);
+  - `auth` and `devLogin` (login form, test-mode banner, quick login).
+
+  Each app adds its own screens in `apps/<app>/src/i18n/messages/ar.json`. The
+  web reads them with next-intl, mobile with use-intl; both use
+  `useTranslations("namespace")`.
+- Numbers and dates always use Western digits (0-9) and the Asia/Jerusalem time
+  zone. Durations read `1 س 30 د` and money `₪ 1,234.50`. The shared
+  formatter in `@fieldmaster/i18n` gives the same text in browsers and on
+  phones.
+- API errors are shown in Arabic from their code, with details where it
+  matters, e.g. "أنت خارج نطاق الموقع. المسافة: 184 م، المسموح: 100 م.". The
+  API's English message is never shown.
 - Arabic must use the project glossary exactly (for example المالك, مدير ميدان,
   وردية, بدء الدوام, إنهاء الدوام, الرواتب). The full list is in
-  `apps/admin-web/scripts/lib/i18n-check.mjs`.
-- `pnpm lint` (and so CI) runs `node apps/admin-web/scripts/check-i18n.mjs`,
-  which fails on:
-  - any messages file other than `ar.json`, empty values, or a message that
-    is not Arabic (an English leftover);
+  `packages/i18n/scripts/i18n-check.mjs`.
+- `pnpm lint` (and so CI) runs each app's `scripts/check-i18n.mjs` and the
+  shared package's check. They fail on:
+  - any messages file other than `ar.json`, an app redefining a shared key,
+    empty values, or a message that is not Arabic;
   - keys used in code but not defined;
   - an API error code without an Arabic message;
   - glossary drift;
   - Hebrew characters or Arabic-Indic digits;
-  - physical `left`/`right` Tailwind classes. Use `ms`/`me`, `ps`/`pe`,
-    `start`/`end`, `text-start`/`text-end`.
+  - physical left/right styles:
+    - web: Tailwind `ml-`/`text-left`... → use `ms`/`me`, `ps`/`pe`, `start`/`end`;
+    - mobile: `marginLeft`/`paddingRight`/`left:`/`textAlign: "left"` → use
+      `marginStart`/`paddingEnd`/`start`.
 
-  ESLint's `i18next/no-literal-string` blocks new hard-coded JSX text.
-- The mobile app is still English-only. Its translation is a later step.
+  ESLint's `i18next/no-literal-string` blocks new hard-coded text in both
+  apps. On mobile, `Text`/`TextInput` must come from `AppText`/`AppTextInput`
+  (Arabic font, RTL alignment).
+- How RTL is switched on in Expo Go, in development/production builds and on
+  the web is explained in `docs/technical-decisions.md` ("Step 3: RTL on
+  mobile").
 
 ## Environment variables
 
@@ -232,12 +248,12 @@ ones:
 
 | Role | Phone | Name |
 |---|---|---|
-| Owner | `+972500000001` | Dana Owner-Levi |
-| Owner | `+972500000002` | Amit Owner-Katz |
-| Field Manager | `+972500000011` | Yossi Manager-Ben David |
-| Field Manager | `+972500000012` | Noa Manager-Peretz |
-| Worker | `+972500010001` | Eli Ramzani |
-| Worker (has a forgotten-stamp deduction) | `+972500010010` | Nir Barrier |
+| Owner | `+972500000001` | سلمى منصور |
+| Owner | `+972500000002` | إلياس رمضان |
+| Field Manager | `+972500000011` | يوسف الخطيب |
+| Field Manager | `+972500000012` | رنا عودة |
+| Worker | `+972500010001` | خالد ناصر |
+| Worker (has a forgotten-stamp deduction) | `+972500010010` | نادر مصالحة |
 
 There are two ways to log in:
 
@@ -267,7 +283,13 @@ enable dev login on a deployment that holds real data.
 3. In another terminal run
    `EXPO_PUBLIC_API_URL=http://<LAN-IP>:3000/api/v1 pnpm --filter @fieldmaster/mobile start`
    and scan the QR code with Expo Go (Android) or the Camera app (iOS).
-4. The login screen shows the test-mode banner and the quick-login list.
+4. The login screen shows the test-mode banner and the quick-login list, in
+   Arabic and right-to-left.
+5. If the layout is left-to-right (the back arrow points left and text starts
+   on the left), fully close the project in Expo Go (swipe it away, or open
+   the Expo Go home screen) and open it again from the QR code or the recent
+   list. Expo Go applies `extra.forcesRTL` from `app.json` only when a project
+   is opened; a JS reload is not enough.
 
 ## Testing summary
 

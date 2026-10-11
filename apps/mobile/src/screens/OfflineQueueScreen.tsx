@@ -1,123 +1,138 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, StyleSheet, View, type ListRenderItemInfo } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useTranslations } from "use-intl";
+import { AppText } from "../components/AppText";
+import { Badge } from "../components/Badge";
+import { Button } from "../components/Button";
+import { isolateLtr } from "../components/LtrText";
+import { ScreenHeader } from "../components/ScreenHeader";
+import { EmptyView, ErrorView } from "../components/StateViews";
+import { useCodeMessage, useEnumLabel, useErrorMessage, useFormat } from "../i18n/hooks";
 import { useOfflineSync } from "../lib/offline-sync-context";
 import type { QueuedEvent, QueuedEventLocalStatus } from "../lib/offline-queue";
-import { colors } from "../lib/theme";
+import { colors, spacing } from "../lib/theme";
 import type { RootStackParamList } from "../navigation/types";
 
 type Props = NativeStackScreenProps<RootStackParamList, "OfflineQueue">;
-
-const STATUS_LABELS: Record<QueuedEventLocalStatus, string> = {
-  PENDING: "Waiting to sync",
-  SYNCING: "Syncing…",
-  VERIFIED: "Verified",
-  FLAGGED: "Flagged for review",
-  REJECTED: "Rejected",
-  DUPLICATE: "Already synced",
-};
 
 const STATUS_COLORS: Record<QueuedEventLocalStatus, string> = {
   PENDING: colors.muted,
   SYNCING: colors.primary,
   VERIFIED: colors.success,
-  FLAGGED: "#b45309",
+  FLAGGED: colors.warning,
   REJECTED: colors.danger,
   DUPLICATE: colors.muted,
 };
 
-const REASON_EXPLANATIONS: Record<string, string> = {
-  DEVICE_KEY_NOT_REGISTERED: "This device's signing key wasn't registered yet -- it will retry automatically.",
-  INVALID_OFFLINE_SIGNATURE: "This event's signature could not be verified.",
-  GEOFENCE_OUTSIDE_ALLOWED_RADIUS: "You were outside the site's permitted check-in area.",
-  ACTIVE_TIME_ENTRY_EXISTS: "You already had an open clock-in when this was captured.",
-  NO_ACTIVE_TIME_ENTRY: "There was no open clock-in to close when this was captured.",
-  SUMMARY_REQUIRED: "A task summary was missing.",
-};
-
 export function OfflineQueueScreen({ navigation }: Props) {
+  const t = useTranslations("offlineQueue");
+  const errorMessage = useErrorMessage();
   const { queue, isOnline, syncNow } = useOfflineSync();
-  const [retrying, setRetrying] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  // The thrown error itself (wrapped, since it can be any value), turned into Arabic at render time.
+  const [syncFailure, setSyncFailure] = useState<{ cause: unknown } | null>(null);
 
-  async function handleRetry() {
-    setRetrying(true);
+  async function handleSync() {
+    setSyncing(true);
+    setSyncFailure(null);
     try {
       await syncNow();
+    } catch (err) {
+      setSyncFailure({ cause: err });
     } finally {
-      setRetrying(false);
+      setSyncing(false);
     }
   }
 
-  const sorted = [...queue].sort((a, b) => new Date(b.queuedAt).getTime() - new Date(a.queuedAt).getTime());
+  const sorted = useMemo(() => [...queue].sort((a, b) => new Date(b.queuedAt).getTime() - new Date(a.queuedAt).getTime()), [queue]);
+  // Stable list props: the list does not re-render while only the sync button changes.
+  const emptyView = useMemo(() => <EmptyView title={t("empty")} />, [t]);
 
   return (
     <SafeAreaView style={styles.screen}>
-      <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>‹ Back</Text>
-        </Pressable>
-        <Text style={styles.title}>Offline sync</Text>
-        <View style={{ width: 48 }} />
+      <ScreenHeader title={t("title")} onBack={() => navigation.goBack()} />
+
+      <View
+        aria-live="polite"
+        style={[styles.statusBanner, { backgroundColor: isOnline ? colors.successSoft : colors.warningSoft }]}
+      >
+        <AppText weight="semibold" color={isOnline ? colors.success : colors.warning}>
+          {isOnline ? t("online") : t("offline")}
+        </AppText>
       </View>
 
-      <View style={[styles.statusBanner, { backgroundColor: isOnline ? "#dcfce7" : "#fef3c7" }]}>
-        <Text style={[styles.statusBannerText, { color: isOnline ? colors.success : "#b45309" }]}>
-          {isOnline ? "Online" : "Offline — events will sync automatically when you're back online"}
-        </Text>
+      {/* Offline, a manual sync cannot reach anyone: the banner above says the records go out on their own. */}
+      <View style={styles.actions}>
+        <Button label={t("syncNow")} busy={syncing} busyLabel={t("syncing")} disabled={!isOnline} onPress={handleSync} />
       </View>
 
-      <Pressable style={[styles.retryButton, retrying && styles.retryButtonDisabled]} disabled={retrying} onPress={handleRetry}>
-        {retrying ? <ActivityIndicator color={colors.primaryText} /> : <Text style={styles.retryButtonText}>Sync now</Text>}
-      </Pressable>
+      {syncFailure ? <ErrorView message={errorMessage(syncFailure.cause)} onRetry={handleSync} /> : null}
 
       <FlatList
+        style={styles.list}
         data={sorted}
-        keyExtractor={(item) => item.clientEventId}
+        keyExtractor={keyExtractor}
         contentContainerStyle={styles.listContent}
-        ListEmptyComponent={<Text style={styles.emptyText}>No offline events. Everything you clock is syncing normally.</Text>}
-        renderItem={({ item }) => <QueueRow item={item} />}
+        ListEmptyComponent={emptyView}
+        renderItem={renderItem}
       />
     </SafeAreaView>
   );
 }
 
+const keyExtractor = (item: QueuedEvent) => item.clientEventId;
+const renderItem = ({ item }: ListRenderItemInfo<QueuedEvent>) => <QueueRow item={item} />;
+
 function QueueRow({ item }: { item: QueuedEvent }) {
-  const reasonText = item.reason ? (REASON_EXPLANATIONS[item.reason] ?? item.reason) : null;
+  const t = useTranslations("offlineQueue");
+  const format = useFormat();
+  const enumLabel = useEnumLabel();
+  const codeMessage = useCodeMessage();
+
+  // Worker wording on purpose ("تم القبول", "بحاجة إلى مراجعة", "تمت مزامنته سابقًا"): the admin web's
+  // enums.OfflineSyncEventStatus ("تم التحقق", "مُعلَّم للمراجعة", "مكرّر") is written for managers.
+  const statusLabel = t(`status.${item.localStatus}`);
+  const rejected = item.localStatus === "REJECTED";
+  // The server sends an error code for a record captured earlier, and a rejection is final (only
+  // waiting records are sent again): explain what was wrong at the time, never the raw code.
+  const reason = item.reason;
+  const reasonText = reason
+    ? t.has(`reasons.${reason}`)
+      ? t(`reasons.${reason}`)
+      : (codeMessage(reason) ?? t("unknownReason"))
+    : null;
+  const coordinates = isolateLtr(`${item.latitude.toFixed(5)}, ${item.longitude.toFixed(5)}`);
+
   return (
     <View style={styles.row}>
       <View style={styles.rowHeader}>
-        <Text style={styles.rowType}>{item.eventType === "CLOCK_IN" ? "Clock in" : "Clock out"}</Text>
-        <View style={[styles.badge, { backgroundColor: STATUS_COLORS[item.localStatus] }]}>
-          <Text style={styles.badgeText}>{STATUS_LABELS[item.localStatus]}</Text>
-        </View>
+        <AppText weight="bold" size="large" style={styles.rowType}>
+          {enumLabel("ClockEventType", item.eventType)}
+        </AppText>
+        <Badge label={statusLabel} color={STATUS_COLORS[item.localStatus] ?? colors.muted} />
       </View>
-      <Text style={styles.rowMeta}>Captured {new Date(item.deviceTimestamp).toLocaleString()}</Text>
-      <Text style={styles.rowMeta}>
-        {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)} (±{Math.round(item.accuracyMeters)}m)
-      </Text>
-      {reasonText && <Text style={styles.rowReason}>{reasonText}</Text>}
+      <AppText color={colors.muted}>{t("capturedAt", { time: format.dateTime(item.deviceTimestamp) })}</AppText>
+      <AppText color={colors.muted}>{t("location", { coordinates })}</AppText>
+      <AppText color={colors.muted}>{t("accuracy", { meters: String(Math.round(item.accuracyMeters)) })}</AppText>
+      {reasonText ? (
+        <AppText weight="semibold" color={rejected ? colors.danger : colors.warning}>
+          {reasonText}
+        </AppText>
+      ) : null}
+      {rejected ? <AppText>{t("rejectedHint")}</AppText> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, paddingBottom: 8 },
-  backText: { color: colors.primary, fontSize: 15, fontWeight: "600" },
-  title: { fontSize: 18, fontWeight: "700", color: colors.text },
-  statusBanner: { marginHorizontal: 20, borderRadius: 10, padding: 12, marginBottom: 8 },
-  statusBannerText: { fontSize: 13, fontWeight: "600", textAlign: "center" },
-  retryButton: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 12, alignItems: "center", marginHorizontal: 20, marginBottom: 12 },
-  retryButtonDisabled: { opacity: 0.6 },
-  retryButtonText: { color: colors.primaryText, fontSize: 15, fontWeight: "600" },
-  listContent: { paddingHorizontal: 20, paddingBottom: 24, gap: 10 },
-  emptyText: { color: colors.muted, textAlign: "center", marginTop: 24 },
-  row: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 4 },
-  rowHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  rowType: { fontSize: 15, fontWeight: "700", color: colors.text },
-  badge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  badgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-  rowMeta: { fontSize: 12, color: colors.muted },
-  rowReason: { fontSize: 12, color: "#b45309", marginTop: 4 },
+  statusBanner: { marginHorizontal: spacing.xl, marginBottom: spacing.md, borderRadius: 14, padding: spacing.md },
+  actions: { paddingHorizontal: spacing.xl, marginBottom: spacing.md },
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xl, gap: spacing.md },
+  row: { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, gap: spacing.xs },
+  rowHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.sm, flexWrap: "wrap" },
+  rowType: { flexShrink: 1 },
 });

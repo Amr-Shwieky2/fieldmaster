@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTranslator, IntlErrorCode, type AbstractIntlMessages } from "next-intl";
-import ar from "@/i18n/messages/ar.json";
-import { INTL_LOCALE } from "@/i18n/config";
+import ar from "@/i18n/messages";
+import { INTL_LOCALE } from "@fieldmaster/i18n";
 
 /** Keys that are only read with `t.raw()` (HTML for Leaflet), not formatted as ICU. */
 const RAW_ONLY = new Set(["geofenceMap.attribution"]);
