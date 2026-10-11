@@ -46,7 +46,7 @@ export default function TuranPage() {
   const errorMessage = useErrorMessage();
   const { client } = useAuth();
   const queryClient = useQueryClient();
-  // Messages are kept as keys or error causes, not translated text, so they follow a language switch.
+  // Messages are kept as keys or error causes and translated while rendering.
   const [formProblem, setFormProblem] = useState<FormProblem | null>(null);
   const [listFailure, setListFailure] = useState<{ cause: unknown } | null>(null);
   const [success, setSuccess] = useState<"created" | "cancelled" | null>(null);

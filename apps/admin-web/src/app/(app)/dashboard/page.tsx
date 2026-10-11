@@ -29,8 +29,8 @@ function StatCard({ label, value, hint }: { label: string; value: ReactNode; hin
 
 /**
  * Cost per project as a bar list. Each bar is a block inside a full-width
- * track, so it starts at the inline-start edge: the right in Arabic, the left
- * in English. Widths are relative to the most expensive project.
+ * track, so it starts at the inline-start edge (the right, since the app is
+ * RTL). Widths are relative to the most expensive project.
  */
 function CostByProject({ items }: { items: FinancialDashboard["costByProject"] }) {
   const t = useTranslations("dashboard");

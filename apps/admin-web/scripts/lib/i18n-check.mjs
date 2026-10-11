@@ -12,37 +12,77 @@ export function flatten(messages, prefix = "") {
   return out;
 }
 
-/** ICU argument names and rich-text tag names used by a message, sorted. */
-export function placeholders(message) {
-  const names = new Set();
-  // Top-level and nested `{name` / `{name, plural, ...}` arguments.
-  for (const match of String(message).matchAll(/\{\s*([A-Za-z_][\w]*)\s*(?:,|\})/g)) names.add(match[1]);
-  for (const match of String(message).matchAll(/<([A-Za-z][\w]*)>/g)) names.add(`<${match[1]}>`);
-  return [...names].sort();
-}
-
-/** Problems comparing two flattened locales (missing keys, empty values, placeholder drift). */
-export function compareLocales(flatA, flatB, nameA = "ar", nameB = "en") {
+/** Problems in the flattened Arabic messages: empty or non-string values. */
+export function emptyValueProblems(flat) {
   const problems = [];
-  for (const key of Object.keys(flatA)) if (!(key in flatB)) problems.push(`${key}: missing in ${nameB}.json`);
-  for (const key of Object.keys(flatB)) if (!(key in flatA)) problems.push(`${key}: missing in ${nameA}.json`);
-  for (const [key, value] of Object.entries(flatA)) {
-    if (typeof value !== "string" || value.trim() === "") problems.push(`${key}: empty or non-string in ${nameA}.json`);
-    if (key in flatB) {
-      const other = flatB[key];
-      if (typeof other !== "string" || other.trim() === "") problems.push(`${key}: empty or non-string in ${nameB}.json`);
-      else if (placeholders(value).join(",") !== placeholders(other).join(","))
-        problems.push(`${key}: placeholders differ (${nameA}: ${placeholders(value).join(", ") || "none"} / ${nameB}: ${placeholders(other).join(", ") || "none"})`);
-    }
+  for (const [key, value] of Object.entries(flat)) {
+    if (typeof value !== "string" || value.trim() === "") problems.push(`${key}: empty or non-string in ar.json`);
   }
   return problems;
+}
+
+/** Keys whose value is intentionally not Arabic (brand names). */
+export const NON_ARABIC_ALLOWED = new Set(["shell.brand"]);
+
+const ARABIC_LETTER = /[\u0621-\u064A]/;
+const LATIN_LETTER = /[A-Za-z]/;
+
+/** The visible text of an ICU message: argument names, selectors and tag names removed. */
+export function visibleText(message) {
+  let text = String(message).replace(/<\/?[A-Za-z][\w]*>/g, " ");
+  // Plural/select branches `{n, plural, one {...} other {...}}`: keep the branch bodies.
+  text = text.replace(/\{\s*[A-Za-z_]\w*\s*,\s*(?:plural|select|selectordinal)\s*,/g, "{");
+  text = text.replace(/(?:=\d+|zero|one|two|few|many|other|[A-Za-z_]\w*)\s*\{/g, "{");
+  // Simple arguments `{name}` / `{n, number}` and the `#` plural value.
+  text = text.replace(/\{\s*[A-Za-z_]\w*\s*(?:,\s*[A-Za-z]+\s*)?\}/g, " ").replace(/#/g, " ");
+  return text.replace(/[{}]/g, " ");
+}
+
+/**
+ * The app is Arabic only: every message must read in Arabic. A value whose
+ * visible text has Latin letters and no Arabic letter (an English leftover)
+ * is a problem. Arabic text with an embedded code such as "SMS" or "API" is
+ * fine, and so is a value that is only placeholders/punctuation.
+ */
+export function arabicOnlyProblems(flat, allowed = NON_ARABIC_ALLOWED) {
+  const problems = [];
+  for (const [key, value] of Object.entries(flat)) {
+    if (allowed.has(key) || typeof value !== "string") continue;
+    const text = visibleText(value);
+    if (LATIN_LETTER.test(text) && !ARABIC_LETTER.test(text)) problems.push(`${key}: not Arabic ("${value}") -- the app is Arabic only`);
+  }
+  return problems;
+}
+
+/**
+ * Error codes the API can send, read from its source: the `ErrorCodes`
+ * object, string codes passed straight to `new AppException(status, "CODE", ...)`,
+ * and the codes the exception filter assigns (`code: ... "CODE" ...`).
+ */
+export function apiErrorCodes(sources) {
+  const codes = new Set();
+  for (const source of sources) {
+    const block = /export const ErrorCodes = \{([\s\S]*?)\}/.exec(source);
+    if (block) for (const match of block[1].matchAll(/:\s*"([A-Z][A-Z0-9_]+)"/g)) codes.add(match[1]);
+    for (const match of source.matchAll(/new AppException\(\s*[^,()]+,\s*"([A-Z][A-Z0-9_]+)"/g)) codes.add(match[1]);
+    for (const line of source.split("\n")) {
+      if (!/^\s*code:/.test(line)) continue;
+      for (const match of line.matchAll(/"([A-Z][A-Z0-9_]+)"/g)) codes.add(match[1]);
+    }
+  }
+  return [...codes].sort();
+}
+
+/** API error codes without an `errors.<CODE>` message (they would show a generic error). */
+export function untranslatedErrorCodes(codes, flat) {
+  return codes.filter((code) => !(`errors.${code}` in flat)).map((code) => `errors.${code}: the API sends this code but ar.json has no message for it`);
 }
 
 const HEBREW = /[֐-׿]/;
 const ARABIC_INDIC_DIGITS = /[٠-٩۰-۹]/;
 
 /** No Hebrew anywhere, Western digits only. */
-export function scriptProblems(flat, name) {
+export function scriptProblems(flat, name = "ar") {
   const problems = [];
   for (const [key, value] of Object.entries(flat)) {
     if (HEBREW.test(value)) problems.push(`${key}: contains Hebrew characters in ${name}.json`);

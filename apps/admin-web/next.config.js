@@ -1,7 +1,7 @@
 const createNextIntlPlugin = require("next-intl/plugin");
 
-// Cookie-based next-intl: no /ar or /en URL prefixes. The request config reads
-// the `fm_locale` cookie (see src/i18n/request.ts).
+// next-intl with a single locale (Arabic only, no URL prefixes); see
+// src/i18n/request.ts.
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 /** @type {import('next').NextConfig} */

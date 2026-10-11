@@ -66,7 +66,10 @@ Every error response has this exact shape, produced by a global
 
 `code` is a stable machine-readable identifier
 (`apps/api/src/common/errors/app-exception.ts`); `message` is safe to show
-a worker directly. Stack traces never appear in a response body.
+a worker directly. Stack traces never appear in a response body. The admin
+web is Arabic only and never displays `message`: it shows the Arabic text
+for `code` (or for the HTTP status when it doesn't know the code), and its
+`pnpm lint` fails if a code the API can send has no Arabic message.
 
 ## Idempotency
 

@@ -8,7 +8,6 @@ import { useAuth } from "@/lib/auth-context";
 import { useFormat } from "@/lib/use-format";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { renderNotificationText } from "@/lib/notification-text";
-import { useAppLocale } from "@/i18n/use-app-locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -98,10 +97,8 @@ function NotificationRow({
 }) {
   const t = useTranslations("notifications");
   const fmt = useFormat();
-  const locale = useAppLocale();
   const intl = useFormatter();
-  // English may show the stored English text for old notifications without data; Arabic never does.
-  const text = renderNotificationText(t, fmt, notification, { storedTextFallback: locale === "en" });
+  const text = renderNotificationText(t, fmt, notification);
   const titleId = `notification-${notification.id}-title`;
   const isUnread = !notification.readAt;
 

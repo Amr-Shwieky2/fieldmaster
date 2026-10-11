@@ -1,14 +1,16 @@
 import { ApiRequestError, NetworkError } from "@fieldmaster/api-client";
 
 /**
- * Turns API / network failures into localized, user-safe messages.
+ * Turns API / network failures into Arabic, user-safe messages.
  *
  * The API returns a stable `code`, an English `message` and optional
- * `details`. The UI maps `code` to `errors.<CODE>` in ar.json / en.json and
- * fills in the details where the message needs them (for example the
- * distance and allowed radius of GEOFENCE_OUTSIDE_ALLOWED_RADIUS). For a code
- * the frontend does not know yet, the API's own message is shown rather than
- * hiding what went wrong.
+ * `details`. The UI maps `code` to `errors.<CODE>` in ar.json and fills in the
+ * details where the message needs them (for example the distance and allowed
+ * radius of GEOFENCE_OUTSIDE_ALLOWED_RADIUS). The app is Arabic only, so the
+ * API's English `message` is never shown: a code the frontend does not know
+ * gets the Arabic message for its HTTP status instead. `pnpm lint` fails when
+ * the API has an error code without an `errors.<CODE>` translation, so that
+ * fallback is only a safety net.
  *
  *   const errorMessage = useErrorMessage();
  *   <ErrorState message={errorMessage(error)} />
@@ -81,9 +83,11 @@ const GENERIC_API_CODE = "ERROR";
 
 /** Status-level message for codes without their own translation. */
 function keyForStatus(status: number): string | null {
+  if (status === 400) return "VALIDATION_FAILED";
   if (status === 401) return "UNAUTHENTICATED";
   if (status === 403) return "FORBIDDEN";
   if (status === 404) return "NOT_FOUND";
+  if (status === 409) return "CONFLICT";
   if (status === 429) return "rateLimited";
   if (status === 503) return "SERVICE_UNAVAILABLE";
   if (status >= 500) return "INTERNAL_ERROR";
@@ -91,14 +95,14 @@ function keyForStatus(status: number): string | null {
 }
 
 /**
- * Localized message for any thrown value.
+ * Arabic message for any thrown value.
  *
  *  - `NetworkError` -> `errors.network`
  *  - the generic code `ERROR` -> the status-level message (e.g. 429 -> `errors.rateLimited`)
  *  - known `body.code` -> `errors.<code>` (with `details` filled in when the
  *    message needs them, or `errors.<code>_NO_DETAILS` when they are missing)
- *  - unknown code -> the API's own `message`
- *  - no usable message -> the status-level message, else `errors.unknown`
+ *  - unknown or missing code -> the status-level message, else `errors.unknown`
+ *    (never the API's English `message`)
  */
 export function getErrorMessage(t: ErrorTranslator, error: unknown): string {
   if (isNetworkError(error)) return t("network");
@@ -119,9 +123,6 @@ export function getErrorMessage(t: ErrorTranslator, error: unknown): string {
     const fallbackKey = `${code}_NO_DETAILS`;
     if (t.has(fallbackKey)) return t(fallbackKey);
   }
-
-  const apiMessage = apiError.body?.message;
-  if (typeof apiMessage === "string" && apiMessage.trim().length > 0) return apiMessage;
 
   const statusKey = keyForStatus(apiError.status);
   if (statusKey && t.has(statusKey)) return t(statusKey);

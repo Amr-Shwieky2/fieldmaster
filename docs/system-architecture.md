@@ -68,7 +68,10 @@ reimplementation (see `offline-sync.md`).
 
 ## Admin web (`apps/admin-web`)
 
-Next.js 15 App Router, React 19, TanStack Query for server state, React
+Arabic only, right-to-left (`<html lang="ar" dir="rtl">`), with next-intl
+and a single messages file (`src/i18n/messages/ar.json`); Western digits,
+Asia/Jerusalem time and `₪ 1,234.50` money. Next.js 15 App Router, React 19,
+TanStack Query for server state, React
 Hook Form + Zod for forms, Tailwind (hand-rolled component primitives —
 see `technical-decisions.md` for why not the shadcn/ui CLI), Leaflet +
 OpenStreetMap for the geofence map editor (a substitute for the spec-named

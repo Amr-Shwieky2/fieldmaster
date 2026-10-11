@@ -5,7 +5,6 @@ import { OrgRole } from "@fieldmaster/shared-types";
 import { AuthProvider } from "@/lib/auth-context";
 import { sessionStore } from "@/lib/session-store";
 import { createIntlWrapper } from "@/test/render-with-intl";
-import type { Locale } from "@/i18n/config";
 import ReportsPage from "../page";
 
 vi.mock("next/navigation", () => ({
@@ -35,11 +34,28 @@ function mockApi(routes: Record<string, Handler>) {
   return fetchMock;
 }
 
+/** Attributes a user reads (tooltip, placeholder) or hears from a screen reader (accessible name, alt text). */
+const READABLE_ATTRIBUTES = ["aria-label", "title", "placeholder", "alt"];
+
+/** Distinct Latin-script words on the page, read per text node (so adjacent elements, e.g. options, do not merge) and per readable attribute. */
+function latinWordsOnPage(): { text: string[]; attributes: string[] } {
+  const collect = (values: Iterable<string | null>) => {
+    const words = new Set<string>();
+    for (const value of values) for (const word of value?.match(/[A-Za-z]+/g) ?? []) words.add(word);
+    return [...words].sort();
+  };
+  const texts: (string | null)[] = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node.textContent);
+  const attributes = [...document.body.querySelectorAll("*")].flatMap((el) => READABLE_ATTRIBUTES.map((name) => el.getAttribute(name)));
+  return { text: collect(texts), attributes: collect(attributes) };
+}
+
 function seedSession(role: OrgRole) {
   sessionStore.save({ accessToken: "test-access", refreshToken: "test-refresh", organizationId: "org-1", role, workerProfileId: null });
 }
 
-function renderPage(locale: Locale = "ar") {
+function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -47,7 +63,7 @@ function renderPage(locale: Locale = "ar") {
         <ReportsPage />
       </AuthProvider>
     </QueryClientProvider>,
-    { wrapper: createIntlWrapper({ locale }) },
+    { wrapper: createIntlWrapper() },
   );
 }
 
@@ -91,14 +107,17 @@ describe("Reports page", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the Worker Attendance Ledger form and past reports in Arabic", async () => {
+  it("renders the Worker Attendance Ledger form and past reports", async () => {
     mockApi(baseRoutes);
-    renderPage("ar");
+    renderPage();
 
     expect(screen.getByRole("heading", { level: 1, name: "التقارير" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "إنشاء سجل حضور العامل" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "التقارير السابقة" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "إنشاء ملف PDF" })).toBeTruthy();
+    expect(screen.getByLabelText("العامل")).toBeTruthy();
+    expect(screen.getByLabelText("من تاريخ")).toBeTruthy();
+    expect(screen.getByLabelText("إلى تاريخ")).toBeTruthy();
 
     const table = await screen.findByRole("table", { name: "التقارير التي أُنشئت سابقًا" });
     expect(table.parentElement?.className).toContain("overflow-x-auto");
@@ -114,19 +133,24 @@ describe("Reports page", () => {
     expect(within(table).getByText("abcdef0123456789…").closest("bdi")?.getAttribute("dir")).toBe("ltr");
     expect(within(table).getByText("wp-9").closest("bdi")?.getAttribute("dir")).toBe("ltr");
     expect(within(table).getByRole("button", { name: "تنزيل تقرير Eli Ramzani (30 سبتمبر 2026 في 10:15)" })).toBeTruthy();
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "العامل",
+      "تاريخ الإنشاء",
+      "الأرقام المالية",
+      "بصمة الملف",
+      "الإجراءات",
+    ]);
     expect(document.body.textContent).not.toMatch(/[٠-٩]/);
-  });
-
-  it("renders in English", async () => {
-    mockApi(baseRoutes);
-    renderPage("en");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Reports" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Generate a Worker Attendance Ledger" })).toBeTruthy();
-    expect(screen.getByLabelText("Worker")).toBeTruthy();
-    expect(await screen.findByText("Sep 30, 2026, 10:15")).toBeTruthy();
-    expect(screen.getByText("Included")).toBeTruthy();
-    expect(screen.getByText("Operational only")).toBeTruthy();
+    // Arabic only: no language switch, and the only Latin-script text is data (worker names, an id, the hash
+    // prefix) and the acronyms PDF / GPS used in the Arabic copy. Attributes carry only data too: the full hashes
+    // in the hash-cell tooltips and the worker name / id inside the Arabic download labels.
+    expect(screen.queryByRole("button", { name: /English/ })).toBeNull();
+    expect(latinWordsOnPage()).toEqual({
+      text: ["Eli", "GPS", "Haddad", "PDF", "Ramzani", "Samir", "abcdef", "wp"],
+      attributes: ["Eli", "Ramzani", "aaaabbbbccccddddeeeeffff", "abcdef", "wp"],
+    });
+    expect(within(table).getByText("abcdef0123456789…").closest("td")?.getAttribute("title")).toBe(REPORTS[0].sha256Hash);
+    expect(within(table).getByRole("button", { name: "تنزيل تقرير wp-9 (30 سبتمبر 2026 في 00:30)" })).toBeTruthy();
   });
 
   it("defaults the date range to the current month in Asia/Jerusalem and keeps the date inputs LTR", async () => {
@@ -134,7 +158,7 @@ describe("Reports page", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-30T22:30:00Z"));
     mockApi(baseRoutes);
-    renderPage("ar");
+    renderPage();
 
     const from = screen.getByLabelText("من تاريخ") as HTMLInputElement;
     const to = screen.getByLabelText("إلى تاريخ") as HTMLInputElement;
@@ -147,7 +171,7 @@ describe("Reports page", () => {
 
   it("shows the empty state when no report was generated", async () => {
     mockApi({ ...baseRoutes, "GET /reports": () => json(200, []) });
-    renderPage("ar");
+    renderPage();
 
     expect(await screen.findByText("لم يُنشأ أي تقرير بعد")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
@@ -156,7 +180,7 @@ describe("Reports page", () => {
   it("shows a translated error with retry for past reports", async () => {
     let calls = 0;
     mockApi({ ...baseRoutes, "GET /reports": () => (++calls === 1 ? apiError(500, "INTERNAL_ERROR") : json(200, REPORTS)) });
-    renderPage("ar");
+    renderPage();
 
     expect((await screen.findByRole("alert")).textContent).toContain("حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.");
     fireEvent.click(screen.getByRole("button", { name: "إعادة المحاولة" }));
@@ -165,7 +189,7 @@ describe("Reports page", () => {
 
   it("shows the access-denied state when the reports list answers 403", async () => {
     mockApi({ ...baseRoutes, "GET /reports": () => apiError(403, "FORBIDDEN") });
-    renderPage("ar");
+    renderPage();
 
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
   });
@@ -179,7 +203,7 @@ describe("Reports page", () => {
           release = () => resolve(json(201, { ...REPORTS[0], downloadUrl: "https://files.example/ledger.pdf" }));
         }),
     });
-    renderPage("ar");
+    renderPage();
 
     const button = screen.getByRole("button", { name: "إنشاء ملف PDF" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
@@ -204,13 +228,29 @@ describe("Reports page", () => {
 
   it("translates a generation error from its API code instead of showing the English message", async () => {
     mockApi({ ...baseRoutes, "POST /reports/worker-attendance-ledger": () => apiError(403, "FORBIDDEN", "You cannot generate a report for another worker.") });
-    renderPage("ar");
+    renderPage();
 
     await screen.findByRole("option", { name: "Eli Ramzani" });
     fireEvent.change(screen.getByLabelText("العامل"), { target: { value: "wp-1" } });
     fireEvent.click(screen.getByRole("button", { name: "إنشاء ملف PDF" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("ليست لديك صلاحية لتنفيذ هذا الإجراء."));
     expect(screen.queryByText(/another worker/)).toBeNull();
+  });
+
+  it("shows the Arabic status-level message for an unknown generation error code, never the English API message", async () => {
+    mockApi({
+      ...baseRoutes,
+      "POST /reports/worker-attendance-ledger": () => apiError(400, "SOME_FUTURE_REPORT_CODE", "The date range is too long."),
+    });
+    renderPage();
+
+    await screen.findByRole("option", { name: "Eli Ramzani" });
+    fireEvent.change(screen.getByLabelText("العامل"), { target: { value: "wp-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "إنشاء ملف PDF" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe("بعض البيانات المُدخلة غير صالحة. راجع الحقول وحاول مرة أخرى."),
+    );
+    expect(screen.queryByText(/date range is too long/)).toBeNull();
   });
 
   it("opens the signed download link for a past report", async () => {
@@ -220,15 +260,15 @@ describe("Reports page", () => {
       ...baseRoutes,
       "GET /reports/r-1/download": () => json(200, { downloadUrl: "https://files.example/r-1.pdf", sha256Hash: REPORTS[0].sha256Hash, generatedAt: REPORTS[0].generatedAt }),
     });
-    renderPage("en");
+    renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download the report for Eli Ramzani (Sep 30, 2026, 10:15)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "تنزيل تقرير Eli Ramzani (30 سبتمبر 2026 في 10:15)" }));
     await waitFor(() => expect(openMock).toHaveBeenCalledWith("https://files.example/r-1.pdf", "_blank", "noopener,noreferrer"));
   });
 
   it("shows a translated download error", async () => {
     mockApi({ ...baseRoutes, "GET /reports/r-1/download": () => apiError(404, "NOT_FOUND", "Report not found.") });
-    renderPage("ar");
+    renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: /^تنزيل تقرير Eli Ramzani/ }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("تعذّر تنزيل التقرير: لم نتمكن من العثور على العنصر المطلوب."));
@@ -237,7 +277,7 @@ describe("Reports page", () => {
   it("shows an inline error with retry when the worker list fails", async () => {
     let calls = 0;
     mockApi({ ...baseRoutes, "GET /workers": () => (++calls === 1 ? apiError(500, "INTERNAL_ERROR") : json(200, WORKERS)) });
-    renderPage("ar");
+    renderPage();
 
     const alert = await screen.findByText("تعذّر تحميل قائمة العمال: حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.");
     fireEvent.click(within(alert.closest("[role=alert]") as HTMLElement).getByRole("button", { name: "إعادة المحاولة" }));
@@ -252,7 +292,7 @@ describe("Reports page", () => {
       "GET /reports": () => json(200, [REPORTS[1]]),
       "POST /reports/worker-attendance-ledger": () => json(201, { ...REPORTS[1], downloadUrl: "https://files.example/ops.pdf" }),
     });
-    renderPage("ar");
+    renderPage();
 
     expect(screen.getByRole("heading", { level: 1, name: "التقارير" })).toBeTruthy();
     await screen.findByRole("option", { name: "Samir Haddad" });

@@ -5,8 +5,6 @@ import { AttributionControl, Circle, MapContainer, Marker, TileLayer, ZoomContro
 import L from "leaflet";
 import { useTranslations } from "next-intl";
 import "leaflet/dist/leaflet.css";
-import { localeDirection } from "@/i18n/config";
-import { useAppLocale } from "@/i18n/use-app-locale";
 import { useFormat } from "@/lib/use-format";
 
 // Default Leaflet marker icons reference image URLs that bundlers don't
@@ -64,16 +62,14 @@ function RecenterOnChange({ latitude, longitude }: { latitude: number; longitude
  *
  * RTL: Leaflet lays out tiles, panes and control corners with physical
  * left/right CSS, so the map container stays `dir="ltr"`. The controls are
- * placed by direction instead: the zoom control sits on the inline-start
- * corner (top-right in Arabic, top-left in English) and the attribution on
- * the opposite bottom corner.
+ * placed for the Arabic (RTL) page instead: the zoom control sits on the
+ * inline-start corner (top right) and the attribution on the opposite bottom
+ * corner (bottom left).
  */
 export function GeofenceMapPicker({ latitude, longitude, radiusMeters, onChange, labelId }: GeofenceMapPickerProps) {
   const t = useTranslations("geofenceMap");
-  const locale = useAppLocale();
   const format = useFormat();
   const helpId = useId();
-  const rtl = localeDirection(locale) === "rtl";
 
   return (
     <div className="space-y-1">
@@ -93,12 +89,11 @@ export function GeofenceMapPicker({ latitude, longitude, radiusMeters, onChange,
           attributionControl={false}
           style={{ height: "280px", width: "100%" }}
         >
-          <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {/* The zoom control and marker are keyed by locale: react-leaflet sets their titles/alt only on creation. */}
-          <ZoomControl key={locale} position={rtl ? "topright" : "topleft"} zoomInTitle={t("zoomIn")} zoomOutTitle={t("zoomOut")} />
-          <AttributionControl position={rtl ? "bottomleft" : "bottomright"} />
+          <TileLayer attribution={t.raw("attribution") as string} url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <ZoomControl position="topright" zoomInTitle={t("zoomIn")} zoomOutTitle={t("zoomOut")} />
+          {/* No default prefix: it carries an English tooltip. The Leaflet credit is part of the Arabic attribution. */}
+          <AttributionControl position="bottomleft" prefix={false} />
           <Marker
-            key={locale}
             position={[latitude, longitude]}
             icon={markerIcon}
             draggable

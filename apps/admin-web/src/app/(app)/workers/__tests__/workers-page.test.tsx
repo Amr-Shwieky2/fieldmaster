@@ -27,9 +27,9 @@ describe("Workers list page", () => {
     auth.client = {};
   });
 
-  it("renders in Arabic with the pending list, translated statuses and Western-digit money", async () => {
+  it("renders the pending list, translated statuses and Western-digit money", async () => {
     setClient({ listWorkers: vi.fn().mockResolvedValue(OWNER_WORKERS), listPendingApproval: vi.fn().mockResolvedValue(PENDING) });
-    renderWorkersPage(<WorkersPage />, "ar");
+    renderWorkersPage(<WorkersPage />);
 
     expect(screen.getByRole("heading", { level: 1, name: "العمال" })).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "بانتظار الموافقة (1)" })).toBeTruthy();
@@ -47,28 +47,16 @@ describe("Workers list page", () => {
     const daily = within(table).getByText("₪ 400.00");
     expect(daily.closest("bdi")?.getAttribute("dir")).toBe("ltr");
     expect(daily.closest("td")?.textContent).toBe("₪ 400.00 يوميًا");
-    expect(within(table).getByText("₪ 1,234.50").closest("td")?.textContent).toBe("₪ 1,234.50 للساعة");
+    const hourly = within(table).getByText("₪ 1,234.50");
+    expect(hourly.closest("bdi")?.getAttribute("dir")).toBe("ltr");
+    expect(hourly.closest("td")?.textContent).toBe("₪ 1,234.50 للساعة");
     expect(within(table).getByRole("link", { name: "Eli Ramzani" }).getAttribute("href")).toBe("/workers/w-daily");
     expect(hasArabicIndicDigits(document.body.textContent)).toBe(false);
   });
 
-  it("renders in English", async () => {
-    setClient({ listWorkers: vi.fn().mockResolvedValue(OWNER_WORKERS), listPendingApproval: vi.fn().mockResolvedValue(PENDING) });
-    renderWorkersPage(<WorkersPage />, "en");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Workers" })).toBeTruthy();
-    expect(await screen.findByRole("heading", { name: "Pending approval (1)" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Review application: Nadia Khoury" })).toBeTruthy();
-    const table = await screen.findByRole("table", { name: "All workers" });
-    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual(["Name", "Phone number", "Status", "Compensation"]);
-    expect(within(table).getByText("Active")).toBeTruthy();
-    expect(within(table).getByText("₪ 400.00").closest("td")?.textContent).toBe("₪ 400.00/day");
-    expect(within(table).getByText("₪ 1,234.50").closest("td")?.textContent).toBe("₪ 1,234.50/hr");
-  });
-
   it("shows an em dash instead of compensation for a Field Manager (the API omits it)", async () => {
     setClient({ listWorkers: vi.fn().mockResolvedValue(MANAGER_WORKERS), listPendingApproval: vi.fn().mockResolvedValue([]) });
-    renderWorkersPage(<WorkersPage />, "ar");
+    renderWorkersPage(<WorkersPage />);
 
     const table = await screen.findByRole("table", { name: "جميع العمال" });
     const rows = within(table).getAllByRole("row").slice(1);
@@ -79,7 +67,7 @@ describe("Workers list page", () => {
 
   it("shows the empty state and hides the pending card when there is nothing to show", async () => {
     setClient({ listWorkers: vi.fn().mockResolvedValue([]), listPendingApproval: vi.fn().mockResolvedValue([]) });
-    renderWorkersPage(<WorkersPage />, "ar");
+    renderWorkersPage(<WorkersPage />);
 
     expect(await screen.findByText("لا يوجد عمال بعد")).toBeTruthy();
     expect(screen.getByText("أرسل دعوة إلى عامل للبدء.")).toBeTruthy();
@@ -93,7 +81,7 @@ describe("Workers list page", () => {
       .mockRejectedValueOnce(apiError(500, "INTERNAL_ERROR", "Internal server error"))
       .mockResolvedValue(OWNER_WORKERS);
     setClient({ listWorkers, listPendingApproval: vi.fn().mockResolvedValue([]) });
-    renderWorkersPage(<WorkersPage />, "ar");
+    renderWorkersPage(<WorkersPage />);
 
     expect(await screen.findByText("حدث خطأ ما")).toBeTruthy();
     expect(screen.getByText("حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.")).toBeTruthy();
@@ -106,23 +94,27 @@ describe("Workers list page", () => {
 
   it("shows access denied when the API answers 403", async () => {
     setClient({ listWorkers: vi.fn().mockRejectedValue(apiError(403, "FORBIDDEN")), listPendingApproval: vi.fn().mockRejectedValue(apiError(403, "FORBIDDEN")) });
-    renderWorkersPage(<WorkersPage />, "en");
+    renderWorkersPage(<WorkersPage />);
 
-    expect(await screen.findByText("Access denied")).toBeTruthy();
+    expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "الانتقال إلى لوحة التحكم" }).getAttribute("href")).toBe("/dashboard");
     expect(screen.queryByRole("table")).toBeNull();
     // A forbidden pending list is simply hidden, not a second error.
-    expect(screen.queryByText("Pending approval")).toBeNull();
+    expect(screen.queryByText(/بانتظار الموافقة/)).toBeNull();
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
   it("shows an error with retry for the pending list without hiding the roster", async () => {
     const listPendingApproval = vi.fn().mockRejectedValueOnce(apiError(503, "SERVICE_UNAVAILABLE")).mockResolvedValue(PENDING);
     setClient({ listWorkers: vi.fn().mockResolvedValue(OWNER_WORKERS), listPendingApproval });
-    renderWorkersPage(<WorkersPage />, "en");
+    renderWorkersPage(<WorkersPage />);
 
-    expect(await screen.findByText("The service is temporarily unavailable. Please try again shortly.")).toBeTruthy();
-    expect(await screen.findByRole("table", { name: "All workers" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Pending approval (1)" })).toBeTruthy());
+    expect(await screen.findByText("الخدمة غير متاحة مؤقتًا. يُرجى المحاولة بعد قليل.")).toBeTruthy();
+    expect(screen.getByText("بانتظار الموافقة")).toBeTruthy();
+    expect(await screen.findByRole("table", { name: "جميع العمال" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "إعادة المحاولة" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "بانتظار الموافقة (1)" })).toBeTruthy());
+    expect(listPendingApproval).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

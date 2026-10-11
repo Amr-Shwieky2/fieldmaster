@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatAgorot, formatBusinessDate, formatDate, formatDateTime, formatMinutes, formatMonth, formatNumber, formatTime } from "../format";
+import { createFormatter, formatAgorot, formatBusinessDate, formatDate, formatDateTime, formatMinutes, formatMonth, formatNumber, formatTime } from "../format";
 
 const ARABIC_INDIC = /[٠-٩۰-۹]/;
 
 describe("formatAgorot", () => {
-  it("formats integer agorot as ₪ 1,234.50 in both languages", () => {
+  it("formats integer agorot as ₪ 1,234.50", () => {
     expect(formatAgorot(123_450)).toBe("₪ 1,234.50");
     expect(formatAgorot(400_000)).toBe("₪ 4,000.00");
     expect(formatAgorot(1_000)).toBe("₪ 10.00");
@@ -24,10 +24,21 @@ describe("formatAgorot", () => {
 });
 
 describe("formatMinutes", () => {
-  it("splits minutes into hours and minutes in each language", () => {
-    expect(formatMinutes(615, "en")).toBe("10h 15m");
-    expect(formatMinutes(540, "ar")).toBe("9 س 0 د");
-    expect(formatMinutes(null, "ar")).toBe("—");
+  it("splits minutes into hours and minutes in Arabic", () => {
+    expect(formatMinutes(615)).toBe("10 س 15 د");
+    expect(formatMinutes(540)).toBe("9 س 0 د");
+    expect(formatMinutes(0)).toBe("0 س 0 د");
+    expect(formatMinutes(-90)).toBe("-1 س 30 د");
+    expect(formatMinutes(null)).toBe("—");
+    expect(formatMinutes(undefined)).toBe("—");
+  });
+});
+
+describe("formatNumber", () => {
+  it("uses Western digits with comma grouping", () => {
+    expect(formatNumber(1234567)).toBe("1,234,567");
+    expect(formatNumber(12.5, { maximumFractionDigits: 1 })).toBe("12.5");
+    expect(formatNumber(null)).toBe("—");
   });
 });
 
@@ -36,39 +47,39 @@ describe("dates and times", () => {
   const summer = "2026-07-15T08:30:00.000Z"; // and UTC+3 in July
 
   it("shows times in Asia/Jerusalem, 24-hour, Western digits", () => {
-    expect(formatTime(winter, "en")).toBe("10:30");
-    expect(formatTime(summer, "en")).toBe("11:30");
-    expect(formatTime(winter, "ar")).toBe("10:30");
+    expect(formatTime(winter)).toBe("10:30");
+    expect(formatTime(summer)).toBe("11:30");
   });
 
-  it("uses Western digits and Arabic month names in Arabic", () => {
-    const text = formatDateTime(winter, "ar");
-    expect(text).not.toMatch(ARABIC_INDIC);
-    expect(text).toContain("2026");
-    expect(text).toContain("10:30");
-    expect(formatDate(winter, "ar")).toMatch(/[؀-ۿ]/);
-    expect(formatNumber(1234567, "ar")).toBe("1,234,567");
-  });
-
-  it("uses English month names in English", () => {
-    expect(formatDate(winter, "en")).toBe("Jan 15, 2026");
+  it("spells out the Arabic month with Western digits", () => {
+    expect(formatDate(winter)).toBe("15 يناير 2026");
+    expect(formatDateTime(winter)).toBe("15 يناير 2026 في 10:30");
+    expect(formatDateTime(summer)).not.toMatch(ARABIC_INDIC);
   });
 
   it("shows a business date (already a local calendar day) without shifting it", () => {
-    expect(formatBusinessDate("2026-03-01", "en")).toBe("Mar 1, 2026");
-    expect(formatBusinessDate("2026-03-01", "ar")).not.toMatch(ARABIC_INDIC);
-    expect(formatBusinessDate("not-a-date", "en")).toBe("—");
+    expect(formatBusinessDate("2026-03-01")).toBe("1 مارس 2026");
+    expect(formatBusinessDate("not-a-date")).toBe("—");
   });
 
   it("formats a payroll month", () => {
-    expect(formatMonth("2026-09", "en")).toBe("September 2026");
-    expect(formatMonth("2026-09", "ar")).toContain("2026");
-    expect(formatMonth("2026-09", "ar")).not.toMatch(ARABIC_INDIC);
-    expect(formatMonth("2026-13", "ar")).toBe("—");
+    expect(formatMonth("2026-09")).toBe("سبتمبر 2026");
+    expect(formatMonth("2026-13")).toBe("—");
   });
 
   it("renders an em-dash for a missing timestamp", () => {
-    expect(formatDateTime(null, "en")).toBe("—");
-    expect(formatTime(undefined, "ar")).toBe("—");
+    expect(formatDateTime(null)).toBe("—");
+    expect(formatDateTime(undefined)).toBe("—");
+    expect(formatTime(undefined)).toBe("—");
+  });
+});
+
+describe("createFormatter", () => {
+  it("bundles the same Arabic formatters", () => {
+    const fmt = createFormatter();
+    expect(fmt.money(123_450)).toBe("₪ 1,234.50");
+    expect(fmt.minutes(615)).toBe("10 س 15 د");
+    expect(fmt.month("2026-09")).toBe("سبتمبر 2026");
+    expect(fmt.dateTime("2026-01-15T08:30:00.000Z")).toBe("15 يناير 2026 في 10:30");
   });
 });

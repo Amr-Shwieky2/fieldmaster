@@ -149,25 +149,27 @@ its origin (`http://localhost:8081` by default) to `CORS_ORIGINS` in
 > to avoid silently talking to the wrong database. See
 > `docs/technical-decisions.md` if you need to change this back.
 
-## Languages (admin web)
+## Language (admin web)
 
-The admin web app is **Arabic by default (right-to-left)**, with English as the
-second language. There is no Hebrew. The **العربية / English** switch sits in the header and on
-the login page. The choice is stored in the `fm_locale` cookie, and the server
-renders `<html lang dir>` from it, so the page arrives in the right direction.
+The admin web app works **only in Arabic, right-to-left**. There is no
+language switch, no English and no Hebrew; every page is rendered with
+`<html lang="ar" dir="rtl">`.
 
-- All interface text lives in `apps/admin-web/src/i18n/messages/ar.json` and
-  `en.json` (same keys in both). Components read it with next-intl
-  (`useTranslations("namespace")`).
+- All interface text lives in `apps/admin-web/src/i18n/messages/ar.json`.
+  Components read it with next-intl (`useTranslations("namespace")`).
 - Numbers and dates always use Western digits (0-9) and the Asia/Jerusalem
   time zone; money is shown as `₪ 1,234.50`.
+- API errors are shown in Arabic from their code. The API's English message is
+  never shown.
 - Arabic must use the project glossary exactly (for example المالك, مدير ميدان,
   وردية, بدء الدوام, إنهاء الدوام, الرواتب). The full list is in
   `apps/admin-web/scripts/lib/i18n-check.mjs`.
 - `pnpm lint` (and so CI) runs `node apps/admin-web/scripts/check-i18n.mjs`,
   which fails on:
-  - keys missing from either file or mismatched placeholders;
+  - any messages file other than `ar.json`, empty values, or a message that
+    is not Arabic (an English leftover);
   - keys used in code but not defined;
+  - an API error code without an Arabic message;
   - glossary drift;
   - Hebrew characters or Arabic-Indic digits;
   - physical `left`/`right` Tailwind classes. Use `ms`/`me`, `ps`/`pe`,

@@ -7,7 +7,6 @@ import { OrgRole } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
 import { Nav } from "@/components/nav";
 import { AppHeader } from "@/components/app-header";
-import { LocaleSwitcher } from "@/components/locale-switcher";
 import { LoadingState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +28,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (session?.role === OrgRole.WORKER) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-100 px-4">
-        <LocaleSwitcher />
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle>{t("title")}</CardTitle>

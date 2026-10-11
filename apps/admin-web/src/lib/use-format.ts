@@ -1,11 +1,8 @@
-"use client";
-
-import { useMemo } from "react";
-import { useAppLocale } from "@/i18n/use-app-locale";
 import { createFormatter, type Formatter } from "./format";
 
-/** Formatters bound to the current UI locale. */
+const FORMATTER = createFormatter();
+
+/** The app's Arabic formatters (Western digits, Asia/Jerusalem, `₪ 1,234.50`). */
 export function useFormat(): Formatter {
-  const locale = useAppLocale();
-  return useMemo(() => createFormatter(locale), [locale]);
+  return FORMATTER;
 }

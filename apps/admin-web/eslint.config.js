@@ -9,7 +9,7 @@ module.exports = [
   {
     // No hard-coded user-facing text in components: JSX text and the
     // attributes people read (placeholder, title, alt, aria-label, label)
-    // must come from ar.json / en.json via next-intl. Strings that are only
+    // must come from ar.json via next-intl. Strings that are only
     // digits/punctuation or CONSTANT_CASE are allowed, as is the brand name.
     files: ["src/**/*.tsx"],
     ignores: ["src/**/__tests__/**", "src/test/**"],
@@ -21,7 +21,7 @@ module.exports = [
           mode: "jsx-only",
           // Native text attributes plus the text props of the app's own components (PageHeader, EmptyState, ErrorState, FullPageMessage, ...).
           "jsx-attributes": {
-            include: ["placeholder", "title", "alt", "aria-label", "aria-description", "label", "description", "message", "hint", "linkLabel", "zoomInTitle", "zoomOutTitle"],
+            include: ["placeholder", "title", "alt", "aria-label", "aria-description", "label", "description", "message", "hint", "linkLabel", "zoomInTitle", "zoomOutTitle", "attribution", "prefix"],
           },
           words: { exclude: ["[0-9!-/:-@[-`{-~\\s₪—·•…]+", "[A-Z_-]+", "FieldMaster"] },
           // Translator functions (t, tCommon, tc, t.rich ...) and helpers that take keys or enum values.

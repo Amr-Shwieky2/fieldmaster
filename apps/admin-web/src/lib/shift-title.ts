@@ -14,7 +14,7 @@ export function isSystemShiftTitle(shift: ShiftLike): boolean {
   return shift.shiftType === ShiftType.EMERGENCY_CALLOUT && shift.title.trim() === SYSTEM_EMERGENCY_CALLOUT_TITLE;
 }
 
-/** Returns a function that gives the title to display for a shift in the current language. */
+/** Returns a function that gives the title to show for a shift: the Arabic shift type instead of the system emergency title. */
 export function useShiftTitle(): (shift: ShiftLike) => string {
   const enumLabel = useEnumLabel();
   return (shift) => (isSystemShiftTitle(shift) ? enumLabel("ShiftType", shift.shiftType) : shift.title);

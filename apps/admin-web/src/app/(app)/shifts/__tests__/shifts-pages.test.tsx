@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ApiRequestError, type Project, type Shift, type Site, type Worker } from "@fieldmaster/api-client";
 import { AccountStatus, CheckInMethod, OrgRole, ShiftStatus, ShiftType } from "@fieldmaster/shared-types";
-import type { Locale } from "@/i18n/config";
+import ar from "@/i18n/messages/ar.json";
 import { renderWithIntl } from "@/test/render-with-intl";
 import ShiftsPage from "../page";
 import ShiftDetailPage from "../[id]/page";
@@ -76,8 +76,13 @@ function setup() {
   return mocks.client;
 }
 
-function render(ui: React.ReactElement, locale: Locale) {
-  return renderWithIntl(ui, { locale, queryClient: true });
+function render(ui: React.ReactElement) {
+  return renderWithIntl(ui, { queryClient: true });
+}
+
+/** The page text with the given API/user data removed, i.e. only the UI's own text. */
+function uiTextWithout(...data: string[]): string {
+  return data.reduce((text, value) => text.split(value).join(""), document.body.textContent ?? "");
 }
 
 beforeEach(() => {
@@ -87,7 +92,7 @@ beforeEach(() => {
 describe("Scheduling (shifts list)", () => {
   it("renders in Arabic with translated enums, Western-digit dates and an accessible table", async () => {
     setup();
-    render(<ShiftsPage />, "ar");
+    render(<ShiftsPage />);
     expect(screen.getByRole("heading", { level: 1, name: "الجدولة" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "وردية جديدة" }).getAttribute("href")).toBe("/shifts/new");
 
@@ -102,16 +107,10 @@ describe("Scheduling (shifts list)", () => {
     expect(within(table).getByText("5 أكتوبر 2026 في 20:00")).toBeTruthy();
     expect(table.textContent).not.toMatch(/NIGHT_TURAN|PENDING_APPROVAL|NIGHT TURAN/);
     expect(table.textContent).not.toMatch(/[٠-٩]/);
-  });
 
-  it("renders in English", async () => {
-    setup();
-    render(<ShiftsPage />, "en");
-    expect(screen.getByRole("heading", { level: 1, name: "Scheduling" })).toBeTruthy();
-    const table = await screen.findByRole("table");
-    expect(within(table).getByText("Night Turan")).toBeTruthy();
-    expect(within(table).getByText("Pending approval")).toBeTruthy();
-    expect(within(table).getByText("Oct 5, 2026, 20:00")).toBeTruthy();
+    // No English UI text leaks: once the API data (the typed shift title) is removed,
+    // no Latin letters are left anywhere on the page.
+    expect(uiTextWithout("Night signals")).not.toMatch(/[A-Za-z]/);
   });
 
   it("shows the translated type instead of the API's English title for emergency call-outs", async () => {
@@ -120,7 +119,7 @@ describe("Scheduling (shifts list)", () => {
       { ...SHIFT, id: "sh2", shiftType: ShiftType.EMERGENCY_CALLOUT, title: "Emergency Call-out" },
       { ...SHIFT, id: "sh3", shiftType: ShiftType.EMERGENCY_CALLOUT, title: "Pole knocked down on Route 4" },
     ]);
-    render(<ShiftsPage />, "ar");
+    render(<ShiftsPage />);
     const table = await screen.findByRole("table");
     expect(within(table).getByRole("link", { name: "استدعاء طوارئ" }).getAttribute("href")).toBe("/shifts/sh2");
     // A title a person typed is kept as written.
@@ -131,25 +130,27 @@ describe("Scheduling (shifts list)", () => {
   it("shows the empty state", async () => {
     const client = setup();
     client.listShifts.mockResolvedValue([]);
-    render(<ShiftsPage />, "ar");
+    render(<ShiftsPage />);
     expect(await screen.findByText("لا توجد ورديات بعد")).toBeTruthy();
     expect(screen.getByText("أنشئ أول وردية للبدء.")).toBeTruthy();
   });
 
-  it("shows a translated error and retries", async () => {
+  it("shows a translated error (not the API text) and retries", async () => {
     const client = setup();
     client.listShifts.mockRejectedValueOnce(apiError(503, "SERVICE_UNAVAILABLE", "redis down"));
-    render(<ShiftsPage />, "en");
+    render(<ShiftsPage />);
     const alert = await screen.findByRole("alert");
-    expect(within(alert).getByText("The service is temporarily unavailable. Please try again shortly.", { exact: false })).toBeTruthy();
-    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(within(alert).getByText(ar.errors.SERVICE_UNAVAILABLE)).toBeTruthy();
+    expect(screen.queryByText("redis down")).toBeNull();
+    fireEvent.click(within(alert).getByRole("button", { name: ar.states.retry }));
     expect(await screen.findByRole("table")).toBeTruthy();
+    expect(client.listShifts).toHaveBeenCalledTimes(2);
   });
 
   it("shows access denied on 403", async () => {
     const client = setup();
     client.listShifts.mockRejectedValue(apiError(403, "FORBIDDEN"));
-    render(<ShiftsPage />, "ar");
+    render(<ShiftsPage />);
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
   });
 });
@@ -157,7 +158,7 @@ describe("Scheduling (shifts list)", () => {
 describe("Shift detail", () => {
   it("renders in Arabic with translated status, type and check-in method", async () => {
     setup();
-    render(<ShiftDetailPage />, "ar");
+    render(<ShiftDetailPage />);
     expect(await screen.findByRole("heading", { level: 1, name: "Night signals" })).toBeTruthy();
     expect(screen.getByText("بانتظار الموافقة")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "تفاصيل الوردية" })).toBeTruthy();
@@ -167,34 +168,37 @@ describe("Shift detail", () => {
     expect(screen.getByRole("heading", { name: "العمال المكلّفون (1)" })).toBeTruthy();
     expect(await screen.findByText("Eli Ramzani")).toBeTruthy();
     expect(screen.getByRole("link", { name: "كل الورديات" }).getAttribute("href")).toBe("/shifts");
+    await waitFor(() => expect((screen.getByLabelText("تكليف عامل") as HTMLSelectElement).disabled).toBe(false));
+    // No English UI text leaks: only API data (title, site and worker names) is in Latin letters.
+    expect(uiTextWithout("Night signals", "North interchange", "Eli Ramzani", "Omar Haddad")).not.toMatch(/[A-Za-z]/);
   });
 
-  it("renders in English and only offers active, unassigned workers", async () => {
+  it("only offers active, unassigned workers", async () => {
     setup();
-    render(<ShiftDetailPage />, "en");
-    expect(await screen.findByRole("heading", { name: "Shift details" })).toBeTruthy();
-    expect(screen.getByText("Geofence")).toBeTruthy();
-    const select = screen.getByLabelText("Assign a worker") as HTMLSelectElement;
+    render(<ShiftDetailPage />);
+    expect(await screen.findByRole("heading", { name: ar.shifts.detail.details })).toBeTruthy();
+    const select = screen.getByLabelText(ar.shifts.detail.assign.label) as HTMLSelectElement;
     await waitFor(() => expect(select.disabled).toBe(false));
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["Select a worker…", "Omar Haddad"]);
+    // w1 is already assigned and w3 is suspended.
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([ar.shifts.detail.assign.placeholder, "Omar Haddad"]);
   });
 
   it("assigns a worker and confirms it", async () => {
     const client = setup();
-    render(<ShiftDetailPage />, "en");
-    const select = (await screen.findByLabelText("Assign a worker")) as HTMLSelectElement;
+    render(<ShiftDetailPage />);
+    const select = (await screen.findByLabelText(ar.shifts.detail.assign.label)) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBe(2));
     fireEvent.change(select, { target: { value: "w2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Assign" }));
+    fireEvent.click(screen.getByRole("button", { name: ar.shifts.detail.assign.submit }));
     await waitFor(() => expect(client.assignWorkerToShift).toHaveBeenCalledWith("sh1", "w2"));
-    expect(await screen.findByText("Worker assigned to the shift.")).toBeTruthy();
+    expect(await screen.findByText(ar.shifts.detail.assign.success)).toBeTruthy();
     await waitFor(() => expect(client.getShift).toHaveBeenCalledTimes(2));
   });
 
   it("explains an overlapping assignment (CONFLICT) in Arabic", async () => {
     const client = setup();
     client.assignWorkerToShift.mockRejectedValue(apiError(409, "CONFLICT", "This worker is already assigned to an overlapping shift."));
-    render(<ShiftDetailPage />, "ar");
+    render(<ShiftDetailPage />);
     const select = (await screen.findByLabelText("تكليف عامل")) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBe(2));
     fireEvent.change(select, { target: { value: "w2" } });
@@ -206,16 +210,17 @@ describe("Shift detail", () => {
   it("says when there is nobody left to assign", async () => {
     const client = setup();
     client.listWorkers.mockResolvedValue([worker("w1", "Eli Ramzani")]);
-    render(<ShiftDetailPage />, "ar");
+    render(<ShiftDetailPage />);
     expect(await screen.findByText("لا يوجد عمال نشطون آخرون متاحون للتكليف.")).toBeTruthy();
   });
 
   it("shows a translated not-found error with retry and a way back", async () => {
     const client = setup();
     client.getShift.mockRejectedValueOnce(apiError(404, "NOT_FOUND", "Shift not found."));
-    render(<ShiftDetailPage />, "ar");
+    render(<ShiftDetailPage />);
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText("لم نتمكن من العثور على العنصر المطلوب.")).toBeTruthy();
+    expect(screen.queryByText("Shift not found.")).toBeNull();
     expect(screen.getByRole("link", { name: "كل الورديات" })).toBeTruthy();
     fireEvent.click(within(alert).getByRole("button", { name: "إعادة المحاولة" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Night signals" })).toBeTruthy();
@@ -224,15 +229,15 @@ describe("Shift detail", () => {
   it("shows access denied on 403", async () => {
     const client = setup();
     client.getShift.mockRejectedValue(apiError(403, "FORBIDDEN"));
-    render(<ShiftDetailPage />, "en");
-    expect(await screen.findByText("Access denied")).toBeTruthy();
+    render(<ShiftDetailPage />);
+    expect(await screen.findByText(ar.states.accessDeniedTitle)).toBeTruthy();
   });
 });
 
 describe("New shift", () => {
   it("renders in Arabic with translated options and LTR date inputs", async () => {
     setup();
-    render(<NewShiftPage />, "ar");
+    render(<NewShiftPage />);
     expect(screen.getByRole("heading", { level: 1, name: "وردية جديدة" })).toBeTruthy();
     const type = screen.getByLabelText("نوع الوردية") as HTMLSelectElement;
     expect(Array.from(type.options).map((o) => o.textContent)).toEqual(["وردية عادية", "مناوبة نهارية", "مناوبة ليلية"]);
@@ -241,48 +246,47 @@ describe("New shift", () => {
     expect(screen.getByLabelText("وقت البداية").getAttribute("dir")).toBe("ltr");
     expect(screen.getByLabelText("وقت النهاية").getAttribute("dir")).toBe("ltr");
     expect(screen.getByRole("link", { name: "كل الورديات" }).getAttribute("href")).toBe("/shifts");
-  });
-
-  it("renders in English", () => {
-    setup();
-    render(<NewShiftPage />, "en");
-    expect(screen.getByRole("heading", { level: 1, name: "New shift" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create shift" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "إنشاء الوردية" })).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText("المشروع") as HTMLSelectElement).options.length).toBe(2));
+    // No English UI text leaks: only API data (the project name) is in Latin letters.
+    expect(uiTextWithout("Ayalon works")).not.toMatch(/[A-Za-z]/);
   });
 
   it("cascades project -> site -> geofence and warns about a site without a geofence", async () => {
     const client = setup();
-    render(<NewShiftPage />, "en");
-    await waitFor(() => expect((screen.getByLabelText("Project") as HTMLSelectElement).options.length).toBe(2));
-    expect(screen.queryByLabelText("Site")).toBeNull();
+    const { fields, hints } = ar.shifts.form;
+    render(<NewShiftPage />);
+    await waitFor(() => expect((screen.getByLabelText(fields.project) as HTMLSelectElement).options.length).toBe(2));
+    expect(screen.queryByLabelText(fields.site)).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p1" } });
+    fireEvent.change(screen.getByLabelText(fields.project), { target: { value: "p1" } });
     await waitFor(() => expect(client.listSites).toHaveBeenCalledWith("p1"));
-    const site = screen.getByLabelText("Site") as HTMLSelectElement;
+    const site = screen.getByLabelText(fields.site) as HTMLSelectElement;
     await waitFor(() => expect(site.options.length).toBe(3));
 
     fireEvent.change(site, { target: { value: "s2" } });
-    expect(screen.getByText("This site has no geofence configured yet.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Check-in method"), { target: { value: CheckInMethod.FLEXI_CHECK } });
-    expect(screen.queryByText("This site has no geofence configured yet.")).toBeNull();
+    expect(screen.getByText(hints.noGeofence)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(fields.checkInMethod), { target: { value: CheckInMethod.FLEXI_CHECK } });
+    expect(screen.queryByText(hints.noGeofence)).toBeNull();
   });
 
   it("creates the shift with the selected geofence and opens it", async () => {
     const client = setup();
-    render(<NewShiftPage />, "en");
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Morning traffic control" } });
-    fireEvent.change(screen.getByLabelText("Shift type"), { target: { value: ShiftType.DAY_TURAN } });
-    await waitFor(() => expect((screen.getByLabelText("Project") as HTMLSelectElement).options.length).toBe(2));
-    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p1" } });
-    await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).options.length).toBe(3));
-    fireEvent.change(screen.getByLabelText("Site"), { target: { value: "s1" } });
-    fireEvent.change(screen.getByLabelText("Start"), { target: { value: "2026-10-06T07:00" } });
-    fireEvent.change(screen.getByLabelText("End"), { target: { value: "2026-10-06T15:00" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create shift" }));
+    const { fields } = ar.shifts.form;
+    render(<NewShiftPage />);
+    fireEvent.change(screen.getByLabelText(fields.title), { target: { value: "تنظيم حركة المرور صباحًا" } });
+    fireEvent.change(screen.getByLabelText(fields.shiftType), { target: { value: ShiftType.DAY_TURAN } });
+    await waitFor(() => expect((screen.getByLabelText(fields.project) as HTMLSelectElement).options.length).toBe(2));
+    fireEvent.change(screen.getByLabelText(fields.project), { target: { value: "p1" } });
+    await waitFor(() => expect((screen.getByLabelText(fields.site) as HTMLSelectElement).options.length).toBe(3));
+    fireEvent.change(screen.getByLabelText(fields.site), { target: { value: "s1" } });
+    fireEvent.change(screen.getByLabelText(fields.start), { target: { value: "2026-10-06T07:00" } });
+    fireEvent.change(screen.getByLabelText(fields.end), { target: { value: "2026-10-06T15:00" } });
+    fireEvent.click(screen.getByRole("button", { name: ar.shifts.form.submit }));
 
     await waitFor(() =>
       expect(client.createShift).toHaveBeenCalledWith({
-        title: "Morning traffic control",
+        title: "تنظيم حركة المرور صباحًا",
         shiftType: ShiftType.DAY_TURAN,
         projectId: "p1",
         siteId: "s1",
@@ -298,7 +302,7 @@ describe("New shift", () => {
   it("hints when the end is before the start and shows API errors translated", async () => {
     const client = setup();
     client.createShift.mockRejectedValue(apiError(400, "VALIDATION_FAILED", "scheduledEnd must be after scheduledStart."));
-    render(<NewShiftPage />, "ar");
+    render(<NewShiftPage />);
     fireEvent.change(screen.getByLabelText("عنوان الوردية"), { target: { value: "صيانة إشارات" } });
     fireEvent.change(screen.getByLabelText("وقت البداية"), { target: { value: "2026-10-06T15:00" } });
     fireEvent.change(screen.getByLabelText("وقت النهاية"), { target: { value: "2026-10-06T07:00" } });
@@ -313,10 +317,12 @@ describe("New shift", () => {
   it("shows an inline error with retry when projects fail to load", async () => {
     const client = setup();
     client.listProjects.mockRejectedValueOnce(apiError(500, "INTERNAL_ERROR"));
-    render(<NewShiftPage />, "en");
+    render(<NewShiftPage />);
     const alert = await screen.findByRole("alert");
-    expect(within(alert).getByText("A server error occurred. Please try again later.")).toBeTruthy();
-    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect((screen.getByLabelText("Project") as HTMLSelectElement).options.length).toBe(2));
+    expect(within(alert).getByText(ar.errors.INTERNAL_ERROR)).toBeTruthy();
+    expect(screen.queryByText("Server says no")).toBeNull();
+    fireEvent.click(within(alert).getByRole("button", { name: ar.common.retry }));
+    await waitFor(() => expect((screen.getByLabelText(ar.shifts.form.fields.project) as HTMLSelectElement).options.length).toBe(2));
+    expect(client.listProjects).toHaveBeenCalledTimes(2);
   });
 });

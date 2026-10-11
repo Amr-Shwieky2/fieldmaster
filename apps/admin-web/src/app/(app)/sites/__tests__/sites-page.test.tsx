@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ApiRequestError, type Project, type Site } from "@fieldmaster/api-client";
-import type { Locale } from "@/i18n/config";
+import ar from "@/i18n/messages/ar.json";
 import { renderWithIntl } from "@/test/render-with-intl";
 import SitesPage from "../page";
 
@@ -43,8 +43,13 @@ function setup({ role = "OWNER", projects = PROJECTS, sites = SITES }: { role?: 
   return auth.client;
 }
 
-function renderPage(locale: Locale) {
-  return renderWithIntl(<SitesPage />, { locale, queryClient: true });
+function renderPage() {
+  return renderWithIntl(<SitesPage />, { queryClient: true });
+}
+
+/** The page text with the given API/user data removed, i.e. only the UI's own text. */
+function uiTextWithout(...data: string[]): string {
+  return data.reduce((text, value) => text.split(value).join(""), document.body.textContent ?? "");
 }
 
 describe("Sites & Projects page", () => {
@@ -54,7 +59,7 @@ describe("Sites & Projects page", () => {
 
   it("renders in Arabic for an Owner, with the budget and coordinates kept left-to-right", async () => {
     setup();
-    renderPage("ar");
+    renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "المواقع والمشاريع" })).toBeTruthy();
     const projectList = await screen.findByRole("list", { name: "قائمة المشاريع" });
     expect(within(projectList).getByText("Ayalon works")).toBeTruthy();
@@ -74,22 +79,30 @@ describe("Sites & Projects page", () => {
     expect(screen.getByLabelText("خط العرض").getAttribute("dir")).toBe("ltr");
     expect(screen.getByTestId("geofence-map").getAttribute("aria-labelledby")).toBe("site-map-label");
     expect(document.getElementById("site-map-label")?.textContent).toBe("مركز نطاق الموقع");
+
+    // No English UI text leaks: once the API data (names, client, project code) is removed,
+    // no Latin letters are left anywhere on the page.
+    expect(uiTextWithout("Ayalon works", "Netivei Israel", "AYL-01", "North interchange")).not.toMatch(/[A-Za-z]/);
   });
 
-  it("renders in English and never shows a project budget to a Field Manager", async () => {
-    setup({ role: "FIELD_MANAGER" });
-    renderPage("en");
-    expect(screen.getByRole("heading", { level: 1, name: "Sites & Projects" })).toBeTruthy();
-    const projectList = await screen.findByRole("list", { name: "Projects list" });
+  it("never shows a project budget to a Field Manager", async () => {
+    const client = setup({ role: "FIELD_MANAGER" });
+    renderPage();
+    expect(screen.getByRole("heading", { level: 1, name: ar.sites.title })).toBeTruthy();
+    const projectList = await screen.findByRole("list", { name: ar.sites.projects.listLabel });
     expect(within(projectList).getByText("Ayalon works")).toBeTruthy();
-    expect(screen.queryByText(/Budget/)).toBeNull();
+    expect(await screen.findByText("نطاق الموقع: 1,500 م", { exact: false })).toBeTruthy();
+    // The mocked API still returns budgetAgorot; the UI must hide it anyway.
+    expect(client.listProjects).toHaveBeenCalled();
+    expect(screen.queryByText(/الميزانية/)).toBeNull();
     expect(screen.queryByText(/₪/)).toBeNull();
-    expect(await screen.findByText("Geofence: 1,500 m", { exact: false })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("₪");
+    expect(document.body.textContent).not.toContain("1,234.50");
   });
 
   it("shows page-specific empty states", async () => {
     setup({ projects: [], sites: [] });
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("لا توجد مشاريع بعد")).toBeTruthy();
     expect(await screen.findByText("لا توجد مواقع بعد")).toBeTruthy();
     expect(screen.getByText("أنشئ مشروعًا أولًا، ثم أضف إليه موقعًا.")).toBeTruthy();
@@ -98,7 +111,7 @@ describe("Sites & Projects page", () => {
   it("shows a translated error with a working retry", async () => {
     const client = setup();
     client.listProjects.mockRejectedValueOnce(apiError(500, "INTERNAL_ERROR", "Database exploded"));
-    renderPage("ar");
+    renderPage();
     const alert = await screen.findByRole("alert");
     expect(within(alert).getByText("حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.")).toBeTruthy();
     expect(screen.queryByText("Database exploded")).toBeNull();
@@ -111,31 +124,32 @@ describe("Sites & Projects page", () => {
   it("shows access denied when the API answers 403", async () => {
     const client = setup();
     client.listSites.mockRejectedValue(apiError(403, "FORBIDDEN"));
-    renderPage("en");
-    expect(await screen.findByText("Access denied")).toBeTruthy();
+    renderPage();
+    expect(await screen.findByText(ar.states.accessDeniedTitle)).toBeTruthy();
   });
 
   it("creates a project with the same payload as before and confirms it", async () => {
     const client = setup();
-    renderPage("en");
-    await screen.findByRole("list", { name: "Projects list" });
-    const submit = screen.getByRole("button", { name: "Create project" }) as HTMLButtonElement;
+    const { form } = ar.sites.projects;
+    renderPage();
+    await screen.findByRole("list", { name: ar.sites.projects.listLabel });
+    const submit = screen.getByRole("button", { name: form.submit }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
 
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Ring road" } });
-    fireEvent.change(screen.getByLabelText("Project code"), { target: { value: "RR-7" } });
+    fireEvent.change(screen.getByLabelText(form.name), { target: { value: "الطريق الدائري" } });
+    fireEvent.change(screen.getByLabelText(form.code), { target: { value: "RR-7" } });
     expect(submit.disabled).toBe(false);
     fireEvent.click(submit);
 
-    await waitFor(() => expect(client.createProject).toHaveBeenCalledWith({ name: "Ring road", client: undefined, projectCode: "RR-7" }));
-    expect(await screen.findByText("Project created.")).toBeTruthy();
+    await waitFor(() => expect(client.createProject).toHaveBeenCalledWith({ name: "الطريق الدائري", client: undefined, projectCode: "RR-7" }));
+    expect(await screen.findByText(ar.sites.projects.messages.created)).toBeTruthy();
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2));
   });
 
   it("shows a translated message (not the API text) when creating a project fails", async () => {
     const client = setup();
     client.createProject.mockRejectedValue(apiError(400, "VALIDATION_FAILED", "projectCode must be unique"));
-    renderPage("ar");
+    renderPage();
     await screen.findByRole("list", { name: "قائمة المشاريع" });
     fireEvent.change(screen.getByLabelText("اسم المشروع"), { target: { value: "طريق" } });
     fireEvent.change(screen.getByLabelText("رمز المشروع"), { target: { value: "X-1" } });
@@ -146,18 +160,19 @@ describe("Sites & Projects page", () => {
 
   it("creates a site and its geofence from the form values", async () => {
     const client = setup();
-    renderPage("en");
+    const { form } = ar.sites.sites;
+    renderPage();
     await screen.findByText("North interchange");
-    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p1" } });
-    fireEvent.change(screen.getByLabelText("Site name"), { target: { value: "Gate 3" } });
-    fireEvent.change(screen.getByLabelText("Latitude"), { target: { value: "31.5" } });
-    fireEvent.change(screen.getByLabelText("Radius (m)"), { target: { value: "250" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create site + geofence" }));
+    fireEvent.change(screen.getByLabelText(form.project), { target: { value: "p1" } });
+    fireEvent.change(screen.getByLabelText(form.name), { target: { value: "البوابة 3" } });
+    fireEvent.change(screen.getByLabelText(form.latitude), { target: { value: "31.5" } });
+    fireEvent.change(screen.getByLabelText(form.radius), { target: { value: "250" } });
+    fireEvent.click(screen.getByRole("button", { name: form.submit }));
 
     await waitFor(() =>
       expect(client.createGeofence).toHaveBeenCalledWith({ siteId: "s2", centerLatitude: 31.5, centerLongitude: 34.7818, radiusMeters: 250 }),
     );
-    expect(client.createSite).toHaveBeenCalledWith({ projectId: "p1", name: "Gate 3", latitude: 31.5, longitude: 34.7818, defaultGeofenceRadiusMeters: 250 });
-    expect(await screen.findByText("Site and geofence created.")).toBeTruthy();
+    expect(client.createSite).toHaveBeenCalledWith({ projectId: "p1", name: "البوابة 3", latitude: 31.5, longitude: 34.7818, defaultGeofenceRadiusMeters: 250 });
+    expect(await screen.findByText(ar.sites.sites.messages.created)).toBeTruthy();
   });
 });

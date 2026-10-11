@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ApiRequestError, type AuditLogEntry } from "@fieldmaster/api-client";
 import { OrgRole } from "@fieldmaster/shared-types";
-import type { Locale } from "@/i18n/config";
 import { renderWithIntl } from "@/test/render-with-intl";
 import AuditLogPage from "../page";
 
@@ -39,7 +38,7 @@ function entry(overrides: Partial<AuditLogEntry>): AuditLogEntry {
 const ENTRIES: AuditLogEntry[] = [
   entry({ id: "a1" }),
   entry({ id: "a2", action: "MANUAL_TIME_CORRECTION", reason: "FORGOTTEN_CLOCK_OUT", entityId: "9e8d7c6b-0000-1111-2222-333344445555" }),
-  entry({ id: "a3", action: "FULL_DAY_CREDIT_APPLIED", reason: "Weather stopped work", entityId: "1a1a1a1a-0000-1111-2222-333344445555" }),
+  entry({ id: "a3", action: "FULL_DAY_CREDIT_APPLIED", reason: "Pump failure on site", entityId: "1a1a1a1a-0000-1111-2222-333344445555" }),
   entry({ id: "a4", action: "SOMETHING_NEW_FROM_API", entityType: "BrandNewEntity", entityId: "2b2b2b2b-0000-1111-2222-333344445555" }),
 ];
 
@@ -60,8 +59,8 @@ function setup(role: OrgRole, overrides: Partial<Record<"listAuditLogs" | "verif
   return client;
 }
 
-function renderPage(locale: Locale) {
-  return renderWithIntl(<AuditLogPage />, { locale, queryClient: true });
+function renderPage() {
+  return renderWithIntl(<AuditLogPage />, { queryClient: true });
 }
 
 describe("Audit log page", () => {
@@ -69,9 +68,9 @@ describe("Audit log page", () => {
     mocks.replace.mockClear();
   });
 
-  it("renders the events in Arabic with translated actions, entities and reasons", async () => {
+  it("renders the events with translated actions, entities and reasons", async () => {
     setup(OrgRole.OWNER);
-    renderPage("ar");
+    renderPage();
 
     expect(screen.getByRole("heading", { level: 1, name: "سجل التدقيق" })).toBeTruthy();
     const table = await screen.findByRole("table", { name: "أحداث سجل التدقيق" });
@@ -87,7 +86,7 @@ describe("Audit log page", () => {
     expect(within(table).getAllByText("سجل حضور").length).toBeGreaterThan(0);
     // CorrectionReason codes are translated; free text typed by a person is shown as written.
     expect(within(table).getByText("نسيان تسجيل إنهاء الدوام")).toBeTruthy();
-    expect(within(table).getByText("Weather stopped work")).toBeTruthy();
+    expect(within(table).getByText("Pump failure on site")).toBeTruthy();
     expect(within(table).queryByText("FORGOTTEN_CLOCK_OUT")).toBeNull();
     // Short entity id is a left-to-right isolate, with the full id on hover.
     const shortId = within(table).getByText("3f2b9c1d…", { selector: "bdi" });
@@ -96,6 +95,34 @@ describe("Audit log page", () => {
     // Date and time in Asia/Jerusalem, Western digits.
     expect(within(table).getAllByText("15 يناير 2026 في 10:30").length).toBe(4);
     expect(document.body.textContent).not.toMatch(/[٠-٩۰-۹]/);
+    expect(screen.getByRole("button", { name: "التحقق من سلامة السجل" })).toBeTruthy();
+  });
+
+  it("shows the old English default reasons the web used to send in today's Arabic wording", async () => {
+    setup(OrgRole.OWNER, {
+      listAuditLogs: vi.fn(async () => ({
+        items: [
+          entry({ id: "l1", action: "WORKER_APPROVED", reason: "Initial onboarding approval" }),
+          entry({ id: "l2", action: "WORKER_REJECTED", reason: "Rejected during admin review." }),
+          entry({ id: "l3", action: "PAYROLL_PERIOD_REOPENED", reason: "Correction needed after review" }),
+          entry({ id: "l4", action: "TIME_ENTRY_REJECTED", reason: "Rejected during review." }),
+          entry({ id: "l5", action: "FULL_DAY_CREDIT_APPLIED", reason: "Weather stopped work" }),
+        ],
+        nextCursor: null,
+      })),
+    });
+    renderPage();
+    const table = await screen.findByRole("table", { name: "أحداث سجل التدقيق" });
+    for (const arabic of [
+      "موافقة أولية عند الانضمام",
+      "تم الرفض أثناء مراجعة الإدارة.",
+      "يلزم تصحيح بعد المراجعة",
+      "تم الرفض بعد المراجعة.",
+      "توقّف العمل بسبب الطقس",
+    ]) {
+      expect(within(table).getByText(arabic)).toBeTruthy();
+    }
+    expect(table.textContent).not.toMatch(/Initial onboarding|admin review|Correction needed|during review|Weather/);
   });
 
   it("translates API error codes stored as a reason (e.g. a rejected offline sync)", async () => {
@@ -108,7 +135,7 @@ describe("Audit log page", () => {
         nextCursor: null,
       })),
     });
-    renderPage("ar");
+    renderPage();
     const table = await screen.findByRole("table", { name: "أحداث سجل التدقيق" });
     expect(within(table).getByText("تعذّر التحقق من التسجيل الذي تمّ دون اتصال.")).toBeTruthy();
     // No details are stored with the reason, so the wording without placeholders is used.
@@ -116,20 +143,9 @@ describe("Audit log page", () => {
     expect(within(table).queryByText("INVALID_OFFLINE_SIGNATURE")).toBeNull();
   });
 
-  it("renders in English", async () => {
-    setup(OrgRole.OWNER);
-    renderPage("en");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Audit Log" })).toBeTruthy();
-    const table = await screen.findByRole("table", { name: "Audit log events" });
-    expect(within(table).getByText("Time entry approved")).toBeTruthy();
-    expect(within(table).getByText("Forgot to clock out")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Verify chain integrity" })).toBeTruthy();
-  });
-
   it("shows an unknown action code and entity type as-is, left to right", async () => {
     setup(OrgRole.OWNER);
-    renderPage("ar");
+    renderPage();
     const code = await screen.findByText("SOMETHING_NEW_FROM_API");
     expect(code.closest("bdi")?.getAttribute("dir")).toBe("ltr");
     expect(screen.getByText("BrandNewEntity").closest("bdi")?.getAttribute("dir")).toBe("ltr");
@@ -137,7 +153,7 @@ describe("Audit log page", () => {
 
   it("shows the empty state", async () => {
     setup(OrgRole.OWNER, { listAuditLogs: vi.fn(async () => ({ items: [], nextCursor: null })) });
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("لا توجد أحداث في السجل بعد")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
   });
@@ -145,7 +161,7 @@ describe("Audit log page", () => {
   it("shows a translated error and retries", async () => {
     const listAuditLogs = vi.fn().mockRejectedValueOnce(apiError(500, "INTERNAL_ERROR")).mockResolvedValue({ items: ENTRIES, nextCursor: null });
     setup(OrgRole.OWNER, { listAuditLogs });
-    renderPage("ar");
+    renderPage();
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.");
@@ -157,25 +173,25 @@ describe("Audit log page", () => {
 
   it("shows access denied when the API answers 403", async () => {
     setup(OrgRole.OWNER, { listAuditLogs: vi.fn().mockRejectedValue(apiError(403, "FORBIDDEN")) });
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("never renders or loads the audit log for a Field Manager and redirects to the dashboard", async () => {
     const client = setup(OrgRole.FIELD_MANAGER);
-    renderPage("ar");
+    renderPage();
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/dashboard"));
     expect(screen.queryByRole("heading", { name: "سجل التدقيق" })).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
     expect(client.listAuditLogs).not.toHaveBeenCalled();
   });
 
-  it("verifies the chain: pending label, then the valid result (Arabic)", async () => {
+  it("verifies the chain: pending label, then the valid result", async () => {
     let resolveVerify: (value: { valid: boolean }) => void = () => {};
     const verifyAuditChain = vi.fn(() => new Promise<{ valid: boolean }>((resolve) => (resolveVerify = resolve)));
     setup(OrgRole.OWNER, { verifyAuditChain });
-    renderPage("ar");
+    renderPage();
 
     fireEvent.click(screen.getByRole("button", { name: "التحقق من سلامة السجل" }));
     const pending = await screen.findByRole("button", { name: "جارٍ التحقق…" });
@@ -187,23 +203,23 @@ describe("Audit log page", () => {
 
   it("verifies the chain: broken result names the event id left to right", async () => {
     setup(OrgRole.OWNER, { verifyAuditChain: vi.fn(async () => ({ valid: false, brokenAtId: "a2-broken-id" })) });
-    renderPage("ar");
+    renderPage();
     fireEvent.click(screen.getByRole("button", { name: "التحقق من سلامة السجل" }));
     const id = await screen.findByText("a2-broken-id");
     expect(id.closest("bdi")?.getAttribute("dir")).toBe("ltr");
     expect(id.parentElement?.textContent).toBe("السجل غير سليم — يوجد خلل عند الحدث a2-broken-id");
   });
 
-  it("verifies the chain: broken result without an id (English)", async () => {
+  it("verifies the chain: broken result without an id", async () => {
     setup(OrgRole.OWNER, { verifyAuditChain: vi.fn(async () => ({ valid: false })) });
-    renderPage("en");
-    fireEvent.click(screen.getByRole("button", { name: "Verify chain integrity" }));
-    expect(await screen.findByText("Chain broken — the event sequence was altered")).toBeTruthy();
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "التحقق من سلامة السجل" }));
+    expect(await screen.findByText("السجل غير سليم — تم اكتشاف خلل في تسلسل الأحداث")).toBeTruthy();
   });
 
   it("verifies the chain: a failed request shows a translated error", async () => {
     setup(OrgRole.OWNER, { verifyAuditChain: vi.fn().mockRejectedValue(apiError(500, "INTERNAL_ERROR")) });
-    renderPage("ar");
+    renderPage();
     await screen.findByRole("table");
     fireEvent.click(screen.getByRole("button", { name: "التحقق من سلامة السجل" }));
     const alert = await screen.findByRole("alert");

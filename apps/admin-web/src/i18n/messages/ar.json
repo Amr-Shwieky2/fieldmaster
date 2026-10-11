@@ -327,15 +327,6 @@
     "minutesLong": "{count, plural, zero {{count} دقيقة} one {دقيقة واحدة} two {دقيقتان} few {{count} دقائق} many {{count} دقيقة} other {{count} دقيقة}}",
     "daysLong": "{count, plural, zero {{count} يوم} one {يوم واحد} two {يومان} few {{count} أيام} many {{count} يومًا} other {{count} يوم}}"
   },
-  "language": {
-    "label": "اللغة",
-    "arabic": "العربية",
-    "english": "English",
-    "current": "اللغة الحالية",
-    "switchTo": "تغيير اللغة إلى {language}",
-    "saved": "تم تحديث اللغة",
-    "saveFailed": "تم تغيير اللغة على هذا الجهاز، لكن تعذّر حفظها في حسابك."
-  },
   "nav": {
     "mainNavigation": "القائمة الرئيسية",
     "dashboard": "لوحة التحكم",
@@ -369,7 +360,9 @@
     "verifying": "جارٍ التحقق…",
     "useDifferentNumber": "استخدام رقم هاتف آخر",
     "chooseOrganization": "هذا الرقم مرتبط بأكثر من مؤسسة. اختر المؤسسة:",
-    "testModeCodeHint": "وضع الاختبار — الرمز: <code></code>"
+    "testModeCodeHint": "وضع الاختبار — الرمز: <code></code>",
+    "phoneRequired": "أدخل رقم الهاتف.",
+    "codeRequired": "أدخل رمز التحقق."
   },
   "devLogin": {
     "bannerTitle": "وضع الاختبار — تسجيل الدخول بدون رسالة SMS",
@@ -548,7 +541,8 @@
     "markerAlt": "دبوس مركز نطاق الموقع",
     "markerTitle": "اسحب الدبوس لتغيير المركز",
     "zoomIn": "تكبير",
-    "zoomOut": "تصغير"
+    "zoomOut": "تصغير",
+    "attribution": "<a href=\"https://leafletjs.com\">Leaflet</a> | © <a href=\"https://www.openstreetmap.org/copyright\">مساهمو OpenStreetMap</a>"
   },
   "notifications": {
     "title": "الإشعارات",
@@ -666,7 +660,8 @@
         "body": "سجلات حضور {workerName} المسجّلة دون اتصال تحتاج إلى مراجعة.\nمُعلَّمة للمراجعة: {flagged}\nمرفوضة: {rejected}",
         "fallbackBody": "تم رصد موقع مشبوه في سجلات الحضور، وهو يحتاج إلى مراجعة."
       }
-    }
+    },
+    "emergencyCalloutShiftTitle": "استدعاء طوارئ"
   },
   "payroll": {
     "title": "الرواتب",

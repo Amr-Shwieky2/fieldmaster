@@ -1,15 +1,16 @@
 import type { NotificationItem } from "@fieldmaster/api-client";
 import type { Formatter } from "./format";
+import { SYSTEM_EMERGENCY_CALLOUT_TITLE } from "./shift-title";
 
 /**
- * Localized notification text.
+ * Arabic notification text.
  *
  * The API stores every notification with an English `title` / `body` (the
  * mobile app still shows those as-is) and, since Step 2, a `dataJson` with the
  * raw values the text is built from: names, ISO instants, `YYYY-MM-DD`
  * business dates, `YYYY-MM` months, whole minutes, counts, enum values and --
- * in Owner notifications only -- money in agorot. The admin web never shows
- * the stored English text in Arabic; it renders
+ * in Owner notifications only -- money in agorot. The admin web is Arabic only
+ * and never shows the stored English text; it renders
  * `notifications.types.<TYPE>.title` / `.body` from the data instead.
  *
  * - Values are formatted here (Western digits, Asia/Jerusalem, `₪ 1,234.50`)
@@ -19,8 +20,7 @@ import type { Formatter } from "./format";
  *   left-to-right isolate so `₪ 1,234.50` keeps its order inside Arabic.
  * - When a value the message needs is missing (notifications created before
  *   the data existed), the type's `fallbackBody` -- a generic sentence
- *   without values -- is used. In English the stored English text may be
- *   shown instead (`storedTextFallback`), since it is already English.
+ *   without values -- is used.
  * - Cost lines are shown only when the data carries the money value, which
  *   the API includes for Owner recipients only. A Field Manager's data never
  *   has it, so a Field Manager never sees a cost.
@@ -32,21 +32,16 @@ export interface NotificationTranslator {
   has(key: string): boolean;
 }
 
-export type NotificationTextSource = "data" | "fallback" | "stored";
+export type NotificationTextSource = "data" | "fallback";
 
 export interface NotificationText {
   title: string;
   body: string;
-  /** Where the text came from: rendered from data, the generic fallback, or the stored English text. */
+  /** Where the text came from: rendered from data, or the generic fallback. */
   source: NotificationTextSource;
 }
 
-export interface RenderNotificationOptions {
-  /** English UI only: show the stored English title/body when the data is missing. */
-  storedTextFallback?: boolean;
-}
-
-type NotificationInput = Pick<NotificationItem, "type" | "title" | "body"> & { dataJson?: Record<string, unknown> | null };
+type NotificationInput = Pick<NotificationItem, "type"> & { dataJson?: Record<string, unknown> | null };
 
 const FSI = "⁨"; // first-strong isolate: user text of unknown direction
 const LRI = "⁦"; // left-to-right isolate: money
@@ -84,6 +79,15 @@ interface Context {
 function text(data: Data, key: string): string | undefined {
   const value = data[key];
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * The shift title from the data. Emergency call-out shifts carry the API's
+ * fixed English placeholder title, which is shown as "استدعاء طوارئ" instead.
+ */
+function readShiftTitle(data: Data, ctx: Context): string | undefined {
+  const value = text(data, "shiftTitle");
+  return value !== undefined && value.trim() === SYSTEM_EMERGENCY_CALLOUT_TITLE ? ctx.t("emergencyCalloutShiftTitle") : value;
 }
 
 function wholeNumber(data: Data, key: string): number | undefined {
@@ -160,14 +164,14 @@ const offlineReview =
 
 const BUILDERS: Record<string, Builder> = {
   WORKER_CLOCKED_IN: (data, ctx) => {
-    const values = { shiftTitle: text(data, "shiftTitle"), at: instant(data, "clockInAt") };
+    const values = { shiftTitle: readShiftTitle(data, ctx), at: instant(data, "clockInAt") };
     if (!allDefined(values)) return null;
     return simple("WORKER_CLOCKED_IN", { workerName: workerName(data, ctx), shiftTitle: isolateText(values.shiftTitle), time: ctx.fmt.dateTime(values.at) });
   },
 
   WORKER_CLOCKED_OUT: (data, ctx) => {
     const values = {
-      shiftTitle: text(data, "shiftTitle"),
+      shiftTitle: readShiftTitle(data, ctx),
       total: wholeNumber(data, "durationMinutes"),
       regular: wholeNumber(data, "regularMinutes"),
       overtime: wholeNumber(data, "overtimeMinutes"),
@@ -204,14 +208,14 @@ const BUILDERS: Record<string, Builder> = {
   },
 
   SHIFT_AWAITING_APPROVAL: (data, ctx) => {
-    const shiftTitle = text(data, "shiftTitle");
+    const shiftTitle = readShiftTitle(data, ctx);
     if (shiftTitle === undefined) return null;
     return simple("SHIFT_AWAITING_APPROVAL", { workerName: workerName(data, ctx), shiftTitle: isolateText(shiftTitle) });
   },
 
   SHIFT_APPROVED: (data, ctx) => {
     const values = {
-      shiftTitle: text(data, "shiftTitle"),
+      shiftTitle: readShiftTitle(data, ctx),
       date: businessDate(data, "businessDate"),
       regular: wholeNumber(data, "approvedRegularMinutes"),
       overtime: wholeNumber(data, "approvedOvertimeMinutes"),
@@ -226,7 +230,7 @@ const BUILDERS: Record<string, Builder> = {
   },
 
   SHIFT_REJECTED: (data, ctx) => {
-    const values = { shiftTitle: text(data, "shiftTitle"), date: businessDate(data, "businessDate"), reason: text(data, "reason") };
+    const values = { shiftTitle: readShiftTitle(data, ctx), date: businessDate(data, "businessDate"), reason: text(data, "reason") };
     if (!allDefined(values)) return null;
     return simple("SHIFT_REJECTED", { shiftTitle: isolateText(values.shiftTitle), date: ctx.fmt.businessDate(values.date), reason: isolateText(values.reason) });
   },
@@ -242,7 +246,7 @@ const BUILDERS: Record<string, Builder> = {
   TURAN_ASSIGNMENT_CREATED: (data, ctx) => {
     // Also sent for new shift assignments, marked with assignmentKind "SHIFT".
     if (data.assignmentKind === "SHIFT") {
-      const values = { shiftTitle: text(data, "shiftTitle"), start: instant(data, "startAt") };
+      const values = { shiftTitle: readShiftTitle(data, ctx), start: instant(data, "startAt") };
       if (!allDefined(values)) return null;
       return simple("TURAN_ASSIGNMENT_CREATED", { shiftTitle: isolateText(values.shiftTitle), start: ctx.fmt.dateTime(values.start) }, "shiftAssignedBody", "shiftAssignedTitle");
     }
@@ -262,8 +266,8 @@ const BUILDERS: Record<string, Builder> = {
       : simple("TURAN_ASSIGNMENT_CHANGED", range);
   },
 
-  TEMPORARY_CHECK_IN_POINT_OPENED: (data) => {
-    const shiftTitle = text(data, "shiftTitle");
+  TEMPORARY_CHECK_IN_POINT_OPENED: (data, ctx) => {
+    const shiftTitle = readShiftTitle(data, ctx);
     if (shiftTitle === undefined) return null;
     return simple("TEMPORARY_CHECK_IN_POINT_OPENED", { shiftTitle: isolateText(shiftTitle) });
   },
@@ -284,7 +288,7 @@ const BUILDERS: Record<string, Builder> = {
   SUSPICIOUS_LOCATION_DETECTED: offlineReview("SUSPICIOUS_LOCATION_DETECTED"),
 
   OVERTIME_THRESHOLD_CROSSED: (data, ctx) => {
-    const shiftTitle = text(data, "shiftTitle");
+    const shiftTitle = readShiftTitle(data, ctx);
     if (shiftTitle === undefined) return null;
     return simple("OVERTIME_THRESHOLD_CROSSED", { workerName: workerName(data, ctx), shiftTitle: isolateText(shiftTitle) });
   },
@@ -298,26 +302,21 @@ function asData(value: unknown): Data {
 }
 
 /**
- * `{ title, body }` for a notification in the translator's language.
+ * `{ title, body }` for a notification, in Arabic.
  *
  *   const t = useTranslations("notifications");
  *   const fmt = useFormat();
- *   renderNotificationText(t, fmt, notification, { storedTextFallback: locale === "en" });
+ *   renderNotificationText(t, fmt, notification);
  */
 export function renderNotificationText(
   t: NotificationTranslator,
   fmt: Formatter,
   notification: NotificationInput,
-  options: RenderNotificationOptions = {},
 ): NotificationText {
   const builder = BUILDERS[notification.type];
   const built = builder ? builder(asData(notification.dataJson), { t, fmt }) : null;
   if (built) {
     return { title: t(built.title.key, built.title.values), body: t(built.body.key, built.body.values), source: "data" };
-  }
-
-  if (options.storedTextFallback && notification.title && notification.body) {
-    return { title: notification.title, body: notification.body, source: "stored" };
   }
 
   const known = builder !== undefined && t.has(typeKey(notification.type, "title"));

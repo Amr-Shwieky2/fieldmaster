@@ -1,12 +1,11 @@
 import type { ReactElement } from "react";
 import { ApiRequestError, type Worker } from "@fieldmaster/api-client";
-import type { Locale } from "@/i18n/config";
 import { renderWithIntl } from "@/test/render-with-intl";
 
-/** Shared helpers for the workers page tests. */
+/** Shared helpers for the workers page tests (the app is Arabic only). */
 
-export function renderWorkersPage(ui: ReactElement, locale: Locale = "ar"): ReturnType<typeof renderWithIntl> {
-  return renderWithIntl(ui, { locale, queryClient: true });
+export function renderWorkersPage(ui: ReactElement): ReturnType<typeof renderWithIntl> {
+  return renderWithIntl(ui, { queryClient: true });
 }
 
 export function apiError(status: number, code: string, message = "Message from the API", details: Record<string, unknown> = {}) {

@@ -12,11 +12,14 @@ pnpm --filter @fieldmaster/api test:e2e   # integration tests against a real dat
 `pnpm test` (root) runs, in parallel via Turborepo:
 
 - `packages/shared-validation` — 35 pure-function unit tests (Jest)
-- `apps/api` — 10 unit tests (Jest, RBAC + location-validation logic)
-- `apps/admin-web` — 9 tests (Vitest + React Testing Library)
+- `apps/api` — 25 unit tests (Jest: RBAC, location validation, app
+  environment, notification money stripping)
+- `apps/admin-web` — 227 tests (Vitest + React Testing Library), all in
+  Arabic: every page, formatting, error mapping, notification text, the
+  translation check script, and the financial-isolation guards
 
 `apps/api`'s `test:e2e` (not part of `pnpm test` — it's slower and needs a
-live database) runs 21 integration tests (Jest + Supertest) against a real
+live database) runs 39 integration tests (Jest + Supertest) against a real
 NestJS app instance and a dedicated `fieldmaster_test` Postgres database.
 
 ## What's covered, by layer
@@ -60,7 +63,13 @@ Against a real running NestJS app + Postgres, covering (see
   attendance record; unregistered-device rejection; duplicate-submission
   detection; Owner-revoked-key rejection
 
-### Admin web (`apps/admin-web`, 9 tests)
+### Admin web (`apps/admin-web`, 227 tests)
+
+The app is Arabic only, so every test renders the real `ar.json`
+(`src/test/render-with-intl.tsx`). Each page has tests for its content,
+right-to-left layout, Western digits, error and empty states, and (where
+it has money) that a Field Manager never sees ₪. The original Step 1 tests
+are still there:
 
 `format.ts` pure-function tests (agorot/minutes/datetime formatting,
 including the "null renders an em-dash, not ₪0.00" rule that matters for

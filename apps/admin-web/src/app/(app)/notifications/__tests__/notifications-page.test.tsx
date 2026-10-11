@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ApiRequestError, type NotificationItem } from "@fieldmaster/api-client";
-import type { Locale } from "@/i18n/config";
 import { renderWithIntl } from "@/test/render-with-intl";
 import NotificationsPage from "../page";
 
@@ -54,7 +53,7 @@ const FIELD_MANAGER_ROWS: NotificationItem[] = [
     readAt: minutesAgo(60),
     createdAt: minutesAgo(120),
   }),
-  // Created before notifications carried data: Arabic must not show the stored English text.
+  // Created before notifications carried data: the stored English text must never be shown.
   notification({ id: "n3", type: "EMERGENCY_SHIFT_STARTED", title: "Emergency call-out started", body: "A worker started a Night Turan emergency call-out.", dataJson: {}, createdAt: minutesAgo(30) }),
 ];
 
@@ -77,9 +76,11 @@ function setup(listNotifications: () => Promise<NotificationItem[]>, markNotific
   return client;
 }
 
-function renderPage(locale: Locale) {
-  return renderWithIntl(<NotificationsPage />, { locale, queryClient: true });
+function renderPage() {
+  return renderWithIntl(<NotificationsPage />, { queryClient: true });
 }
+
+const LIST_LABEL = "قائمة الإشعارات، الأحدث أولًا";
 
 /** Text content without bidi isolate marks. */
 const visible = (element: HTMLElement) => (element.textContent ?? "").replace(/[⁦-⁩]/g, "");
@@ -91,10 +92,10 @@ describe("Notifications page", () => {
 
   it("renders in Arabic from the notification data, never showing the stored English text", async () => {
     setup(async () => FIELD_MANAGER_ROWS);
-    renderPage("ar");
+    renderPage();
 
     expect(screen.getByRole("heading", { level: 1, name: "الإشعارات" })).toBeTruthy();
-    const list = await screen.findByRole("list", { name: "قائمة الإشعارات، الأحدث أولًا" });
+    const list = await screen.findByRole("list", { name: LIST_LABEL });
     const items = within(list).getAllByRole("listitem");
     expect(items).toHaveLength(3);
 
@@ -106,45 +107,38 @@ describe("Notifications page", () => {
     expect(visible(items[0])).not.toContain("₪");
     expect(visible(items[0])).not.toMatch(/[٠-٩]/);
 
+    expect(within(items[1]).getByText("تم إقفال الرواتب")).toBeTruthy();
     expect(visible(items[1])).toContain("تم إقفال رواتب شهر سبتمبر 2026.");
-    // Old notification without data: generic Arabic sentence.
+    // Old notification without data: the type's title and generic Arabic sentence.
+    expect(within(items[2]).getByText("بدأ استدعاء طوارئ")).toBeTruthy();
     expect(visible(items[2])).toContain("بدأ أحد العمال استدعاء طوارئ.");
 
-    expect(document.body.textContent).not.toMatch(/Worker clocked out|Approval is required|A worker started/);
+    // Neither the stored English text nor any English UI wording is shown, and there is no language switch.
+    expect(document.body.textContent).not.toMatch(/Worker clocked out|Approval is required|A worker started|Emergency call-out|Payroll for|Payroll finalized/);
+    expect(document.body.textContent).not.toMatch(/Notifications|Mark as read|Unread|minutes ago/);
+    expect(screen.queryByRole("button", { name: "English" })).toBeNull();
     // Two unread, one read.
     expect(screen.getByText("غير مقروءة: 2")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "تحديد كمقروء" })).toHaveLength(2);
   });
 
-  it("renders in English", async () => {
-    setup(async () => FIELD_MANAGER_ROWS);
-    renderPage("en");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Notifications" })).toBeTruthy();
-    const list = await screen.findByRole("list", { name: "Notifications, newest first" });
-    const items = within(list).getAllByRole("listitem");
-    expect(within(items[0]).getByText("Worker clocked out")).toBeTruthy();
-    expect(visible(items[0])).toContain("Eli Ramzani clocked out of “Ayalon North”.");
-    expect(visible(items[0])).toContain("5 minutes ago");
-    expect(visible(items[1])).toContain("Payroll for September 2026 has been finalized.");
-    // English may show the stored English text of an old notification.
-    expect(visible(items[2])).toContain("A worker started a Night Turan emergency call-out.");
-  });
-
-  it("shows the Owner the estimated cost as ₪ 573.75 in both languages", async () => {
+  it("shows the Owner the estimated cost as ₪ 573.75, isolated left-to-right", async () => {
     setup(async () => OWNER_ROWS);
-    renderPage("ar");
-    expect(visible(await screen.findByRole("list"))).toContain("التكلفة التقديرية: ₪ 573.75");
-    cleanup();
+    renderPage();
 
-    renderPage("en");
-    expect(visible(await screen.findByRole("list"))).toContain("Estimated cost: ₪ 573.75");
+    const list = await screen.findByRole("list", { name: LIST_LABEL });
+    expect(visible(list)).toContain("التكلفة التقديرية: ₪ 573.75");
+    // The amount sits in a left-to-right isolate so it keeps its order inside the Arabic sentence.
+    expect(list.textContent).toContain("⁦₪ 573.75⁩");
+    // Never the stored English text.
+    expect(list.textContent).not.toMatch(/Estimated cost|₪573\.75/);
   });
 
   it("shows the empty state", async () => {
     setup(async () => []);
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("لا توجد إشعارات بعد")).toBeTruthy();
+    expect(screen.getByText("ستظهر هنا إشعارات بدء الدوام وإنهائه والموافقات واستدعاءات الطوارئ.")).toBeTruthy();
     expect(screen.queryByRole("list")).toBeNull();
   });
 
@@ -155,22 +149,24 @@ describe("Notifications page", () => {
       if (calls === 1) throw apiError(500, "INTERNAL_ERROR");
       return FIELD_MANAGER_ROWS;
     });
-    renderPage("en");
+    renderPage();
 
     const alert = await screen.findByRole("alert");
-    expect(within(alert).getByText("Something went wrong")).toBeTruthy();
+    expect(within(alert).getByText("حدث خطأ ما")).toBeTruthy();
+    expect(within(alert).getByText("حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.")).toBeTruthy();
     expect(alert.textContent).not.toContain("API says");
-    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    fireEvent.click(within(alert).getByRole("button", { name: "إعادة المحاولة" }));
 
-    expect(await screen.findByRole("list")).toBeTruthy();
+    expect(await screen.findByRole("list", { name: LIST_LABEL })).toBeTruthy();
     expect(client.listNotifications).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("shows access denied on a 403", async () => {
     setup(async () => {
       throw apiError(403, "FORBIDDEN");
     });
-    renderPage("ar");
+    renderPage();
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
   });
 
@@ -178,7 +174,7 @@ describe("Notifications page", () => {
     let resolveMark: (value: { success: boolean }) => void = () => undefined;
     const markNotificationRead = vi.fn(() => new Promise<{ success: boolean }>((resolve) => (resolveMark = resolve)));
     const client = setup(async () => FIELD_MANAGER_ROWS, markNotificationRead);
-    renderPage("ar");
+    renderPage();
 
     const [first] = await screen.findAllByRole("button", { name: "تحديد كمقروء" });
     fireEvent.click(first);
@@ -197,13 +193,15 @@ describe("Notifications page", () => {
       throw apiError(404, "NOT_FOUND");
     });
     setup(async () => FIELD_MANAGER_ROWS, markNotificationRead);
-    renderPage("en");
+    renderPage();
 
-    const [first] = await screen.findAllByRole("button", { name: "Mark as read" });
+    const [first] = await screen.findAllByRole("button", { name: "تحديد كمقروء" });
     fireEvent.click(first);
 
     const alert = await screen.findByRole("alert");
-    expect(within(alert).getByText("Could not mark the notification as read.")).toBeTruthy();
+    expect(within(alert).getByText("تعذّر تحديد الإشعار كمقروء.")).toBeTruthy();
+    expect(within(alert).getByText("لم نتمكن من العثور على العنصر المطلوب.")).toBeTruthy();
     expect(alert.textContent).not.toContain("API says");
+    expect(markNotificationRead).toHaveBeenCalledWith("n1");
   });
 });
