@@ -8,6 +8,7 @@ import { AssignmentKind } from "../notifications/notification-data";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { projectSelectFor } from "../sites/project-fields";
 import type { CreateShiftDto } from "./dto/create-shift.dto";
 
 const LONG_RUNNING_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -64,6 +65,7 @@ export class ShiftsService {
   async list(
     organizationId: string,
     filters: { status?: ShiftStatus; businessDate?: string; shiftType?: ShiftType },
+    viewer: AuthenticatedUser,
     scope?: { workerProfileId: string },
   ) {
     return this.prisma.shift.findMany({
@@ -76,13 +78,14 @@ export class ShiftsService {
         // they're actually assigned to -- managers see the full org list.
         ...(scope ? { assignments: { some: { workerProfileId: scope.workerProfileId, removedAt: null } } } : {}),
       },
-      include: { assignments: { where: { removedAt: null } }, site: true, project: true },
+      // The project budget is Owner-only: everyone else's query never reads it.
+      include: { assignments: { where: { removedAt: null } }, site: true, project: { select: projectSelectFor(viewer) } },
       orderBy: { scheduledStart: "desc" },
       take: 200,
     });
   }
 
-  async getById(organizationId: string, id: string, scope?: { workerProfileId: string }) {
+  async getById(organizationId: string, id: string, viewer: AuthenticatedUser, scope?: { workerProfileId: string }) {
     const shift = await this.prisma.shift.findFirst({
       where: {
         id,
@@ -92,7 +95,7 @@ export class ShiftsService {
       include: {
         assignments: { where: { removedAt: null }, include: { worker: { include: { membership: { include: { user: true } } } } } },
         site: true,
-        project: true,
+        project: { select: projectSelectFor(viewer) },
         geofence: true,
         temporaryCheckInPoints: true,
       },

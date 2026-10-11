@@ -11,7 +11,14 @@ export async function createTestApp(): Promise<INestApplication> {
   app.setGlobalPrefix("api/v1");
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true, transformOptions: { enableImplicitConversion: true } }));
   app.useGlobalFilters(new AllExceptionsFilter());
-  await app.init();
+  try {
+    await app.init();
+  } catch (error) {
+    // Close what did start (the Redis/BullMQ connections) so a failed boot, e.g. an unreachable
+    // database, fails the suite instead of keeping Jest alive until the CI job times out.
+    await app.close().catch(() => undefined);
+    throw error;
+  }
   return app;
 }
 

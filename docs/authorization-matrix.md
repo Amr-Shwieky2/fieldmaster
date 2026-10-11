@@ -60,7 +60,11 @@ figures. This is enforced independently at every layer, not once:
    for a Field Manager token, verified in `auth-and-rbac.e2e-spec.ts`).
 2. **Service** — services that serve both roles (e.g. worker list) never
    fetch compensation columns when the caller isn't authorized, rather
-   than fetching-then-filtering.
+   than fetching-then-filtering. The same applies to every other money
+   column: a project's `budgetAgorot` (project endpoints and the project
+   nested in `GET /shifts`, via `PROJECT_FIELDS_WITHOUT_BUDGET` in
+   `sites/project-fields.ts`) and a forgotten-stamp infraction's
+   `deductionAgorot` are only selected for an Owner.
 3. **DTO/response mapper** — `worker-response.mapper.ts` strips
    `compensation` from the serialized response unless the viewer is an
    Owner or the worker themself, even if a service accidentally included it.

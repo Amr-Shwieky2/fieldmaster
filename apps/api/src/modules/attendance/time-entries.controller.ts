@@ -90,7 +90,7 @@ export class TimeEntriesController {
   @Get("forgotten-stamp-infractions")
   @RequirePermissions(Permission.APPROVE_ATTENDANCE)
   listForgottenStampInfractions(@CurrentUser() user: AuthenticatedUser, @Query("workerProfileId") workerProfileId?: string) {
-    return this.forgottenStampService.listForOrganization(user.organizationId, workerProfileId);
+    return this.forgottenStampService.listForOrganization(user.organizationId, user, workerProfileId);
   }
 
   @Post("forgotten-stamp-infractions/:id/reverse")

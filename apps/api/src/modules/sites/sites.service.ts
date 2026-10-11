@@ -1,5 +1,4 @@
 import { Injectable } from "@nestjs/common";
-import { OrgRole } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
@@ -8,12 +7,7 @@ import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { CreateProjectDto } from "./dto/create-project.dto";
 import type { CreateSiteDto } from "./dto/create-site.dto";
 import type { CreateGeofenceDto } from "./dto/create-geofence.dto";
-
-function serializeProject(project: { budgetAgorot: number | null; [k: string]: unknown }, viewer: AuthenticatedUser) {
-  if (viewer.role === OrgRole.OWNER) return project;
-  const { budgetAgorot: _budgetAgorot, ...rest } = project;
-  return rest;
-}
+import { projectSelectFor } from "./project-fields";
 
 @Injectable()
 export class SitesService {
@@ -36,6 +30,7 @@ export class SitesService {
         endDate: dto.endDate ? new Date(dto.endDate) : undefined,
         budgetAgorot: dto.budgetAgorot,
       },
+      select: projectSelectFor(actor),
     });
     await this.auditService.record({
       organizationId,
@@ -45,18 +40,21 @@ export class SitesService {
       entityId: project.id,
       correlationId,
     });
-    return serializeProject(project, actor);
+    return project;
   }
 
   async listProjects(organizationId: string, viewer: AuthenticatedUser) {
-    const projects = await this.prisma.project.findMany({ where: { organizationId, archivedAt: null }, orderBy: { createdAt: "asc" } });
-    return projects.map((p) => serializeProject(p, viewer));
+    return this.prisma.project.findMany({
+      where: { organizationId, archivedAt: null },
+      select: projectSelectFor(viewer),
+      orderBy: { createdAt: "asc" },
+    });
   }
 
   async getProject(organizationId: string, id: string, viewer: AuthenticatedUser) {
-    const project = await this.prisma.project.findFirst({ where: { id, organizationId, archivedAt: null } });
+    const project = await this.prisma.project.findFirst({ where: { id, organizationId, archivedAt: null }, select: projectSelectFor(viewer) });
     if (!project) throw new AppException(404, ErrorCodes.NOT_FOUND, "Project not found.");
-    return serializeProject(project, viewer);
+    return project;
   }
 
   // ── Sites ─────────────────────────────────────────────────────────────
