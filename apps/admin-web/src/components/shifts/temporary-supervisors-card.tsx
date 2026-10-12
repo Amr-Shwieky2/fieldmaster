@@ -96,7 +96,15 @@ export function TemporarySupervisorsCard({ shift, workerNames }: { shift: Shift;
                         <Button size="sm" variant="danger" onClick={() => revoke.mutate(assignment)} disabled={revoke.isPending}>
                           {revoke.isPending ? t("revoking") : t("confirmRevokeAction")}
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setConfirming(null)} disabled={revoke.isPending}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            revoke.reset();
+                            setConfirming(null);
+                          }}
+                          disabled={revoke.isPending}
+                        >
                           {t("cancel")}
                         </Button>
                       </>
@@ -148,12 +156,20 @@ function AssignForm({ shift, workerNames, onAssigned }: { shift: Shift; workerNa
   const [canOpenCheckInPoints, setCanOpenCheckInPoints] = useState(true);
   const [showErrors, setShowErrors] = useState(false);
 
-  const candidates = (shift.assignments ?? []).map((assignment) => ({ id: assignment.workerProfileId, name: workerNames.get(assignment.workerProfileId) ?? null }));
+  const candidates = (shift.assignments ?? []).map((assignment) => ({
+    id: assignment.workerProfileId,
+    name: workerNames.get(assignment.workerProfileId) ?? null,
+  }));
   const activation = activatedAt ? fromJerusalemInputValue(activatedAt) : null;
   const expiry = fromJerusalemInputValue(expiresAt);
   const problems = {
     worker: workerProfileId === "" ? tForm("errors.workerRequired") : null,
-    expiresAt: !expiry ? tForm("errors.expiryRequired") : expiry <= (activation ?? new Date()) ? tForm("errors.expiryBeforeStart") : null,
+    // The API's rule: after the start (if any) and in the future.
+    expiresAt: !expiry
+      ? tForm("errors.expiryRequired")
+      : expiry <= new Date() || (activation !== null && expiry <= activation)
+        ? tForm("errors.expiryBeforeStart")
+        : null,
   };
 
   const assign = useMutation({

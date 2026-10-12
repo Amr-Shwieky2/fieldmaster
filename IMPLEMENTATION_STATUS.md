@@ -122,11 +122,29 @@ checks. No business rule changed. Design and reasoning are in
 |---|---|---|
 | shared-validation | 47 | 47 |
 | @fieldmaster/i18n | 71 | 73 |
-| admin-web | 387 | 387 (+ the component tests of the new screens, in a follow-up commit on this PR) |
+| admin-web | 387 | 516 |
 | API unit | 25 | 25 |
 | mobile | 131 | 131 |
 | API e2e | 66 | 107 |
-| **Total** | **727** | **770** |
+| **Total** | **727** | **899** |
+
+New admin-web component tests (129; merged in a follow-up PR after Step 6):
+- operations page: 23 + settings page: 14 (loading / error, Owner vs Field Manager, the
+  live indicator with a fake `EventSource`, every list, no ₪ anywhere);
+- users page: 29;
+- temporary-supervisors card: 17;
+- simulator supervisor panel: 22;
+- nav: 8;
+- issue-report and 9-hour notification texts: 16.
+
+They found three small UI bugs, fixed:
+- the supervisor panel's mutations went into the admin's QueryClient (fixed
+  before the Step 6 merge);
+- the assign form accepted an expiry in the past when a start time was given;
+- «تراجع» after a failed revoke left the error on screen.
+
+And one Arabic text: the late list said "مهلة التأخير 10 دقيقة"; the grace
+minutes now use the Arabic plural ("10 دقائق").
 
 New API e2e tests (41):
 - `temporary-supervisors.e2e-spec.ts` (9):
@@ -165,7 +183,7 @@ No test was removed or weakened. Existing tests that changed:
 - `shifts-pages.test.tsx`: mocks the new supervisors list. One worker-name assertion is scoped to the assigned-workers list item, because the name now also appears in the supervisor form.
 - `test/env.setup.js` no longer sets `DEVICE_TIME_DEVIATION_SECONDS` (not read any more).
 
-`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 663 · `pnpm test:e2e` ✅ 107 · `pnpm build` ✅
+`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 792 · `pnpm test:e2e` ✅ 107 · `pnpm build` ✅
 
 ---
 
