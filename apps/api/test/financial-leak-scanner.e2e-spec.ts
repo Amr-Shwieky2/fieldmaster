@@ -228,6 +228,38 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       })
       .expect(201);
 
+    // An emergency call-out (manager-authorized, then ended by the worker): its Owner DTO carries a cost estimate.
+    const calloutStart = await request(http)
+      .post("/api/v1/emergency-callouts/start")
+      .set("Authorization", `Bearer ${managerToken}`)
+      .set("Idempotency-Key", uuidv7())
+      .send({
+        workerProfileId: worker.workerProfile.id,
+        deviceId: "scanner-manager-device",
+        clientEventId: uuidv7(),
+        deviceTimestamp: new Date().toISOString(),
+        latitude: NEARBY_LAT,
+        longitude: SITE_LNG,
+        accuracyMeters: 10,
+      })
+      .expect(201);
+    await request(http)
+      .post("/api/v1/emergency-callouts/end")
+      .set("Authorization", `Bearer ${workerToken}`)
+      .set("Idempotency-Key", uuidv7())
+      .send({
+        deviceId: "scanner-worker-device",
+        clientEventId: uuidv7(),
+        deviceTimestamp: new Date().toISOString(),
+        latitude: NEARBY_LAT,
+        longitude: SITE_LNG,
+        accuracyMeters: 10,
+        summaryText: "Restored the failed traffic light.",
+        taskCategory: "EMERGENCY_REPAIR",
+      })
+      .expect(201);
+    const calloutId: string = calloutStart.body.calloutId;
+
     const batch = await prisma.offlineSyncBatch.create({
       data: { id: uuidv7(), organizationId, workerProfileId: worker.workerProfile.id, deviceId: "scanner-worker-device", eventCount: 0 },
     });
@@ -253,6 +285,8 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       otherWorker,
       shift,
       yearMonth,
+      timeEntryId,
+      calloutId,
       tokens: { owner: ownerToken, manager: managerToken, worker: workerToken, otherWorker: otherWorkerToken },
       idsByResource: {
         shifts: shift.id,
@@ -262,6 +296,7 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
         batches: batch.id,
         workers: worker.workerProfile.id,
         reports: report.id,
+        "emergency-callouts": calloutId,
         ":yearMonth": yearMonth,
       },
     };
@@ -299,11 +334,17 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     const { leaks } = await scanGetRoutes(seed.tokens.owner, "manager", new Set());
     const ownerLeaks = leaks.join("\n");
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/projects -> \$\[0\]\.budgetAgorot$/m);
-    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/shifts -> \$\[0\]\.project\.budgetAgorot$/m);
+    // Any index: the seeded emergency call-out's own shift (no project) now sorts first.
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/shifts -> \$\[\d+\]\.project\.budgetAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/workers -> \$\[\d+\]\.compensation\.dailyBaseRateAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/forgotten-stamp-infractions -> \$\[\d+\]\.deductionAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/payroll-periods\/:yearMonth -> \$\.items\[\d+\]\.netPayableAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/notifications -> \$\[\d+\]\.dataJson\.estimatedCostAgorot$/m);
+    // Step 5: the Owner-only cost responses and the Owner's emergency call-out DTO.
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/time-entries\/:id\/estimated-cost -> \$\.estimatedCostAgorot$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/workers\/:id\/estimated-earnings -> \$\.totalEstimatedAgorot$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/emergency-callouts -> \$\.items\[0\]\.estimatedCostAgorot$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/emergency-callouts\/:id -> \$\.estimatedCostAgorot$/m);
   });
 
   /** The routes were really read as this role, with rows in them (an empty list would scan clean). */
@@ -320,6 +361,11 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
 
     expectRows(bodies, ["GET /api/v1/shifts", "GET /api/v1/forgotten-stamp-infractions", "GET /api/v1/projects", "GET /api/v1/workers", "GET /api/v1/notifications"]);
     expect(bodies.get("GET /api/v1/shifts/:id")).toMatchObject({ id: seed.shift.id, project: { name: "Test Project" } });
+    // Step 5 routes were read with real rows (the evidence has corrections with forgotten-stamp infractions).
+    expect(bodies.get("GET /api/v1/time-entries/:id/evidence")).toMatchObject({ id: seed.timeEntryId, history: { corrections: [{ infraction: { monthlySequenceNumber: 1 } }, {}, {}] } });
+    expect(bodies.get("GET /api/v1/emergency-callouts")).toMatchObject({ items: [{ id: seed.calloutId }] });
+    expect(bodies.get("GET /api/v1/emergency-callouts/:id")).toMatchObject({ id: seed.calloutId });
+    expect((bodies.get("GET /api/v1/attendance/entries") as { items: unknown[] }).items.length).toBeGreaterThan(0);
   });
 
   it("a Worker gets no money or bank field from any GET route except their own pay (explicit exceptions)", async () => {

@@ -12,7 +12,7 @@ Everything is under `/api/v1`. Implemented route groups:
 /auth                  OTP request/verify, refresh, logout
 /organizations         org settings
 /memberships           membership management
-/workers                roster, onboarding approval/rejection
+/workers                roster, onboarding approval/rejection; /:id/estimated-earnings (Owner only)
 /onboarding-invitations single-use invite links
 /compensation-profiles  effective-dated rate profiles
 /projects, /sites, /geofences
@@ -21,8 +21,11 @@ Everything is under `/api/v1`. Implemented route groups:
 /clock-events           clock-in / clock-out (online)
 /devices                Ed25519 public-key registration for offline signing
 /offline-sync           batched offline clock-event submission
-/time-entries           attendance detail, approvals, corrections
-/turan-assignments, /emergency-callouts
+/time-entries           attendance detail, approvals, corrections; /:id/evidence (detail page);
+                        /:id/estimated-cost (Owner only)
+/attendance/entries     admin attendance list: tabs, filters, page-based pagination
+/forgotten-stamp-infractions  month list; Owner-only reversal
+/turan-assignments, /emergency-callouts (start/end, plus the admin list and detail)
 /payroll-periods, /payroll-items, /payroll-adjustments
 /reports                worker attendance ledger PDF generation
 /notifications          in-app list, mark-read, WebSocket/SSE streams
@@ -31,9 +34,17 @@ Everything is under `/api/v1`. Implemented route groups:
 ```
 
 Not implemented as separate route groups (see `IMPLEMENTATION_STATUS.md`):
-`/sessions` (folded into `/auth`), `/forgotten-stamp-infractions` (surfaced
-via `/time-entries`/`/payroll-adjustments` instead of its own CRUD
-surface), `/settings`, `/files`.
+`/sessions` (folded into `/auth`), `/settings`, `/files`.
+`/forgotten-stamp-infractions` has no CRUD surface: infractions are created
+by manual corrections, and the group only lists them and reverses a
+deduction.
+
+Money for the attendance screens never appears in the attendance list,
+evidence or emergency responses of a Field Manager. An Owner gets it from
+`GET /time-entries/:id/estimated-cost` and
+`GET /workers/:id/estimated-earnings?month=YYYY-MM` (both
+`VIEW_COMPENSATION`), and from `estimatedCostAgorot`, which only an Owner's
+emergency call-out DTO has. See `authorization-matrix.md`.
 
 ## Authentication
 
@@ -85,9 +96,20 @@ body is rejected with `409 IDEMPOTENCY_KEY_CONFLICT`.
 
 Cursor-based on high-volume lists (`/audit-logs`): response shape is
 `{ items, nextCursor }`, pass `nextCursor` back as `?cursor=...` for the
-next page. Other list endpoints (workers, shifts, sites) are simple arrays
-— the data volumes in this deployment shape don't yet justify cursor
-pagination there.
+next page.
+
+Page-based on the admin attendance lists (`GET /attendance/entries`,
+`GET /emergency-callouts`):
+- `?page=` (from 1) and `?pageSize=` (default 20, at most 100);
+- response shape `{ items, page, pageSize, total }`;
+- `/attendance/entries` adds `tabCounts` (`PENDING`, `APPROVED`,
+  `REJECTED`, `ALL`) under the same filters;
+- a page past the end returns `items: []` with the real `total`;
+- filters are validated (UUIDs, `YYYY-MM-DD` business dates, enum values)
+  and an invalid value is a 400.
+
+Other list endpoints (workers, shifts, sites) are simple arrays: the data
+volumes in this deployment shape don't yet justify pagination there.
 
 ## Offline sync specifics
 

@@ -202,6 +202,7 @@ model Organization {
   notifications          Notification[]
   temporaryCheckInPoints TemporaryCheckInPoint[]
   offlineSyncBatches     OfflineSyncBatch[]
+  rejectedClockAttempts  RejectedClockAttempt[]
 
   @@map("organizations")
 }
@@ -297,6 +298,7 @@ model WorkerProfile {
   turanAssignments               TuranAssignment[]               @relation("TuranAssignee")
   turanBackupFor                 TuranAssignment[]               @relation("TuranBackup")
   offlineSyncBatches             OfflineSyncBatch[]
+  rejectedClockAttempts          RejectedClockAttempt[]
 
   @@index([organizationId])
   @@map("worker_profiles")
@@ -632,6 +634,7 @@ model Shift {
   temporarySupervisors   TemporarySupervisorAssignment[]
   temporaryCheckInPoints TemporaryCheckInPoint[]
   timeEntries            TimeEntry[]
+  rejectedClockAttempts  RejectedClockAttempt[]
 
   @@index([organizationId, status])
   @@index([organizationId, businessDate])
@@ -694,6 +697,9 @@ model TemporaryCheckInPoint {
   revokedBy           String?   @map("revoked_by") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at")
+
+  clockEvents           ClockEvent[]
+  rejectedClockAttempts RejectedClockAttempt[]
 
   @@index([shiftId, status])
   @@map("temporary_check_in_points")
@@ -822,6 +828,7 @@ model TimeEntry {
   corrections               ManualTimeCorrection[]
   forgottenStampInfractions ForgottenStampInfraction[]
   emergencyCallout          EmergencyCallout?
+  rejectedClockAttempts     RejectedClockAttempt[]
 
   @@index([organizationId, status])
   @@index([workerProfileId, businessDate])
@@ -853,6 +860,11 @@ model ClockEvent {
   distanceFromSiteMeters   Float?                   @map("distance_from_site_meters")
   locationValidationStatus LocationValidationStatus @default(UNAVAILABLE) @map("location_validation_status")
 
+  /// The temporary check-in point a clock-in was validated against (its
+  /// distance is then measured from the point's center, not the site's).
+  temporaryCheckInPointId String?                @map("temporary_check_in_point_id") @db.Uuid
+  temporaryCheckInPoint   TemporaryCheckInPoint? @relation(fields: [temporaryCheckInPointId], references: [id])
+
   appVersion         String?           @map("app_version")
   isManualCorrection Boolean           @default(false) @map("is_manual_correction")
   correctedBy        String?           @map("corrected_by") @db.Uuid
@@ -864,6 +876,52 @@ model ClockEvent {
   @@unique([deviceId, clientEventId])
   @@index([timeEntryId])
   @@map("clock_events")
+}
+
+/// A clock-in or clock-out the server refused because of where the phone was
+/// or what its clock said (outside the geofence, GPS accuracy too low, device
+/// clock off, mock location). The worker gets exactly the same error as
+/// before; this row is the evidence managers see on the attendance detail
+/// page. Attempts at a clock-in are linked to the time entry the worker later
+/// opens for the same shift; a refused clock-out is linked to the open entry
+/// it was meant to close.
+model RejectedClockAttempt {
+  id              String        @id @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  workerProfileId String        @map("worker_profile_id") @db.Uuid
+  worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
+  shiftId         String        @map("shift_id") @db.Uuid
+  shift           Shift         @relation(fields: [shiftId], references: [id])
+  timeEntryId     String?       @map("time_entry_id") @db.Uuid
+  timeEntry       TimeEntry?    @relation(fields: [timeEntryId], references: [id])
+
+  eventType ClockEventType @map("event_type")
+  origin    EventOrigin
+  /// The error code the worker received (e.g. GEOFENCE_OUTSIDE_ALLOWED_RADIUS).
+  code      String
+
+  deviceTimestamp  DateTime @map("device_timestamp")
+  serverReceivedAt DateTime @default(now()) @map("server_received_at")
+  deviationSeconds Int?     @map("deviation_seconds")
+
+  latitude              Float
+  longitude             Float
+  accuracyMeters        Float   @map("accuracy_meters")
+  mockLocationSuspected Boolean @default(false) @map("mock_location_suspected")
+
+  distanceMeters          Float?                 @map("distance_meters")
+  allowedRadiusMeters     Int?                   @map("allowed_radius_meters")
+  requiredAccuracyMeters  Int?                   @map("required_accuracy_meters")
+  temporaryCheckInPointId String?                @map("temporary_check_in_point_id") @db.Uuid
+  temporaryCheckInPoint   TemporaryCheckInPoint? @relation(fields: [temporaryCheckInPointId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, shiftId])
+  @@index([workerProfileId, shiftId])
+  @@index([timeEntryId])
+  @@map("rejected_clock_attempts")
 }
 
 model UnpaidBreak {

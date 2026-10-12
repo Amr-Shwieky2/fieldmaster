@@ -1,5 +1,196 @@
 # FieldMaster — Implementation Status
 
+## Step 5 of 10 — complete attendance screens (2026-10-12)
+
+Scope: admin-web attendance pages plus the API endpoints they need. Arabic
+only, RTL, same i18n checks. No business rule was changed. Design and
+reasoning are in `docs/technical-decisions.md` ("Step 5: attendance
+screens").
+
+**Pages (admin web):**
+- **`/attendance`**:
+  - tabs بانتظار الموافقة / معتمد / مرفوض / الكل, each with its count;
+  - filters: worker, business-date range (Asia/Jerusalem), project, site
+    (narrowed to the chosen project), shift type, and the flags (attempt
+    outside the geofence, mock or suspicious location, offline, Flexi-Check,
+    temporary point, emergency, "تعديل تجريبي");
+  - 20 per page; every filter and the page live in the URL;
+  - every row opens the detail page; waiting rows keep the quick approve /
+    reject / full-day-credit actions;
+  - "إضافة بدء دوام منسي" opens the correction dialog for a new entry.
+- **`/attendance/[id]`**:
+  - record data and the timeline: per clock event the device, server and
+    validated times, the device-clock deviation, origin, offline-sync
+    outcome, location result in Arabic, accuracy and distance;
+  - Leaflet map: geofence, clock-in/out points with accuracy circles, the
+    temporary point, and rejected attempts with their distance;
+  - duration with the expected (or approved) regular/overtime split,
+    full-day credit, the emergency breakdown and the daily summary;
+  - history: corrections (with their forgotten-stamp infraction), decisions
+    and audit events;
+  - actions: approve, reject (reason), request correction (reason),
+    full-day credit (reason), manual correction;
+  - Owner only: an estimated-cost card from its own Owner-only endpoint.
+- **Manual correction dialog** (5 types: add a missing clock-in/out, correct
+  either time, correct the unpaid break):
+  - Arabic reason list; "أخرى" needs a note;
+  - a now/after preview computed with the shared approval split;
+  - for a forgotten stamp, "هذه المخالفة رقم N لهذا الشهر". From the third,
+    an Owner also sees "سيُخصم ₪ 10.00"; a Field Manager sees the count
+    only.
+- **`/attendance/forgotten-stamps`**: per month and per worker, every
+  infraction with its date, type, sequence number, linked correction and
+  reversal state.
+  - Owner: the deductions, the month's totals (deducted, reversed, net),
+    and "إلغاء الخصم" with a mandatory reason. The original infraction and
+    adjustment are kept, and an offsetting adjustment is added.
+  - Field Manager: counts and sequence numbers only.
+- **`/emergencies`** and **`/emergencies/[id]`**:
+  - filters: worker, date range, status, kept in the URL; paginated;
+  - the authorization source, the four times (actual and compensated start
+    and end), actual and compensated minutes, and a start/end GPS map;
+  - the summary, approval status, and a link to the attendance entry;
+  - Owner only: the estimated cost (only an Owner's DTO has it).
+- **`/workers/[id]`**, new tab "سجل الحضور":
+  - one month at a time: status, minutes (worked / regular / overtime),
+    flags and a link per entry;
+  - month totals, which leave rejected entries out;
+  - Owner only: the month's estimated earnings, from their own Owner-only
+    endpoint.
+- **Nav:** "نسيان التسجيل" and "استدعاءات الطوارئ".
+
+**API:**
+- New GET routes (Owner and Field Manager; Workers 403):
+  - `GET /attendance/entries`: tabs, filters, pagination and tab counts;
+  - `GET /time-entries/:id/evidence`: everything the detail page shows;
+  - `GET /emergency-callouts` and `GET /emergency-callouts/:id`: role-specific
+    DTOs; only an Owner's has `estimatedCostAgorot`.
+- New Owner-only routes (`VIEW_COMPENSATION`; Field Manager and Worker 403):
+  - `GET /time-entries/:id/estimated-cost`;
+  - `GET /workers/:id/estimated-earnings?month=YYYY-MM`.
+  Both compute money only through `PayrollCalculationService`, the code the
+  monthly payroll uses.
+- `GET /forgotten-stamp-infractions`:
+  - takes `month` and returns the worker, the linked correction and the
+    entry's date;
+  - Owners still get `deductionAgorot`, and nobody else's query reads that
+    column.
+  - `POST .../reverse` now refuses an empty or blank reason (400). Before,
+    any string was accepted, though the reason is mandatory.
+- **Evidence capture:**
+  - clock-ins and clock-outs refused for the phone's location or clock are
+    stored in the new `rejected_clock_attempts` table. The worker's answer
+    is unchanged, and storing never fails the request.
+  - Attempts are linked to the entry the worker then opens for the same
+    shift.
+  - A clock event records the temporary check-in point it was validated
+    against.
+  - Migration `20261012100000_attendance_evidence`.
+- **Manual correction of a new entry:**
+  - checks the worker belongs to the organization (404);
+  - checks the worker has no open entry: 409 `ACTIVE_TIME_ENTRY_EXISTS`
+    instead of a database error.
+  - Correcting an existing clock-in or clock-out was already supported. It
+    keeps the original clock event (evidence), writes old → new to the
+    audit log and is refused in a finalized period (409); e2e tests now
+    prove all three.
+- **Shared rules** (`@fieldmaster/shared-validation`): the API and the admin
+  web both use these.
+  - `rawDurationMinutes` and `splitWorkedMinutes`: the 540-minute regular /
+    overtime split and the full-day credit, as approval applies them;
+  - `forgottenStampInfractionMonth`: which month an infraction counts in.
+
+**Financial isolation:** the leak scanner finds GET routes from Nest's
+metadata, so it covers all 6 new routes (40 GET routes, up from 34) with no
+list to maintain. It needed seeded ids for the new `:id` routes (an
+emergency call-out was added to its seed).
+- As Field Manager and as Worker: no money key on any route.
+- The Owner pass finds money exactly where expected: the two cost routes and
+  the Owner's emergency DTO.
+- `dev-login.e2e-spec.ts`'s list of routes behind a financial permission
+  gained the two cost routes.
+
+**Browser check** (worker simulator + admin web, as Owner then as Field
+Manager):
+
+| Scenario | Result |
+|---|---|
+| Clock-in outside the geofence, then inside | ✅ Attempt stored; on the entry's map and list: "خارج نطاق الموقع، المسافة 229 م (المسموح 150 م)"; flag "محاولة خارج نطاق الموقع" |
+| Flexi-Check 3 km from the site | ✅ Flag "تسجيل مرن"; map fits the site and the point (2,992 م) |
+| Offline clock-in/out | ✅ Flag "تسجيل دون اتصال"; sync outcome on the timeline |
+| 10 h 30 m | ✅ 630 min shown as 540 regular / 90 overtime; Owner cost ₪ 495.00 + ₪ 105.00 |
+| Forgotten stamps 1–3 in one month (clock-in, clock-out, missing clock-out) | ✅ Dialog said رقم 1, 2, 3. On #3 the Owner saw "سيُخصم ₪ 10.00"; the Field Manager (on another entry, #4) saw only the count |
+| Reverse the third deduction | ✅ Empty reason refused; after it, the row keeps ₪ 10.00 with "أُلغي … السبب …"; month totals ₪ 20.00 / ₪ 10.00 / ₪ 10.00 |
+| BROKEN_PHONE correction | ✅ No infraction notice, no infraction created |
+| Night Turan emergency | ✅ Four times, 1 h 15 m compensated, start/end map; Owner cost ₪ 62.50 |
+| Field Manager on every page | ✅ No ₪ anywhere; the cost and earnings requests are never sent; raw evidence and emergency responses have no money key |
+
+Found and fixed during the check:
+- the English placeholder title of emergency shifts on the detail page;
+- an English dev-rewind note in the history: audit notes are no longer
+  shown, as on the audit log page;
+- focus handling in the correction dialog;
+- a stale error when reopening the reversal form;
+- an empty page past the end of a list (now sent to the last page).
+
+`pnpm db:seed` was run afterwards to reset the data.
+
+**Tests** (runtime counts):
+
+| | Before Step 5 | After |
+|---|---|---|
+| shared-validation | 35 | 47 |
+| @fieldmaster/i18n | 69 | 71 |
+| admin-web | 208 | 387 |
+| API unit | 25 | 25 |
+| mobile | 131 | 131 |
+| API e2e | 55 | 66 |
+| **Total** | **523** | **727** |
+
+No test was removed or weakened. Existing tests that changed:
+- `attendance/__tests__/attendance-page.test.tsx`: moved to the new list
+  endpoint and item shape (the page now calls `listAttendanceEntries`, not
+  the pending queue). The heading is "الحضور". One new assertion checks the
+  first request (tab PENDING, page 1, 20 per page). All 12 tests kept.
+- `financial-leak-scanner.e2e-spec.ts`:
+  - the Owner check for the shift budget matches any index (`$[\d+]`
+    instead of `$[0]`), because the seeded emergency call-out's own shift
+    (no project) now sorts first;
+  - it gained the Step 5 Owner and Field Manager expectations.
+- `dev-login.e2e-spec.ts`: two routes added to its expected list.
+
+New tests:
+- **admin-web: 179 in 10 files:**
+  - list page: 26;
+  - URL filters: 54;
+  - detail page: 19;
+  - correction dialog: 18;
+  - emergency pages: 19;
+  - forgotten stamps: 15;
+  - worker tab: 11;
+  - nav: 8;
+  - read-only map: 5;
+  - Jerusalem time: 4.
+
+  They cover loading / empty / error / 403 states, Field Manager vs Owner,
+  and the regressions found in the browser check.
+- **shared-validation: 12** (split and infraction month).
+- **i18n: 2** (Arabic labels of the two new shared enums).
+- **API e2e: 11** (`test/attendance-screens.e2e-spec.ts`):
+  - organization scoping;
+  - Workers refused;
+  - the Owner-only cost routes;
+  - an existing clock-in correction keeps the evidence and audits old → new;
+  - 409 in a finalized period;
+  - a reversal keeps the original adjustment;
+  - stored and linked rejected attempts;
+  - the emergency DTOs.
+
+`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 661 · `pnpm test:e2e` ✅ 66 ·
+`pnpm build` ✅
+
+---
+
 ## Fix: money in non-financial endpoints + CI (2026-10-11)
 
 Scope: this fix only (Step 5 not started).
@@ -890,8 +1081,9 @@ and a seeded Field Manager and clicked through every page). Implemented:
   click-to-place marker + draggable radius circle, two-way synced with the
   underlying lat/lng/radius fields
 
-Not implemented in admin-web: worker attendance history detail view,
-RTL/Hebrew UI, shadcn/ui's actual CLI-generated components (hand-rolled
+Not implemented in admin-web (as of this pass; Step 5 later added the
+worker attendance history tab and the attendance detail pages, see the top
+of this file): worker attendance history detail view, RTL/Hebrew UI, shadcn/ui's actual CLI-generated components (hand-rolled
 Tailwind equivalents were used instead — see technical-decisions.md), and
 a Playwright E2E suite. A real Vitest + React Testing Library suite *was*
 added this pass (see section 34) — 9 tests, including a genuine test that

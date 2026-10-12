@@ -76,6 +76,18 @@ notification payloads the same way. The only exceptions are a Worker's own
 compensation history and own payslip, which are checked to contain only that
 Worker's data.
 
+Because the routes are discovered, new endpoints are covered without editing
+a list. The Step 5 attendance screens added 6 GET routes (40 in all); the
+scanner reads each as a Field Manager and as a Worker with real rows, and
+needed only a seeded id per new `:id` parameter.
+- `GET /attendance/entries`, `GET /time-entries/:id/evidence` and
+  `GET /emergency-callouts[/:id]` return no money to a Field Manager.
+- The Owner-only `GET /time-entries/:id/estimated-cost` and
+  `GET /workers/:id/estimated-earnings` answer a Field Manager and a Worker
+  403.
+- The scanner's Owner pass confirms the money is exactly where expected:
+  those two routes and the Owner's emergency call-out DTO.
+
 See `authorization-matrix.md` for the full defense-in-depth breakdown and
 `docs/testing.md` for how to run these tests yourself.
 

@@ -12,6 +12,8 @@ import { ManualCorrectionsService } from "./manual-corrections.service";
 import { ForgottenStampService } from "./forgotten-stamp.service";
 import { FullDayCreditDto, ApproveTimeEntryDto, RejectTimeEntryDto, RequestCorrectionDto } from "./dto/approval.dto";
 import { CreateManualCorrectionDto } from "./dto/manual-correction.dto";
+import { ReverseInfractionDto } from "./dto/reverse-infraction.dto";
+import { ListForgottenStampsQueryDto } from "./dto/forgotten-stamp-list.dto";
 
 @ApiBearerAuth()
 @ApiTags("attendance")
@@ -89,15 +91,15 @@ export class TimeEntriesController {
 
   @Get("forgotten-stamp-infractions")
   @RequirePermissions(Permission.APPROVE_ATTENDANCE)
-  listForgottenStampInfractions(@CurrentUser() user: AuthenticatedUser, @Query("workerProfileId") workerProfileId?: string) {
-    return this.forgottenStampService.listForOrganization(user.organizationId, user, workerProfileId);
+  listForgottenStampInfractions(@CurrentUser() user: AuthenticatedUser, @Query() query: ListForgottenStampsQueryDto) {
+    return this.forgottenStampService.listForOrganization(user.organizationId, user, query);
   }
 
   @Post("forgotten-stamp-infractions/:id/reverse")
   @RequirePermissions(Permission.MANAGE_PAYROLL)
   reverseInfraction(
     @Param("id") id: string,
-    @Body() dto: RejectTimeEntryDto,
+    @Body() dto: ReverseInfractionDto,
     @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId: string,
   ) {

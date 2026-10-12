@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
-import { AttributionControl, Circle, MapContainer, Marker, TileLayer, ZoomControl, useMapEvents } from "react-leaflet";
+import { AttributionControl, Circle, CircleMarker, MapContainer, Marker, TileLayer, Tooltip, ZoomControl, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { useTranslations } from "next-intl";
 import "leaflet/dist/leaflet.css";
@@ -29,15 +29,40 @@ export interface MapCircle {
   color: string;
 }
 
+/**
+ * A labelled location drawn as a dot (e.g. a clock-in, or a refused attempt),
+ * with its GPS accuracy as a dashed circle around it.
+ */
+export interface MapPoint {
+  key: string;
+  latitude: number;
+  longitude: number;
+  color: string;
+  /** Shown when the dot is hovered or focused (Arabic text). */
+  label: string;
+  accuracyMeters?: number | null;
+}
+
 const GEOFENCE_BLUE = "#2563eb";
 
 interface GeofenceMapPickerProps {
   latitude: number;
   longitude: number;
   radiusMeters: number;
-  onChange: (lat: number, lng: number) => void;
+  /** Required unless `readOnly`. */
+  onChange?: (lat: number, lng: number) => void;
+  /**
+   * Evidence view (the attendance and emergency pages): no draggable marker,
+   * clicks do nothing, and the map fits all `circles` and `points`.
+   * `latitude`/`longitude` are only the initial center.
+   */
+  readOnly?: boolean;
+  /** Labelled dots with optional accuracy circles. */
+  points?: MapPoint[];
   /** Id of a visible element naming the map; without it the map gets its own aria-label. */
   labelId?: string;
+  /** The map's own aria-label when there is no `labelId` (default: the geofence map's name). */
+  ariaLabel?: string;
   /** Extra fixed circles (the worker simulator draws the shift's geofence and temporary points this way). */
   circles?: MapCircle[];
   /** Colour of the circle around the marker (default: the geofence blue). */
@@ -54,6 +79,23 @@ function ClickToMove({ onChange }: { onChange: (lat: number, lng: number) => voi
       onChange(e.latlng.lat, e.latlng.lng);
     },
   });
+  return null;
+}
+
+/** Fits the view to every circle and point once they are known. */
+function FitToContent({ circles, points }: { circles: MapCircle[]; points: MapPoint[] }) {
+  const map = useMap();
+  const signature = JSON.stringify([
+    circles.map((c) => [c.latitude, c.longitude, c.radiusMeters]),
+    points.map((p) => [p.latitude, p.longitude, p.accuracyMeters ?? 0]),
+  ]);
+  useEffect(() => {
+    const bounds = L.latLngBounds([]);
+    for (const circle of circles) bounds.extend(L.latLng(circle.latitude, circle.longitude).toBounds(circle.radiusMeters * 2));
+    for (const point of points) bounds.extend(L.latLng(point.latitude, point.longitude).toBounds(Math.max(20, (point.accuracyMeters ?? 0) * 2)));
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 18 });
+    // Keyed on the signature: the arrays themselves are new on every render.
+  }, [map, signature]);
   return null;
 }
 
@@ -90,7 +132,10 @@ export function GeofenceMapPicker({
   longitude,
   radiusMeters,
   onChange,
+  readOnly = false,
+  points = [],
   labelId,
+  ariaLabel,
   circles = [],
   markerCircleColor = GEOFENCE_BLUE,
   help,
@@ -107,7 +152,7 @@ export function GeofenceMapPicker({
       <div
         dir="ltr"
         role="group"
-        aria-label={labelId ? undefined : t("label")}
+        aria-label={labelId ? undefined : (ariaLabel ?? t("label"))}
         aria-labelledby={labelId}
         aria-describedby={helpId}
         className="overflow-hidden rounded-md border border-slate-300"
@@ -123,20 +168,22 @@ export function GeofenceMapPicker({
           <ZoomControl position="topright" zoomInTitle={t("zoomIn")} zoomOutTitle={t("zoomOut")} />
           {/* No default prefix: it carries an English tooltip. The Leaflet credit is part of the Arabic attribution. */}
           <AttributionControl position="bottomleft" prefix={false} />
-          <Marker
-            position={[latitude, longitude]}
-            icon={markerIcon}
-            draggable
-            alt={markerLabel ?? t("markerAlt")}
-            title={markerLabel ?? t("markerTitle")}
-            eventHandlers={{
-              dragend: (e) => {
-                const marker = e.target as L.Marker;
-                const pos = marker.getLatLng();
-                onChange(pos.lat, pos.lng);
-              },
-            }}
-          />
+          {readOnly ? null : (
+            <Marker
+              position={[latitude, longitude]}
+              icon={markerIcon}
+              draggable
+              alt={markerLabel ?? t("markerAlt")}
+              title={markerLabel ?? t("markerTitle")}
+              eventHandlers={{
+                dragend: (e) => {
+                  const marker = e.target as L.Marker;
+                  const pos = marker.getLatLng();
+                  onChange?.(pos.lat, pos.lng);
+                },
+              }}
+            />
+          )}
           {circles.map((circle) => (
             <Circle
               key={circle.key}
@@ -145,9 +192,37 @@ export function GeofenceMapPicker({
               pathOptions={{ color: circle.color, fillOpacity: 0.1 }}
             />
           ))}
-          <Circle center={[latitude, longitude]} radius={radiusMeters} pathOptions={{ color: markerCircleColor, fillOpacity: 0.1 }} />
-          <ClickToMove onChange={onChange} />
-          <RecenterOnChange latitude={latitude} longitude={longitude} />
+          {points.map((point) =>
+            point.accuracyMeters ? (
+              <Circle
+                key={`${point.key}-accuracy`}
+                center={[point.latitude, point.longitude]}
+                radius={point.accuracyMeters}
+                pathOptions={{ color: point.color, weight: 1, dashArray: "4 4", fillOpacity: 0.05 }}
+              />
+            ) : null,
+          )}
+          {points.map((point) => (
+            <CircleMarker
+              key={point.key}
+              center={[point.latitude, point.longitude]}
+              radius={7}
+              pathOptions={{ color: "#ffffff", weight: 2, fillColor: point.color, fillOpacity: 1 }}
+            >
+              <Tooltip direction="top" offset={[0, -6]}>
+                <span dir="rtl">{point.label}</span>
+              </Tooltip>
+            </CircleMarker>
+          ))}
+          {readOnly ? (
+            <FitToContent circles={circles} points={points} />
+          ) : (
+            <>
+              <Circle center={[latitude, longitude]} radius={radiusMeters} pathOptions={{ color: markerCircleColor, fillOpacity: 0.1 }} />
+              <ClickToMove onChange={(lat, lng) => onChange?.(lat, lng)} />
+              <RecenterOnChange latitude={latitude} longitude={longitude} />
+            </>
+          )}
         </MapContainer>
       </div>
       <p id={helpId} className="text-xs text-slate-500">

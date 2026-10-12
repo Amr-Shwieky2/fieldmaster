@@ -1,12 +1,20 @@
 import type {
   ApiError,
+  AttendanceListFilters,
+  AttendanceListResponse,
   AuditLogEntry,
   AuthSession,
   ClockInResult,
   DevLoginUser,
   EmergencyCalloutEndResult,
+  EmergencyCalloutFilters,
+  EmergencyCalloutRecord,
   EmergencyCalloutStartResult,
+  EntryCostEstimate,
   FinancialDashboard,
+  ForgottenStampInfraction,
+  ManualCorrectionInput,
+  Paginated,
   Geofence,
   GeneratedReport,
   NotificationItem,
@@ -19,10 +27,27 @@ import type {
   TemporaryCheckInPoint,
   TemporarySupervisorAssignment,
   TimeEntry,
+  TimeEntryEvidence,
   TuranAssignment,
   Worker,
+  WorkerMonthEarnings,
   WorkerSimulatorContext,
 } from "./types";
+
+/** `?a=1&b=x,y` from the defined values (arrays joined with commas); "" when there are none. */
+function queryString(params: Record<string, string | number | string[] | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === "") continue;
+    if (Array.isArray(value)) {
+      if (value.length > 0) search.set(key, value.join(","));
+    } else {
+      search.set(key, String(value));
+    }
+  }
+  const text = search.toString();
+  return text ? `?${text}` : "";
+}
 
 export class ApiRequestError extends Error {
   constructor(
@@ -208,6 +233,36 @@ export class FieldMasterClient {
   getTimeEntry(id: string) {
     return this.request<TimeEntry>("GET", `/time-entries/${id}`);
   }
+  /** Owners and Field Managers; never carries money. */
+  listAttendanceEntries(filters: AttendanceListFilters = {}) {
+    return this.request<AttendanceListResponse>("GET", `/attendance/entries${queryString({ ...filters })}`);
+  }
+  /** Everything a manager needs to decide on one entry; never carries money. */
+  getTimeEntryEvidence(id: string) {
+    return this.request<TimeEntryEvidence>("GET", `/time-entries/${id}/evidence`);
+  }
+  /** Owner only (403 for anyone else). */
+  getTimeEntryEstimatedCost(id: string) {
+    return this.request<EntryCostEstimate>("GET", `/time-entries/${id}/estimated-cost`);
+  }
+  requestTimeEntryCorrection(id: string, notes: string) {
+    return this.request<TimeEntry>("POST", `/time-entries/${id}/request-correction`, { notes });
+  }
+  createManualCorrection(input: ManualCorrectionInput) {
+    return this.request<{ timeEntry: TimeEntry; correction: { id: string } }>("POST", "/manual-corrections", input);
+  }
+  /** An Owner's rows also carry `deductionAgorot`. */
+  listForgottenStampInfractions(filters: { month?: string; workerProfileId?: string } = {}) {
+    return this.request<ForgottenStampInfraction[]>("GET", `/forgotten-stamp-infractions${queryString(filters)}`);
+  }
+  /** Owner only: cancels the deduction with an offsetting adjustment (the original is kept). */
+  reverseForgottenStampInfraction(id: string, reason: string) {
+    return this.request<ForgottenStampInfraction>("POST", `/forgotten-stamp-infractions/${id}/reverse`, { reason });
+  }
+  /** Owner only (403 for anyone else). `month` is YYYY-MM; the current month when omitted. */
+  getWorkerEstimatedEarnings(workerProfileId: string, month?: string) {
+    return this.request<WorkerMonthEarnings>("GET", `/workers/${workerProfileId}/estimated-earnings${queryString({ month })}`);
+  }
 
   // ── Clock events ────────────────────────────────────────────────────
   /** The API answers with the new time entry and the clock event that opened it. */
@@ -275,6 +330,13 @@ export class FieldMasterClient {
   }
   endEmergencyCallout(input: Record<string, unknown>, idempotencyKey: string) {
     return this.request<EmergencyCalloutEndResult>("POST", "/emergency-callouts/end", input, { "Idempotency-Key": idempotencyKey });
+  }
+  /** Owners and Field Managers; an Owner's items also carry `estimatedCostAgorot`. */
+  listEmergencyCallouts(filters: EmergencyCalloutFilters = {}) {
+    return this.request<Paginated<EmergencyCalloutRecord>>("GET", `/emergency-callouts${queryString({ ...filters })}`);
+  }
+  getEmergencyCallout(id: string) {
+    return this.request<EmergencyCalloutRecord>("GET", `/emergency-callouts/${id}`);
   }
 
   // ── Dev tools (test mode only; the API answers 404 when dev login is off) ──

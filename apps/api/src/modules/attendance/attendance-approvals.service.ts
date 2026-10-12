@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { ApprovalAction, NotificationType, STANDARD_DAY_MINUTES, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { splitWorkedMinutes } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -64,18 +65,12 @@ export class AttendanceApprovalsService {
     }
     await this.assertPeriodNotFinalized(organizationId, timeEntry.businessDate);
 
-    const rawMinutes = timeEntry.rawDurationMinutes ?? 0;
-    const netMinutes = Math.max(0, rawMinutes - timeEntry.unpaidBreakMinutes);
-
-    let approvedRegularMinutes: number;
-    let approvedOvertimeMinutes: number;
-    if (timeEntry.fullDayCredit && netMinutes < STANDARD_DAY_MINUTES) {
-      approvedRegularMinutes = STANDARD_DAY_MINUTES;
-      approvedOvertimeMinutes = 0;
-    } else {
-      approvedRegularMinutes = Math.min(netMinutes, STANDARD_DAY_MINUTES);
-      approvedOvertimeMinutes = Math.max(0, netMinutes - STANDARD_DAY_MINUTES);
-    }
+    // The shared split (also shown by the admin web's correction preview before a correction is saved).
+    const { regularMinutes: approvedRegularMinutes, overtimeMinutes: approvedOvertimeMinutes } = splitWorkedMinutes({
+      rawDurationMinutes: timeEntry.rawDurationMinutes ?? 0,
+      unpaidBreakMinutes: timeEntry.unpaidBreakMinutes,
+      fullDayCredit: timeEntry.fullDayCredit,
+    });
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const entry = await tx.timeEntry.update({
