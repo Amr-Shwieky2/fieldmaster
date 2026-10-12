@@ -107,6 +107,24 @@ caught and fixed by the automated tests during this build; see the git
 history / `offline-sync.service.ts`'s comment on canonical-payload
 construction).
 
+## Dependency audit
+
+CI's "Dependency security scan" job runs `pnpm audit --audit-level high`.
+Vulnerable transitive packages are pinned to patched versions through
+`pnpm.overrides` in the root `package.json`. Each override is scoped to the
+affected major (for example `"js-yaml@^3": "^3.15.2"`), so a dependency is
+never pushed across a major version it wasn't written for.
+
+Advisories with **no patched release** are listed in
+`pnpm.auditConfig.ignoreCves` so the gate stays meaningful for everything
+else. Both of these are reached only through development/build tooling, never
+through the API runtime or the shipped web/mobile bundles:
+
+| CVE | Package | Why it is ignored | Remove when |
+|---|---|---|---|
+| CVE-2026-93687 (GHSA-vfj7-8cjw-p6xm) | `braces` ≤ 3.0.3 | Stack-exhaustion DoS from deeply nested brace patterns. Only reached via `micromatch`/`chokidar`/`fast-glob` in jest, the Nest CLI, metro, tailwind and eslint, which expand glob patterns from repo config, not user input. | `braces` ships a fix (then add an override instead) |
+| CVE-2026-85393 (GHSA-86w9-cpqp-85rv) | `node-forge` ≤ 1.4.0 | RSA PKCS#1 v1.5 signature-verification bypass. Only reached via `@expo/cli` (dev server / export code signing); the app never verifies signatures with it. | `node-forge` ships a fix |
+
 ## Reporting a vulnerability
 
 This is a development/demonstration repository, not a deployed production
