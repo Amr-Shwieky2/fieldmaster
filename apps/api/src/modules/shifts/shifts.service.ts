@@ -6,6 +6,9 @@ import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { AssignmentKind } from "../notifications/notification-data";
 import { generateId } from "../../common/ids";
+import { UUID_PATTERN } from "../../common/validation/patterns";
+import { OrganizationSettingsService } from "../../common/settings/organization-settings.service";
+import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { projectSelectFor } from "../sites/project-fields";
@@ -19,6 +22,8 @@ export class ShiftsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly settings: OrganizationSettingsService,
+    private readonly realtime: RealtimeEventsService,
   ) {}
 
   async create(organizationId: string, dto: CreateShiftDto, actor: AuthenticatedUser, correlationId: string) {
@@ -27,6 +32,7 @@ export class ShiftsService {
     if (end <= start) {
       throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "scheduledEnd must be after scheduledStart.");
     }
+    const settings = await this.settings.get(organizationId);
 
     const shift = await this.prisma.shift.create({
       data: {
@@ -41,7 +47,8 @@ export class ShiftsService {
         scheduledStart: start,
         scheduledEnd: end,
         checkInMethod: dto.checkInMethod ?? "GEOFENCED",
-        graceMinutes: dto.graceMinutes ?? 10,
+        // The organization's default (settings) unless the shift sets its own.
+        graceMinutes: dto.graceMinutes ?? settings.defaultGraceMinutes,
         businessDate: toBusinessDate(start),
         managerId: dto.managerId ?? actor.sub,
         status: ShiftStatus.PUBLISHED,
@@ -86,6 +93,8 @@ export class ShiftsService {
   }
 
   async getById(organizationId: string, id: string, viewer: AuthenticatedUser, scope?: { workerProfileId: string }) {
+    // A malformed id is simply not found (a @db.Uuid column would make Prisma throw a 500).
+    if (!UUID_PATTERN.test(id)) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
     const shift = await this.prisma.shift.findFirst({
       where: {
         id,
@@ -105,7 +114,7 @@ export class ShiftsService {
   }
 
   async assignWorker(organizationId: string, shiftId: string, workerProfileId: string, actor: AuthenticatedUser, correlationId: string) {
-    const shift = await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId } });
+    const shift = UUID_PATTERN.test(shiftId) ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId } }) : null;
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
 
     const worker = await this.prisma.workerProfile.findFirst({ where: { id: workerProfileId, organizationId } });
@@ -169,8 +178,12 @@ export class ShiftsService {
   }
 
   async close(organizationId: string, shiftId: string, actor: AuthenticatedUser, correlationId: string) {
-    const shift = await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId } });
+    const shift = UUID_PATTERN.test(shiftId) ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId } }) : null;
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
+    // Step 6 fix: closing again would overwrite closedAt/closedBy and audit twice; a cancelled shift stays cancelled.
+    if (shift.status === ShiftStatus.CLOSED || shift.status === ShiftStatus.CANCELLED) {
+      throw new AppException(409, ErrorCodes.SHIFT_NOT_OPEN, "This shift is already closed or cancelled.");
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const closed = await tx.shift.update({
@@ -192,6 +205,8 @@ export class ShiftsService {
       entityId: shiftId,
       correlationId,
     });
+    // Its temporary points expired and its temporary supervisors lost access (checked live).
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.SHIFT);
 
     return updated;
   }

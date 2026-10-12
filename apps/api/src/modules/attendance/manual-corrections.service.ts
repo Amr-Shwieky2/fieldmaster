@@ -8,6 +8,7 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { ForgottenStampService } from "./forgotten-stamp.service";
 import { RejectedClockAttemptsService } from "./rejected-clock-attempts.service";
+import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { CorrectionField, type CreateManualCorrectionDto } from "./dto/manual-correction.dto";
 
@@ -26,6 +27,7 @@ export class ManualCorrectionsService {
     private readonly auditService: AuditService,
     private readonly forgottenStampService: ForgottenStampService,
     private readonly rejectedAttempts: RejectedClockAttemptsService,
+    private readonly realtime: RealtimeEventsService,
   ) {}
 
   async create(organizationId: string, dto: CreateManualCorrectionDto, actor: AuthenticatedUser, meta: CorrectionRequestMeta) {
@@ -33,7 +35,7 @@ export class ManualCorrectionsService {
       throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "A note is required when reason is OTHER.");
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       let timeEntry = dto.timeEntryId
         ? await tx.timeEntry.findFirst({ where: { id: dto.timeEntryId, organizationId } })
         : null;
@@ -215,6 +217,9 @@ export class ManualCorrectionsService {
 
       return { timeEntry: updatedEntry, correction };
     });
+    // A correction can open or close an entry: the live operations page refetches.
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE);
+    return result;
   }
 
   private async assertPeriodNotFinalized(tx: Prisma.TransactionClient, organizationId: string, businessDate: string) {

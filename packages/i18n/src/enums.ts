@@ -38,6 +38,8 @@ export const ENUM_NAMES = [
   "OfflineSyncEventStatus",
   "AttendanceListTab",
   "AttendanceFlag",
+  "TemporarySupervisorState",
+  "ShiftWorkerPresence",
 ] as const;
 
 export type EnumName = (typeof ENUM_NAMES)[number];

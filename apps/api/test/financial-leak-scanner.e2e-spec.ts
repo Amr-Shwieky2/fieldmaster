@@ -23,7 +23,8 @@ import { NotificationsService } from "../src/modules/notifications/notifications
 /**
  * Financial leak scanner (spec sections 6.2 / 23.5).
  *
- * Signs in (dev login) as a Field Manager and as a Worker, calls every GET
+ * Signs in (dev login) as a Field Manager, a Worker and a Temporary
+ * Supervisor (a worker with an active assignment, Step 6), calls every GET
  * route the app exposes -- discovered from Nest's route metadata, so a new
  * route is scanned without anyone adding it here -- and fails with the route
  * and JSON path of every money or bank key in any response. The notification
@@ -34,6 +35,7 @@ const OWNER_PHONE = "+972500000001";
 const MANAGER_PHONE = "+972500000011";
 const WORKER_PHONE = "+972500010001";
 const OTHER_WORKER_PHONE = "+972500010002";
+const SUPERVISOR_PHONE = "+972500010003";
 
 const SITE_LAT = 32.0853;
 const SITE_LNG = 34.7818;
@@ -82,8 +84,10 @@ const WORKER_OWN_MONEY_ROUTES = new Set([
  */
 const EXPECTED_NOT_FOUND = {
   // A Field Manager who is not time-trackable has no worker profile, so no payslip.
-  manager: new Set(["GET /api/v1/payroll-periods/:yearMonth/my-payslip"]),
-  worker: new Set<string>(),
+  // A temporary supervisor assignment exists only for its own supervisor: everyone else gets 404.
+  manager: new Set(["GET /api/v1/payroll-periods/:yearMonth/my-payslip", "GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
+  worker: new Set(["GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
+  supervisor: new Set<string>(),
 };
 
 interface GetRoute {
@@ -174,6 +178,11 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       hourlyRateAgorot: 5_000,
       overtimeRateAgorot: 7_500,
     });
+    const supervisor = await addWorker(prisma, organizationId, SUPERVISOR_PHONE, "Sami Supervisor", {
+      type: "HOURLY",
+      hourlyRateAgorot: 6_000,
+      overtimeRateAgorot: 9_000,
+    });
 
     const project = await createProject(prisma, organizationId);
     await prisma.project.update({ where: { id: project.id }, data: { budgetAgorot: PROJECT_BUDGET_AGOROT } });
@@ -183,12 +192,26 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     const shift = await createStandardShift(prisma, organizationId, project.id, site.id, geofence.id, manager.user.id, shiftStart, shiftEnd);
     await assignWorkerToShift(prisma, shift.id, worker.workerProfile.id, manager.user.id);
     await assignWorkerToShift(prisma, shift.id, otherWorker.workerProfile.id, manager.user.id);
+    await assignWorkerToShift(prisma, shift.id, supervisor.workerProfile.id, manager.user.id);
 
     const ownerToken = await devLogin(owner.membership.id);
     const managerToken = await devLogin(manager.membership.id);
     const workerToken = await devLogin(worker.membership.id);
     const otherWorkerToken = await devLogin(otherWorker.membership.id);
+    const supervisorToken = await devLogin(supervisor.membership.id);
     const http = app.getHttpServer();
+
+    // Step 6: a temporary supervisor of the shift (assigned by the manager), who opens a temporary point.
+    const supervision = await request(http)
+      .post(`/api/v1/shifts/${shift.id}/temporary-supervisors`)
+      .set("Authorization", `Bearer ${managerToken}`)
+      .send({ workerProfileId: supervisor.workerProfile.id, canOpenCheckInPoints: true })
+      .expect(201);
+    await request(http)
+      .post("/api/v1/shifts/temporary-check-in-points")
+      .set("Authorization", `Bearer ${supervisorToken}`)
+      .send({ shiftId: shift.id, name: "North gate", latitude: NEARBY_LAT, longitude: SITE_LNG })
+      .expect(201);
 
     // The Worker's day, through the real endpoints: clock in, clock out (notifies the manager and the Owner).
     await clockEvent(workerToken, "clock-in", { shiftId: shift.id, deviceId: "scanner-worker-device" }).expect(201);
@@ -287,7 +310,8 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       yearMonth,
       timeEntryId,
       calloutId,
-      tokens: { owner: ownerToken, manager: managerToken, worker: workerToken, otherWorker: otherWorkerToken },
+      supervisionId: supervision.body.id as string,
+      tokens: { owner: ownerToken, manager: managerToken, worker: workerToken, otherWorker: otherWorkerToken, supervisor: supervisorToken },
       idsByResource: {
         shifts: shift.id,
         "time-entries": timeEntryId,
@@ -297,13 +321,15 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
         workers: worker.workerProfile.id,
         reports: report.id,
         "emergency-callouts": calloutId,
+        memberships: worker.membership.id,
+        "temporary-supervisors": supervision.body.id as string,
         ":yearMonth": yearMonth,
       },
     };
   }
 
   /** Calls every GET route as `accessToken`; returns each leaked key as "GET /route -> $.json.path". */
-  async function scanGetRoutes(accessToken: string, role: "manager" | "worker", skip: Set<string>) {
+  async function scanGetRoutes(accessToken: string, role: "manager" | "worker" | "supervisor", skip: Set<string>) {
     const leaks: string[] = [];
     const unexpectedStatuses: string[] = [];
     const bodies = new Map<string, unknown>();
@@ -345,6 +371,8 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/workers\/:id\/estimated-earnings -> \$\.totalEstimatedAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/emergency-callouts -> \$\.items\[0\]\.estimatedCostAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/emergency-callouts\/:id -> \$\.estimatedCostAgorot$/m);
+    // Step 6: the settings' fixed rules carry the forgotten-stamp penalty amount for an Owner only.
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/organizations\/me\/settings -> \$\.fixedRules\.forgottenStampPenaltyAgorot$/m);
   });
 
   /** The routes were really read as this role, with rows in them (an empty list would scan clean). */
@@ -366,6 +394,9 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     expect(bodies.get("GET /api/v1/emergency-callouts")).toMatchObject({ items: [{ id: seed.calloutId }] });
     expect(bodies.get("GET /api/v1/emergency-callouts/:id")).toMatchObject({ id: seed.calloutId });
     expect((bodies.get("GET /api/v1/attendance/entries") as { items: unknown[] }).items.length).toBeGreaterThan(0);
+    // Step 6 routes were read too: the live operations page and the settings (without the penalty amount).
+    expect(bodies.get("GET /api/v1/operations/live")).toMatchObject({ temporaryPoints: [{ name: "North gate" }] });
+    expect(bodies.get("GET /api/v1/organizations/me/settings")).toMatchObject({ canEdit: false, fixedRules: { standardDayMinutes: 540 } });
   });
 
   it("a Worker gets no money or bank field from any GET route except their own pay (explicit exceptions)", async () => {
@@ -374,6 +405,18 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
 
     expectRows(bodies, ["GET /api/v1/shifts", "GET /api/v1/time-entries", "GET /api/v1/notifications"]);
     expect(bodies.get("GET /api/v1/shifts/:id")).toMatchObject({ id: seed.shift.id, project: { name: "Test Project" } });
+  });
+
+  it("a Temporary Supervisor gets no money or bank field from any GET route, including the supervised shift", async () => {
+    // Their own pay is the Worker's exception above, so it is skipped the same way.
+    const { leaks, unexpectedStatuses, bodies } = await scanGetRoutes(seed.tokens.supervisor, "supervisor", WORKER_OWN_MONEY_ROUTES);
+    expect({ leaks, unexpectedStatuses }).toEqual({ leaks: [], unexpectedStatuses: [] });
+
+    // The supervisor routes were really read, with rows: the shift's three workers and the opened point.
+    expectRows(bodies, ["GET /api/v1/temporary-supervisors/me"]);
+    const view = bodies.get("GET /api/v1/temporary-supervisors/:assignmentId/shift") as { workers: unknown[]; temporaryCheckInPoints: unknown[] };
+    expect(view.workers).toHaveLength(3);
+    expect(view.temporaryCheckInPoints).toHaveLength(1);
   });
 
   it("the Worker's own-money exceptions only ever contain the Worker's own data", async () => {

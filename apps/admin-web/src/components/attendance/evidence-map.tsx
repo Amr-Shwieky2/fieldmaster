@@ -24,6 +24,9 @@ export const EVIDENCE_COLORS = {
   rejected: "#dc2626",
   start: "#ea580c",
   end: "#2563eb",
+  /** Live operations map: an emergency call-out in progress, and a position that needs review. */
+  emergency: "#db2777",
+  flagged: "#d97706",
 } as const;
 
 export type EvidenceColor = keyof typeof EVIDENCE_COLORS;

@@ -184,6 +184,7 @@ export const NotificationType = {
   OFFLINE_EVENT_SYNCED: "OFFLINE_EVENT_SYNCED",
   OFFLINE_EVENT_REJECTED: "OFFLINE_EVENT_REJECTED",
   SUSPICIOUS_LOCATION_DETECTED: "SUSPICIOUS_LOCATION_DETECTED",
+  TEMPORARY_SUPERVISOR_ISSUE_REPORTED: "TEMPORARY_SUPERVISOR_ISSUE_REPORTED",
 } as const;
 export type NotificationType = (typeof NotificationType)[keyof typeof NotificationType];
 
@@ -226,6 +227,27 @@ export const AttendanceFlag = {
   DEV_REWOUND: "DEV_REWOUND",
 } as const;
 export type AttendanceFlag = (typeof AttendanceFlag)[keyof typeof AttendanceFlag];
+
+/**
+ * Where a temporary-supervisor assignment stands now (derived, not stored).
+ * Only ACTIVE gives access: not revoked, inside its window, and the shift is
+ * not closed or cancelled.
+ */
+export const TemporarySupervisorState = {
+  ACTIVE: "ACTIVE",
+  UPCOMING: "UPCOMING",
+  EXPIRED: "EXPIRED",
+  REVOKED: "REVOKED",
+} as const;
+export type TemporarySupervisorState = (typeof TemporarySupervisorState)[keyof typeof TemporarySupervisorState];
+
+/** A worker's attendance on one shift, as a temporary supervisor (or the live operations page) sees it. */
+export const ShiftWorkerPresence = {
+  NOT_CLOCKED_IN: "NOT_CLOCKED_IN",
+  CLOCKED_IN: "CLOCKED_IN",
+  CLOCKED_OUT: "CLOCKED_OUT",
+} as const;
+export type ShiftWorkerPresence = (typeof ShiftWorkerPresence)[keyof typeof ShiftWorkerPresence];
 
 /** Every business table's timezone anchor for monthly/daily grouping. */
 export const BUSINESS_TIMEZONE = "Asia/Jerusalem";

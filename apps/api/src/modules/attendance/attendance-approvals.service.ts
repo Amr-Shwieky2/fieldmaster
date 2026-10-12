@@ -4,6 +4,7 @@ import { splitWorkedMinutes } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import type { NotificationData } from "../notifications/notification-data";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
@@ -15,6 +16,7 @@ export class AttendanceApprovalsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly realtime: RealtimeEventsService,
   ) {}
 
   async listPendingApproval(organizationId: string) {
@@ -54,6 +56,7 @@ export class AttendanceApprovalsService {
       correlationId,
     });
 
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE);
     return updated;
   }
 
@@ -110,6 +113,7 @@ export class AttendanceApprovalsService {
       approvedOvertimeMinutes,
     });
 
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE);
     return updated;
   }
 
@@ -143,6 +147,7 @@ export class AttendanceApprovalsService {
       reason,
     });
 
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE);
     return updated;
   }
 
@@ -162,6 +167,7 @@ export class AttendanceApprovalsService {
       return entry;
     });
 
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE);
     return updated;
   }
 

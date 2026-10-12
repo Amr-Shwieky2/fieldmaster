@@ -113,7 +113,6 @@ jobs:
       FIELDMASTER_TEST_OTP: "000000"
       OTP_TTL_SECONDS: "300"
       OTP_MAX_ATTEMPTS: "5"
-      DEVICE_TIME_DEVIATION_SECONDS: "120"
       CORS_ORIGINS: ""
       NODE_ENV: "test"
     steps:

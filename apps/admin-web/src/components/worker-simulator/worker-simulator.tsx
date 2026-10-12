@@ -44,6 +44,7 @@ import { OfflineQueuePanel } from "./offline-queue-panel";
 import { SessionLog } from "./session-log";
 import { ScenarioChecklist } from "./scenario-checklist";
 import type { ScenarioId, SessionLogEntry, SimulatorAction, SimulatorResult, SummaryForm } from "./types";
+import { SupervisorPanel } from "./supervisor-panel";
 
 /**
  * /dev/worker-simulator: act as any seeded worker from the admin web and
@@ -546,6 +547,7 @@ function SimulatorWorkspace({ devUsers, organizationId }: { devUsers: DevLoginUs
               onEmergencyEnd={() => void endEmergency()}
             />
             <ResultPanel result={result} onApprove={(id) => void approve(id)} approving={busy === "approve"} />
+            {memberKey ? <SupervisorPanel client={sim.client} queryClient={sim.queryClient} memberKey={memberKey} onLog={addLog} /> : null}
             <OfflineQueuePanel
               queue={queue}
               keyRegistered={keyRegistered}

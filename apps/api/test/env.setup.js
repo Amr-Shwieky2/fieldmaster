@@ -10,7 +10,6 @@ process.env.LOCAL_ENCRYPTION_KEY_BASE64 ||= "3flOAwkmbM8Wbu+jPivo+sMVLbSkA8+as2w
 process.env.FIELDMASTER_TEST_OTP ||= "000000";
 process.env.OTP_TTL_SECONDS ||= "300";
 process.env.OTP_MAX_ATTEMPTS ||= "5";
-process.env.DEVICE_TIME_DEVIATION_SECONDS ||= "120";
 process.env.CORS_ORIGINS ||= "";
 process.env.NODE_ENV ||= "test";
 // Dev login is OFF by default in tests; test/dev-login.e2e-spec.ts turns it on

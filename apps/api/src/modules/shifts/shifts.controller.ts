@@ -5,6 +5,7 @@ import { CorrelationId } from "../../common/decorators/correlation-id.decorator"
 import { RequirePermissions } from "../../common/decorators/require-permissions.decorator";
 import { Permission } from "../../common/auth/permissions";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
+import { UUID_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { OrgRole, type ShiftStatus, type ShiftType } from "@fieldmaster/shared-types";
 import { ShiftsService } from "./shifts.service";
@@ -75,6 +76,12 @@ export class ShiftsController {
     return this.shiftsService.close(user.organizationId, id, user, correlationId);
   }
 
+  @Get(":id/temporary-supervisors")
+  @RequirePermissions(Permission.MANAGE_TEMP_SUPERVISORS)
+  listTemporarySupervisors(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.temporarySupervisorsService.listForShift(user.organizationId, id);
+  }
+
   @Post(":id/temporary-supervisors")
   @RequirePermissions(Permission.MANAGE_TEMP_SUPERVISORS)
   assignTemporarySupervisor(
@@ -95,8 +102,15 @@ export class ShiftsController {
     return this.temporaryCheckInPointsService.create(user.organizationId, dto, user, correlationId);
   }
 
+  /**
+   * The same visibility as the shift itself (Step 6 fix): a Worker -- a
+   * temporary supervisor included -- only for a shift they are assigned to;
+   * an unknown or other organization's shift is a 404.
+   */
   @Get(":id/temporary-check-in-points")
-  listTemporaryCheckInPoints(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+  async listTemporaryCheckInPoints(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    if (!UUID_PATTERN.test(id)) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
+    await this.shiftsService.getById(user.organizationId, id, user, this.scopeFor(user));
     return this.temporaryCheckInPointsService.listForShift(user.organizationId, id);
   }
 
@@ -110,8 +124,8 @@ export class ShiftsController {
     return this.temporarySupervisorsService.revoke(user.organizationId, assignmentId, user, correlationId);
   }
 
+  /** Managers, or an active temporary supervisor of the point's shift who may manage points (checked in the service). */
   @Delete("temporary-check-in-points/:pointId")
-  @RequirePermissions(Permission.MANAGE_TEMP_SUPERVISORS)
   revokeTemporaryCheckInPoint(
     @Param("pointId") pointId: string,
     @CurrentUser() user: AuthenticatedUser,

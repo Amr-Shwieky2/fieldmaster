@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -7,7 +7,9 @@ import { Permission } from "../../common/auth/permissions";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { MembershipsService } from "./memberships.service";
 import { CreateMembershipDto } from "./dto/create-membership.dto";
+import { ChangeMemberRoleDto, MemberActionReasonDto, SetTimeTrackingDto } from "./dto/member-actions.dto";
 
+/** Members, roles and devices (Owners only; every change with a reason, audited). */
 @ApiBearerAuth()
 @ApiTags("memberships")
 @Controller("memberships")
@@ -23,6 +25,66 @@ export class MembershipsController {
   @Get()
   @RequirePermissions(Permission.MANAGE_ORG_USERS)
   async list(@CurrentUser() user: AuthenticatedUser) {
-    return this.membershipsService.list(user.organizationId);
+    return this.membershipsService.list(user.organizationId, user);
+  }
+
+  @Patch(":id/role")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  changeRole(@Param("id") id: string, @Body() dto: ChangeMemberRoleDto, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    return this.membershipsService.changeRole(user.organizationId, id, dto, user, correlationId);
+  }
+
+  @Post(":id/suspend")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  suspend(@Param("id") id: string, @Body() dto: MemberActionReasonDto, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    return this.membershipsService.suspend(user.organizationId, id, dto, user, correlationId);
+  }
+
+  @Post(":id/reactivate")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  reactivate(@Param("id") id: string, @Body() dto: MemberActionReasonDto, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    return this.membershipsService.reactivate(user.organizationId, id, dto, user, correlationId);
+  }
+
+  @Post(":id/archive")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  archive(@Param("id") id: string, @Body() dto: MemberActionReasonDto, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    return this.membershipsService.archive(user.organizationId, id, dto, user, correlationId);
+  }
+
+  @Patch(":id/time-tracking")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  setTimeTracking(@Param("id") id: string, @Body() dto: SetTimeTrackingDto, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    return this.membershipsService.setTimeTracking(user.organizationId, id, dto, user, correlationId);
+  }
+
+  @Get(":id/devices")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  devices(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.membershipsService.devicesAndSessions(user.organizationId, id);
+  }
+
+  @Post(":id/sessions/:sessionId/revoke")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  revokeSession(
+    @Param("id") id: string,
+    @Param("sessionId") sessionId: string,
+    @Body() dto: MemberActionReasonDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId: string,
+  ) {
+    return this.membershipsService.revokeSession(user.organizationId, id, sessionId, dto, user, correlationId);
+  }
+
+  @Post(":id/devices/:deviceId/revoke-key")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  revokeDeviceKey(
+    @Param("id") id: string,
+    @Param("deviceId") deviceId: string,
+    @Body() dto: MemberActionReasonDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @CorrelationId() correlationId: string,
+  ) {
+    return this.membershipsService.revokeDeviceKey(user.organizationId, id, deviceId, dto, user, correlationId);
   }
 }

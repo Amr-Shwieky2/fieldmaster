@@ -21,6 +21,11 @@ export enum Permission {
   VIEW_FINANCIAL_DASHBOARD = "VIEW_FINANCIAL_DASHBOARD",
   CLOCK_IN_OUT = "CLOCK_IN_OUT",
   VIEW_OWN_ATTENDANCE = "VIEW_OWN_ATTENDANCE",
+  /** The live operations page (Step 6): operational only, no money. */
+  VIEW_OPERATIONS = "VIEW_OPERATIONS",
+  /** Read the organization settings (a Field Manager's copy has no money). */
+  VIEW_ORG_SETTINGS = "VIEW_ORG_SETTINGS",
+  MANAGE_ORG_SETTINGS = "MANAGE_ORG_SETTINGS",
 }
 
 const OWNER_PERMISSIONS: Permission[] = Object.values(Permission);
@@ -37,6 +42,8 @@ const FIELD_MANAGER_PERMISSIONS: Permission[] = [
   Permission.MANAGE_TEMP_SUPERVISORS,
   Permission.CLOCK_IN_OUT,
   Permission.VIEW_OWN_ATTENDANCE,
+  Permission.VIEW_OPERATIONS,
+  Permission.VIEW_ORG_SETTINGS,
 ];
 
 const WORKER_PERMISSIONS: Permission[] = [Permission.CLOCK_IN_OUT, Permission.VIEW_OWN_ATTENDANCE];

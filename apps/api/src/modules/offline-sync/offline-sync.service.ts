@@ -5,6 +5,8 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { NotificationAudienceService } from "../notifications/notification-audience.service";
+import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { ClockEventsService } from "../attendance/clock-events.service";
@@ -39,6 +41,8 @@ export class OfflineSyncService {
     private readonly auditService: AuditService,
     private readonly idempotencyService: IdempotencyService,
     private readonly notifications: NotificationsService,
+    private readonly notificationAudience: NotificationAudienceService,
+    private readonly realtime: RealtimeEventsService,
     private readonly clockEventsService: ClockEventsService,
   ) {}
 
@@ -85,6 +89,8 @@ export class OfflineSyncService {
       const flaggedOrRejected = outcomes.filter((o) => o.status === OfflineSyncEventStatus.FLAGGED || o.status === OfflineSyncEventStatus.REJECTED);
       if (flaggedOrRejected.length > 0) {
         await this.notifyReviewNeeded(organizationId, workerProfileId, flaggedOrRejected);
+        // The live operations page lists offline events waiting for review.
+        this.realtime.operationsChanged(organizationId, OperationsChangeKind.OFFLINE_SYNC);
       }
 
       return { status: 200, body: { batchId: batch.id, results: outcomes } };
@@ -294,18 +300,18 @@ export class OfflineSyncService {
       where: { id: workerProfileId },
       include: { membership: { include: { user: true } } },
     });
-    const owners = await this.prisma.organizationMembership.findMany({
-      where: { organizationId, role: OrgRole.OWNER, status: "ACTIVE", archivedAt: null },
-    });
     const flaggedCount = outcomes.filter((o) => o.status === OfflineSyncEventStatus.FLAGGED).length;
     const rejectedCount = outcomes.filter((o) => o.status === OfflineSyncEventStatus.REJECTED).length;
     const body = `${worker?.membership.user.fullLegalName ?? "A worker"}'s offline attendance sync needs review: ${flaggedCount} flagged, ${rejectedCount} rejected.`;
+    const type = rejectedCount > 0 ? NotificationType.OFFLINE_EVENT_REJECTED : NotificationType.SUSPICIOUS_LOCATION_DETECTED;
+    // Owners by default; Field Managers too when the organization's notification settings say so.
+    const { ownerUserIds, fieldManagerUserIds } = await this.notificationAudience.managers(organizationId, type);
 
     await this.notifications.notifyMany(
-      owners.map((owner) => ({
+      [...ownerUserIds, ...fieldManagerUserIds].map((recipientUserId) => ({
         organizationId,
-        recipientUserId: owner.userId,
-        type: rejectedCount > 0 ? NotificationType.OFFLINE_EVENT_REJECTED : NotificationType.SUSPICIOUS_LOCATION_DETECTED,
+        recipientUserId,
+        type,
         title: "Offline attendance needs review",
         body,
         data: { workerProfileId, workerName: worker?.membership.user.fullLegalName ?? null, flaggedCount, rejectedCount },

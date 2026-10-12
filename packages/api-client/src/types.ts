@@ -16,8 +16,10 @@ import type {
   PayrollPeriodStatus,
   ShiftStatus,
   ShiftType,
+  ShiftWorkerPresence,
   TaskCategory,
   TemporaryPointStatus,
+  TemporarySupervisorState,
   TimeEntryStatus,
   TuranStatus,
   TuranType,
@@ -654,4 +656,236 @@ export interface ManualCorrectionInput {
   reason: CorrectionReason;
   /** Required when reason is OTHER. */
   note?: string;
+}
+
+// ── Step 6: temporary supervisors ────────────────────────────────────────
+
+/** `GET /shifts/:id/temporary-supervisors`: a shift's assignments with their state now. */
+export interface TemporarySupervisorListItem {
+  id: string;
+  shiftId: string;
+  worker: { id: string; fullLegalName: string };
+  activatedAt: string;
+  expiresAt: string;
+  canOpenCheckInPoints: boolean;
+  state: TemporarySupervisorState;
+  assignedByName: string | null;
+  revokedAt: string | null;
+  revokedByName: string | null;
+  createdAt: string;
+}
+
+/** `GET /temporary-supervisors/me`: the caller's ACTIVE assignments. */
+export interface MyTemporarySupervision {
+  id: string;
+  activatedAt: string;
+  expiresAt: string;
+  canOpenCheckInPoints: boolean;
+  shift: { id: string; title: string; shiftType: ShiftType; scheduledStart: string; scheduledEnd: string; siteName: string | null };
+}
+
+export interface SupervisedShiftWorker {
+  workerProfileId: string;
+  fullLegalName: string;
+  presence: ShiftWorkerPresence;
+  clockInAt: string | null;
+  clockOutAt: string | null;
+  locationOutcome: LocationValidationStatus | null;
+  flags: AttendanceFlag[];
+}
+
+/** `GET /temporary-supervisors/:assignmentId/shift`: operational only (no money, no phone numbers). */
+export interface SupervisedShift {
+  assignment: { id: string; activatedAt: string; expiresAt: string; canOpenCheckInPoints: boolean };
+  shift: {
+    id: string;
+    title: string;
+    shiftType: ShiftType;
+    status: ShiftStatus;
+    scheduledStart: string;
+    scheduledEnd: string;
+    businessDate: string;
+    checkInMethod: CheckInMethod;
+    projectName: string | null;
+    site: { name: string; latitude: number; longitude: number } | null;
+    geofence: { centerLatitude: number; centerLongitude: number; radiusMeters: number } | null;
+  };
+  workers: SupervisedShiftWorker[];
+  temporaryCheckInPoints: { id: string; name: string; latitude: number; longitude: number; radiusMeters: number; expiresAt: string; createdAt: string }[];
+}
+
+// ── Step 6: live operations (no money for anyone) ───────────────────────
+
+export interface OperationsPerson {
+  id: string;
+  fullLegalName: string;
+}
+export interface OperationsShiftRef {
+  id: string;
+  title: string;
+  shiftType: ShiftType;
+}
+
+export interface OperationsSnapshot {
+  generatedAt: string;
+  workersOnShift: {
+    timeEntryId: string;
+    worker: OperationsPerson;
+    shift: OperationsShiftRef;
+    clockInAt: string | null;
+    openMinutes: number;
+    isEmergency: boolean;
+    position: {
+      latitude: number;
+      longitude: number;
+      accuracyMeters: number;
+      at: string;
+      eventType: ClockEventType;
+      locationValidationStatus: LocationValidationStatus;
+    } | null;
+  }[];
+  sites: { siteId: string; name: string; centerLatitude: number; centerLongitude: number; radiusMeters: number }[];
+  temporaryPoints: { id: string; name: string; latitude: number; longitude: number; radiusMeters: number; expiresAt: string; shift: OperationsShiftRef }[];
+  activeEmergencies: {
+    calloutId: string;
+    timeEntryId: string | null;
+    worker: OperationsPerson;
+    authorizationSource: EmergencyAuthorizationSource;
+    actualStartClick: string;
+    compensatedStart: string;
+    start: { latitude: number; longitude: number };
+  }[];
+  activeShifts: {
+    id: string;
+    title: string;
+    shiftType: ShiftType;
+    scheduledStart: string;
+    scheduledEnd: string;
+    siteName: string | null;
+    expectedCount: number;
+    clockedInCount: number;
+    lateCount: number;
+  }[];
+  lateWorkers: { worker: OperationsPerson; shift: OperationsShiftRef; scheduledStart: string; graceMinutes: number; lateMinutes: number }[];
+  longOpenEntries: { timeEntryId: string; worker: OperationsPerson; shift: OperationsShiftRef; clockInAt: string | null; openMinutes: number; isEmergency: boolean }[];
+  recentRejectedAttempts: {
+    id: string;
+    eventType: ClockEventType;
+    code: string;
+    at: string;
+    latitude: number;
+    longitude: number;
+    accuracyMeters: number;
+    distanceMeters: number | null;
+    allowedRadiusMeters: number | null;
+    requiredAccuracyMeters: number | null;
+    timeEntryId: string | null;
+    worker: OperationsPerson;
+    shift: OperationsShiftRef;
+  }[];
+  suspiciousLocations: {
+    clockEventId: string;
+    eventType: ClockEventType;
+    origin: EventOrigin;
+    at: string;
+    latitude: number;
+    longitude: number;
+    mockLocationSuspected: boolean;
+    locationValidationStatus: LocationValidationStatus;
+    timeEntryId: string;
+    worker: OperationsPerson;
+    shift: OperationsShiftRef;
+  }[];
+  offlineReview: {
+    id: string;
+    eventType: ClockEventType;
+    status: OfflineSyncEventStatus;
+    deviceTimestamp: string;
+    processedAt: string;
+    rejectionReason: string | null;
+    timeEntryId: string | null;
+    worker: OperationsPerson;
+  }[];
+}
+
+// ── Step 6: organization settings ───────────────────────────────────────
+
+/** Besides the Owners, who a manager-facing notification reaches. */
+export type FieldManagerAudience = "SHIFT_MANAGER" | "ALL_FIELD_MANAGERS";
+
+export interface NotificationPreferenceView {
+  type: NotificationType;
+  fieldManagerAudience: FieldManagerAudience;
+  owners: boolean;
+  fieldManagers: boolean;
+  defaults: { owners: boolean; fieldManagers: boolean };
+}
+
+export interface WorkdaySettings {
+  defaultGraceMinutes: number;
+  defaultGeofenceRadiusMeters: number;
+  defaultMinGpsAccuracyMeters: number;
+  deviceTimeDeviationSeconds: number;
+  temporaryPointRadiusMeters: number;
+  temporaryPointMinAccuracyMeters: number;
+  autoDeductUnpaidBreaks: boolean;
+}
+
+/** `GET /organizations/me/settings`. `forgottenStampPenaltyAgorot` is in an Owner's copy only. */
+export interface OrganizationSettingsView {
+  canEdit: boolean;
+  workday: WorkdaySettings & { timezone: string };
+  onboarding: { invitationTtlHours: number };
+  notifications: NotificationPreferenceView[];
+  testMode: { appEnv: string; devLoginEnabled: boolean };
+  fixedRules: {
+    standardDayMinutes: number;
+    freeForgottenStampsPerMonth: number;
+    emergencyRetroactiveMinutes: number;
+    emergencyReturnBufferMinutes: number;
+    forgottenStampPenaltyAgorot?: number;
+  };
+  updatedAt: string;
+}
+
+// ── Step 6: users, roles and devices ────────────────────────────────────
+
+export interface Member {
+  id: string;
+  userId: string;
+  fullLegalName: string;
+  phoneNumber: string;
+  role: OrgRole;
+  status: AccountStatus;
+  isTimeTrackable: boolean;
+  workerProfileId: string | null;
+  /** Latest sign-in or token refresh in this organization. */
+  lastActiveAt: string | null;
+  createdAt: string;
+  archivedAt: string | null;
+  isSelf: boolean;
+}
+
+export type DeviceKeyStatus = "NONE" | "ACTIVE" | "REVOKED";
+
+export interface MemberSession {
+  id: string;
+  /** OTP | DEV_LOGIN | DEV_FIXED_OTP */
+  origin: string;
+  createdAt: string;
+  lastUsedAt: string;
+  revokedAt: string | null;
+  revokedReason: string | null;
+  active: boolean;
+}
+
+export interface MemberDevice {
+  id: string;
+  clientDeviceId: string;
+  platform: string;
+  appVersion: string | null;
+  osVersion: string | null;
+  lastActiveAt: string | null;
+  key: { status: DeviceKeyStatus; registeredAt: string | null; revokedAt: string | null };
+  sessions: MemberSession[];
 }

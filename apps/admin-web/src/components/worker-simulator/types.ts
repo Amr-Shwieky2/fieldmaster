@@ -21,7 +21,11 @@ export type SimulatorAction =
   | "approve"
   | "sync"
   | "resend"
-  | "prepare";
+  | "prepare"
+  // Step 6: the temporary supervisor panel.
+  | "supervisorView"
+  | "supervisorReport"
+  | "closePoint";
 
 /** What the last action returned, kept so the result panel can show the mobile receipt and the raw response. */
 export type SimulatorResult =

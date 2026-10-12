@@ -11,6 +11,8 @@ export interface AccessTokenPayload {
   deviceId?: string;
   /** How the session started; absent on tokens issued before this claim existed (treated as OTP). */
   loginMethod?: string;
+  /** The session (refresh-token family id); absent on tokens issued before Step 6. A revoked session is refused at once. */
+  sid?: string;
 }
 
 export interface AuthenticatedUser extends AccessTokenPayload {}

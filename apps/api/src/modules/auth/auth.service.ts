@@ -320,12 +320,21 @@ export class AuthService {
       throw new AppException(401, "REFRESH_TOKEN_REUSED", "Session invalidated due to suspicious activity. Please sign in again.");
     }
 
-    // Re-derive full context from the user's current active membership
-    // rather than trusting anything embedded in the old token.
+    // Re-derive full context from the session's membership (Step 6: a session
+    // stays in its organization) rather than trusting anything embedded in the
+    // old token. Sessions from before Step 6 without a membership fall back to
+    // the user's active membership, which they keep from now on.
     const activeMembership = await this.prisma.organizationMembership.findFirst({
-      where: { userId: family.userId, status: AccountStatus.ACTIVE, archivedAt: null },
+      where: {
+        userId: family.userId,
+        status: AccountStatus.ACTIVE,
+        archivedAt: null,
+        user: { status: AccountStatus.ACTIVE },
+        ...(family.membershipId ? { id: family.membershipId } : {}),
+      },
     });
     if (!activeMembership) {
+      await this.revokeFamily(family.id, "MEMBERSHIP_INACTIVE");
       throw new AppException(401, "NO_ACTIVE_MEMBERSHIP", "This account has no active organization membership.");
     }
 
@@ -365,7 +374,14 @@ export class AuthService {
     const currentTokenHash = createHash("sha256").update(secret).digest("hex");
 
     await this.prisma.refreshTokenFamily.create({
-      data: { id: familyId, userId: payload.userId, deviceId: payload.deviceId, currentTokenHash, origin: payload.loginMethod },
+      data: {
+        id: familyId,
+        userId: payload.userId,
+        membershipId: payload.membershipId,
+        deviceId: payload.deviceId,
+        currentTokenHash,
+        origin: payload.loginMethod,
+      },
     });
 
     return this.signAccessToken(payload, familyId, secret);
@@ -374,7 +390,10 @@ export class AuthService {
   private async rotateTokens(familyId: string, payload: SessionClaims): Promise<AuthTokens> {
     const secret = randomBytes(32).toString("hex");
     const currentTokenHash = createHash("sha256").update(secret).digest("hex");
-    await this.prisma.refreshTokenFamily.update({ where: { id: familyId }, data: { currentTokenHash } });
+    await this.prisma.refreshTokenFamily.update({
+      where: { id: familyId },
+      data: { currentTokenHash, membershipId: payload.membershipId, lastUsedAt: new Date() },
+    });
     return this.signAccessToken(payload, familyId, secret);
   }
 
@@ -390,6 +409,8 @@ export class AuthService {
         workerProfileId: payload.workerProfileId,
         deviceId: payload.deviceId,
         loginMethod: payload.loginMethod,
+        // The session: the guard refuses the token as soon as the session is revoked.
+        sid: familyId,
       },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: accessTtl },
     );

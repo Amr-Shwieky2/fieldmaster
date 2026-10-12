@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
+import { OrganizationSettingsService } from "../../common/settings/organization-settings.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { CreateProjectDto } from "./dto/create-project.dto";
@@ -14,6 +15,7 @@ export class SitesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly settings: OrganizationSettingsService,
   ) {}
 
   // ── Projects ──────────────────────────────────────────────────────────
@@ -61,6 +63,7 @@ export class SitesService {
   async createSite(organizationId: string, dto: CreateSiteDto, actor: AuthenticatedUser, correlationId: string) {
     const project = await this.prisma.project.findFirst({ where: { id: dto.projectId, organizationId } });
     if (!project) throw new AppException(404, ErrorCodes.NOT_FOUND, "Project not found.");
+    const settings = await this.settings.get(organizationId);
 
     const site = await this.prisma.site.create({
       data: {
@@ -71,7 +74,7 @@ export class SitesService {
         address: dto.address,
         latitude: dto.latitude,
         longitude: dto.longitude,
-        defaultGeofenceRadiusMeters: dto.defaultGeofenceRadiusMeters ?? 100,
+        defaultGeofenceRadiusMeters: dto.defaultGeofenceRadiusMeters ?? settings.defaultGeofenceRadiusMeters,
         instructions: dto.instructions,
         emergencyContact: dto.emergencyContact,
       },
@@ -109,6 +112,7 @@ export class SitesService {
       where: { siteId: dto.siteId },
       orderBy: { version: "desc" },
     });
+    const settings = await this.settings.get(organizationId);
 
     const geofence = await this.prisma.geofence.create({
       data: {
@@ -118,7 +122,7 @@ export class SitesService {
         centerLatitude: dto.centerLatitude,
         centerLongitude: dto.centerLongitude,
         radiusMeters: dto.radiusMeters,
-        minAccuracyMeters: dto.minAccuracyMeters ?? 50,
+        minAccuracyMeters: dto.minAccuracyMeters ?? settings.defaultMinGpsAccuracyMeters,
         version: (previousVersion?.version ?? 0) + 1,
         createdBy: actor.sub,
       },

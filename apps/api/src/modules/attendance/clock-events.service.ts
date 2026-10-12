@@ -5,7 +5,6 @@ import {
   EventOrigin,
   LocationValidationStatus,
   NotificationType,
-  OrgRole,
   ShiftStatus,
   TimeEntryStatus,
 } from "@fieldmaster/shared-types";
@@ -18,14 +17,15 @@ import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { GeofenceValidationService } from "../sites/geofence-validation.service";
 import { TemporaryCheckInPointsService } from "../shifts/temporary-check-in-points.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { NotificationAudienceService } from "../notifications/notification-audience.service";
+import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { loadWorkerName, withoutFinancialData, type NotificationData } from "../notifications/notification-data";
+import { OrganizationSettingsService } from "../../common/settings/organization-settings.service";
 import { LocationValidationService } from "./location-validation.service";
 import { RejectedClockAttemptsService, type RejectedClockAttemptInput } from "./rejected-clock-attempts.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { ClockInDto } from "./dto/clock-in.dto";
 import type { ClockOutDto } from "./dto/clock-out.dto";
-
-const DEFAULT_TEMP_POINT_MIN_ACCURACY_METERS = 75;
 
 @Injectable()
 export class ClockEventsService {
@@ -38,6 +38,9 @@ export class ClockEventsService {
     private readonly locationValidation: LocationValidationService,
     private readonly notifications: NotificationsService,
     private readonly rejectedAttempts: RejectedClockAttemptsService,
+    private readonly settings: OrganizationSettingsService,
+    private readonly notificationAudience: NotificationAudienceService,
+    private readonly realtime: RealtimeEventsService,
   ) {}
 
   async clockIn(organizationId: string, dto: ClockInDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string) {
@@ -86,7 +89,14 @@ export class ClockEventsService {
     const origin = dto.origin ?? EventOrigin.ONLINE;
     const mockSuspected = dto.mockLocationSuspected ?? false;
 
-    const timeValidation = this.locationValidation.validateTime({ deviceTimestamp, mockLocationSuspected: mockSuspected, origin });
+    // The organization's limits (settings), read on every clock event.
+    const settings = await this.settings.get(organizationId);
+    const timeValidation = this.locationValidation.validateTime({
+      deviceTimestamp,
+      mockLocationSuspected: mockSuspected,
+      origin,
+      deviationLimitSeconds: settings.deviceTimeDeviationSeconds,
+    });
 
     /** Stores the refused attempt as evidence (Step 5), then hands back the same error to throw. */
     const refuse = async (error: AppException, evidence: Partial<RejectedClockAttemptInput> = {}) => {
@@ -140,7 +150,7 @@ export class ClockEventsService {
         if (!point || !this.temporaryCheckInPoints.isCurrentlyActive(point)) {
           throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "This temporary check-in point is not currently active.");
         }
-        center = { lat: point.latitude, lng: point.longitude, radius: point.radiusMeters, minAccuracy: DEFAULT_TEMP_POINT_MIN_ACCURACY_METERS };
+        center = { lat: point.latitude, lng: point.longitude, radius: point.radiusMeters, minAccuracy: settings.temporaryPointMinAccuracyMeters };
         temporaryCheckInPointId = point.id;
       } else {
         if (!shift.geofence) {
@@ -251,6 +261,7 @@ export class ClockEventsService {
       workerName: await loadWorkerName(this.prisma, actor.workerProfileId),
       clockInAt: effectiveAt.toISOString(),
     };
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.CLOCK_IN);
     await this.notifyManagerAndOwners(organizationId, shift.managerId, {
       type: NotificationType.WORKER_CLOCKED_IN,
       title: "Worker clocked in",
@@ -293,7 +304,14 @@ export class ClockEventsService {
     const origin = dto.origin ?? EventOrigin.ONLINE;
     const mockSuspected = dto.mockLocationSuspected ?? false;
 
-    const timeValidation = this.locationValidation.validateTime({ deviceTimestamp, mockLocationSuspected: mockSuspected, origin });
+    // The organization's limits (settings), read on every clock event.
+    const settings = await this.settings.get(organizationId);
+    const timeValidation = this.locationValidation.validateTime({
+      deviceTimestamp,
+      mockLocationSuspected: mockSuspected,
+      origin,
+      deviationLimitSeconds: settings.deviceTimeDeviationSeconds,
+    });
 
     /** Stores the refused clock-out as evidence on the open entry (Step 5), then hands back the same error to throw. */
     const refuse = async (error: AppException) => {
@@ -393,6 +411,7 @@ export class ClockEventsService {
       correlationId,
     });
 
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.CLOCK_OUT);
     await this.notifyClockOut(organizationId, actor.workerProfileId, timeEntry.shift.managerId, timeEntry.shift.title, rawDurationMinutes, {
       timeEntryId: timeEntry.id,
       shiftId: timeEntry.shiftId,
@@ -410,12 +429,13 @@ export class ClockEventsService {
    * The shift's manager gets `managerBody` / `managerData`; every other active
    * Owner gets `ownerBody` / `ownerData`. Only `ownerData` may carry money
    * (`*Agorot`): it is the Owner-only counterpart of `ownerBody`'s cost line.
+   * Who receives it follows the organization's notification settings.
    */
   private async notifyManagerAndOwners(
     organizationId: string,
     managerUserId: string,
     content: {
-      type: NotificationType;
+      type: typeof NotificationType.WORKER_CLOCKED_IN | typeof NotificationType.WORKER_CLOCKED_OUT;
       title: string;
       managerBody: string;
       ownerBody: string;
@@ -423,10 +443,8 @@ export class ClockEventsService {
       ownerData: NotificationData;
     },
   ) {
-    const owners = await this.prisma.organizationMembership.findMany({
-      where: { organizationId, role: OrgRole.OWNER, status: "ACTIVE", archivedAt: null },
-    });
-    const recipients = new Set<string>([managerUserId, ...owners.map((o) => o.userId)]);
+    const audience = await this.notificationAudience.shiftManagerAndOwners(organizationId, content.type, managerUserId);
+    const recipients = new Set<string>([...(audience.managerUserId ? [audience.managerUserId] : []), ...audience.ownerUserIds]);
     await this.notifications.notifyMany(
       Array.from(recipients).map((recipientUserId) => {
         const isShiftManager = recipientUserId === managerUserId;

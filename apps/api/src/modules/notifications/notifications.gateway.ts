@@ -1,62 +1,57 @@
-import { Inject, Logger } from "@nestjs/common";
 import { OnEvent } from "@nestjs/event-emitter";
-import { JwtService } from "@nestjs/jwt";
-import {
-  ConnectedSocket,
-  OnGatewayConnection,
-  OnGatewayDisconnect,
-  WebSocketGateway,
-  WebSocketServer,
-} from "@nestjs/websockets";
-import type { Server, Socket } from "socket.io";
-import type { AccessTokenPayload } from "../../common/auth/auth-context";
-import { APP_ENVIRONMENT, type AppEnvironment } from "../../common/config/app-environment";
-import { isTestModeLoginMethod } from "../../common/auth/login-method";
+import { ConnectedSocket, OnGatewayConnection, WebSocketGateway, WebSocketServer } from "@nestjs/websockets";
+import type { Namespace, Socket } from "socket.io";
 import { NOTIFICATION_CREATED_EVENT, type NotificationCreatedEvent } from "./notifications.service";
+import { RealtimeAuthService } from "./realtime-auth.service";
+import { OPERATIONS_CHANGED_EVENT, SESSIONS_ENDED_EVENT, type OperationsChangedEvent, type SessionsEndedEvent } from "./realtime-events";
 
 /**
- * Real-time notification fan-out (spec section 24.3). Clients connect with
- * `?token=<access token>` (same JWT used for REST calls); each socket joins
- * a room scoped to its own userId, so `notification.created` events reach
- * only their intended recipient. `GET /notifications/stream` (SSE) is the
- * fallback for clients that can't hold a WebSocket open.
+ * Real-time fan-out (spec section 24.3). Clients connect with
+ * `?token=<access token>` (same JWT used for REST calls), checked like a REST
+ * call (`RealtimeAuthService`). Each socket joins rooms for its user (its
+ * `notification` events), its membership and its session (so suspending the
+ * member or revoking the session disconnects it), and -- Owners and Field
+ * Managers only -- its organization's live operations room (`operations`
+ * events, Step 6). `GET /notifications/stream` (SSE) is the fallback for
+ * clients that can't hold a WebSocket open.
  */
 @WebSocketGateway({ cors: { origin: (process.env.CORS_ORIGINS ?? "").split(",").filter(Boolean) }, namespace: "/notifications" })
-export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class NotificationsGateway implements OnGatewayConnection {
   @WebSocketServer()
-  server!: Server;
+  server!: Namespace;
 
-  private readonly logger = new Logger(NotificationsGateway.name);
-
-  constructor(
-    private readonly jwtService: JwtService,
-    @Inject(APP_ENVIRONMENT) private readonly appEnvironment: AppEnvironment,
-  ) {}
+  constructor(private readonly realtimeAuth: RealtimeAuthService) {}
 
   async handleConnection(@ConnectedSocket() client: Socket) {
     const token = client.handshake.auth?.token ?? (client.handshake.query?.token as string | undefined);
-    if (!token) {
+    const viewer = await this.realtimeAuth.authenticate(token);
+    if (!viewer) {
       client.disconnect(true);
       return;
     }
-    try {
-      const payload = await this.jwtService.verifyAsync<AccessTokenPayload>(token, { secret: process.env.JWT_ACCESS_SECRET });
-      if (isTestModeLoginMethod(payload.loginMethod) && !this.appEnvironment.devLoginEnabled) {
-        client.disconnect(true);
-        return;
-      }
-      await client.join(`user:${payload.sub}`);
-    } catch {
-      client.disconnect(true);
-    }
-  }
-
-  handleDisconnect(@ConnectedSocket() _client: Socket) {
-    // Rooms are cleaned up automatically by socket.io on disconnect.
+    await client.join([
+      `user:${viewer.userId}`,
+      `membership:${viewer.membershipId}`,
+      ...(viewer.sessionId ? [`session:${viewer.sessionId}`] : []),
+      ...(viewer.canViewOperations ? [`ops:${viewer.organizationId}`] : []),
+    ]);
+    // A suspension or session revoke that landed between the check and the join found no socket to close: check once more.
+    if (!(await this.realtimeAuth.authenticate(token))) client.disconnect(true);
   }
 
   @OnEvent(NOTIFICATION_CREATED_EVENT)
   handleNotificationCreated(event: NotificationCreatedEvent) {
     this.server.to(`user:${event.recipientUserId}`).emit("notification", event.notification);
+  }
+
+  @OnEvent(OPERATIONS_CHANGED_EVENT)
+  handleOperationsChanged(event: OperationsChangedEvent) {
+    this.server.to(`ops:${event.organizationId}`).emit("operations", { kind: event.kind, at: event.at });
+  }
+
+  @OnEvent(SESSIONS_ENDED_EVENT)
+  handleSessionsEnded(event: SessionsEndedEvent) {
+    if (event.membershipId) this.server.in(`membership:${event.membershipId}`).disconnectSockets(true);
+    if (event.sessionId) this.server.in(`session:${event.sessionId}`).disconnectSockets(true);
   }
 }

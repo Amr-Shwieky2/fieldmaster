@@ -1,15 +1,17 @@
-import { Controller, Get, Inject, Param, Patch, Query, Sse, UnauthorizedException } from "@nestjs/common";
+import { Controller, Get, Param, Patch, Query, Sse, UnauthorizedException, type MessageEvent } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import { JwtService } from "@nestjs/jwt";
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { Observable, fromEvent } from "rxjs";
-import { filter, map } from "rxjs/operators";
+import { EMPTY, Observable, fromEvent, interval, merge } from "rxjs";
+import { filter, map, takeUntil } from "rxjs/operators";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Public } from "../../common/decorators/public.decorator";
-import type { AuthenticatedUser, AccessTokenPayload } from "../../common/auth/auth-context";
-import { APP_ENVIRONMENT, type AppEnvironment } from "../../common/config/app-environment";
-import { TEST_MODE_SESSION_ENDED_MESSAGE, isTestModeLoginMethod } from "../../common/auth/login-method";
+import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { NotificationsService, NOTIFICATION_CREATED_EVENT, type NotificationCreatedEvent } from "./notifications.service";
+import { RealtimeAuthService } from "./realtime-auth.service";
+import { OPERATIONS_CHANGED_EVENT, SESSIONS_ENDED_EVENT, type OperationsChangedEvent, type SessionsEndedEvent } from "./realtime-events";
+
+/** How often an SSE connection gets a `ping` event, so a client can tell a live connection from a dead one. */
+const SSE_HEARTBEAT_MS = 25_000;
 
 @ApiBearerAuth()
 @ApiTags("notifications")
@@ -17,9 +19,8 @@ import { NotificationsService, NOTIFICATION_CREATED_EVENT, type NotificationCrea
 export class NotificationsController {
   constructor(
     private readonly notificationsService: NotificationsService,
-    private readonly jwtService: JwtService,
     private readonly eventEmitter: EventEmitter2,
-    @Inject(APP_ENVIRONMENT) private readonly appEnvironment: AppEnvironment,
+    private readonly realtimeAuth: RealtimeAuthService,
   ) {}
 
   @Get()
@@ -37,25 +38,38 @@ export class NotificationsController {
    * SSE fallback for clients that can't hold a WebSocket connection open
    * (spec section 24.3). Browsers' native EventSource can't set an
    * Authorization header, so the token travels as a query param instead --
-   * this route is @Public() at the guard layer and verifies the JWT itself.
+   * this route is @Public() at the guard layer and checks the token like a
+   * REST call (`RealtimeAuthService`).
+   *
+   * Events: the viewer's notifications (default `message` event), `operations`
+   * for Owners and Field Managers (Step 6: the live operations page refetches
+   * its snapshot), and a `ping` heartbeat. The stream ends when the member is
+   * suspended or archived, their role changes, or this session is revoked.
    */
   @Public()
   @Sse("stream")
-  stream(@Query("token") token: string): Observable<{ data: unknown }> {
-    let payload: AccessTokenPayload;
-    try {
-      payload = this.jwtService.verify<AccessTokenPayload>(token, { secret: process.env.JWT_ACCESS_SECRET });
-    } catch {
-      throw new UnauthorizedException("Invalid or expired token.");
-    }
-    if (isTestModeLoginMethod(payload.loginMethod) && !this.appEnvironment.devLoginEnabled) {
-      throw new UnauthorizedException(TEST_MODE_SESSION_ENDED_MESSAGE);
-    }
-    const userId = payload.sub;
+  async stream(@Query("token") token: string): Promise<Observable<MessageEvent>> {
+    const viewer = await this.realtimeAuth.authenticate(token);
+    if (!viewer) throw new UnauthorizedException("Invalid or expired token, or the session or account is no longer active.");
 
-    return fromEvent(this.eventEmitter, NOTIFICATION_CREATED_EVENT).pipe(
-      filter((event): event is NotificationCreatedEvent => (event as NotificationCreatedEvent).recipientUserId === userId),
-      map((event) => ({ data: event.notification })),
+    const notifications = fromEvent(this.eventEmitter, NOTIFICATION_CREATED_EVENT).pipe(
+      filter((event): event is NotificationCreatedEvent => (event as NotificationCreatedEvent).recipientUserId === viewer.userId),
+      map((event): MessageEvent => ({ data: event.notification })),
     );
+    const operations = viewer.canViewOperations
+      ? fromEvent(this.eventEmitter, OPERATIONS_CHANGED_EVENT).pipe(
+          filter((event): event is OperationsChangedEvent => (event as OperationsChangedEvent).organizationId === viewer.organizationId),
+          map((event): MessageEvent => ({ type: "operations", data: { kind: event.kind, at: event.at } })),
+        )
+      : EMPTY;
+    const heartbeat = interval(SSE_HEARTBEAT_MS).pipe(map((): MessageEvent => ({ type: "ping", data: {} })));
+    const ended = fromEvent(this.eventEmitter, SESSIONS_ENDED_EVENT).pipe(
+      filter((event) => {
+        const ended = event as SessionsEndedEvent;
+        return ended.membershipId === viewer.membershipId || (viewer.sessionId !== null && ended.sessionId === viewer.sessionId);
+      }),
+    );
+
+    return merge(notifications, operations, heartbeat).pipe(takeUntil(ended));
   }
 }

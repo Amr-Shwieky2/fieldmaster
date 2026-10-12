@@ -31,6 +31,19 @@ Attendance: `time_entries`, `clock_events`, `unpaid_breaks`,
 `daily_summaries`, `attendance_approvals`, `manual_time_corrections`,
 `forgotten_stamp_infractions`, `rejected_clock_attempts`.
 
+Step 6 (migration `20261012120000_supervisors_operations_settings`) adds
+columns, no tables. Defaults are the old behavior.
+- `organization_settings`: `default_grace_minutes` 10,
+  `default_geofence_radius_meters` 100, `default_min_gps_accuracy_meters` 50,
+  `temporary_point_radius_meters` 100, `temporary_point_min_accuracy_meters`
+  75, `notification_preferences` JSONB `{}`.
+- `refresh_token_families`: `membership_id` (FK, `SET NULL`, indexed;
+  backfilled for users with one membership) and `last_used_at`.
+- `temporary_supervisor_assignments.can_open_check_in_points` (default true).
+- `time_entries.long_open_notified_at` (the 9-hour alert, sent once per
+  entry).
+- `NotificationType` gains `TEMPORARY_SUPERVISOR_ISSUE_REPORTED`.
+
 `rejected_clock_attempts` (Step 5, migration
 `20261012100000_attendance_evidence`) is evidence only: clock-ins and
 clock-outs the server refused for the phone's location or clock, with the
