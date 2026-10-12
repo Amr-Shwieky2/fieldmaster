@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { OrgRole, PayrollAdjustmentSource, PayrollAdjustmentType } from "@fieldmaster/shared-types";
-import { evaluateForgottenStampInfraction, toBusinessYearMonth } from "@fieldmaster/shared-validation";
+import { evaluateForgottenStampInfraction } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
@@ -47,11 +47,11 @@ export class ForgottenStampService {
     workerProfileId: string,
     timeEntryId: string,
     correctionId: string,
-    occurredAt: Date,
+    /** From `forgottenStampInfractionMonth` (shared with the admin web's correction preview). */
+    businessMonth: string,
     actor: AuthenticatedUser,
     correlationId: string,
   ) {
-    const businessMonth = toBusinessYearMonth(occurredAt);
     const existingCount = await tx.forgottenStampInfraction.count({ where: { workerProfileId, businessMonth } });
     const monthlySequenceNumber = existingCount + 1;
     const evaluation = evaluateForgottenStampInfraction(monthlySequenceNumber);
@@ -153,11 +153,47 @@ export class ForgottenStampService {
     return result;
   }
 
-  async listForOrganization(organizationId: string, viewer: AuthenticatedUser, workerProfileId?: string) {
-    return this.prisma.forgottenStampInfraction.findMany({
-      where: { organizationId, ...(workerProfileId ? { workerProfileId } : {}) },
-      select: viewer.role === OrgRole.OWNER ? undefined : INFRACTION_FIELDS_WITHOUT_DEDUCTION,
-      orderBy: { createdAt: "desc" },
-    });
+  /**
+   * Infractions for the forgotten-stamp report, newest first, with the
+   * worker, the correction that recorded them and the corrected entry's date.
+   * An Owner also gets `deductionAgorot`; for anyone else the column is never
+   * read (FM: counts and sequence numbers only).
+   */
+  async listForOrganization(organizationId: string, viewer: AuthenticatedUser, filters: { workerProfileId?: string; month?: string } = {}) {
+    const related = {
+      worker: { select: { id: true, membership: { select: { user: { select: { fullLegalName: true } } } } } },
+      correction: { select: { id: true, field: true, oldValue: true, newValue: true, reason: true, note: true, editedBy: true, createdAt: true } },
+      timeEntry: { select: { id: true, businessDate: true, status: true } },
+    } satisfies Prisma.ForgottenStampInfractionSelect;
+    const where: Prisma.ForgottenStampInfractionWhereInput = {
+      organizationId,
+      ...(filters.workerProfileId ? { workerProfileId: filters.workerProfileId } : {}),
+      ...(filters.month ? { businessMonth: filters.month } : {}),
+    };
+    const orderBy: Prisma.ForgottenStampInfractionOrderByWithRelationInput[] = [
+      { businessMonth: "desc" },
+      { createdAt: "desc" },
+      { monthlySequenceNumber: "desc" },
+    ];
+
+    const rows =
+      viewer.role === OrgRole.OWNER
+        ? await this.prisma.forgottenStampInfraction.findMany({
+            where,
+            orderBy,
+            select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, deductionAgorot: true, ...related },
+          })
+        : await this.prisma.forgottenStampInfraction.findMany({ where, orderBy, select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, ...related } });
+
+    const userIds = [...new Set(rows.flatMap((row) => [row.correction.editedBy, row.reversedBy]).filter((id): id is string => id !== null))];
+    const users = userIds.length > 0 ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullLegalName: true } }) : [];
+    const nameOf = (id: string | null) => (id ? (users.find((user) => user.id === id)?.fullLegalName ?? null) : null);
+
+    return rows.map(({ worker, correction, ...row }) => ({
+      ...row,
+      reversedByName: nameOf(row.reversedBy),
+      worker: { id: worker.id, fullLegalName: worker.membership.user.fullLegalName },
+      correction: { ...correction, editedByName: nameOf(correction.editedBy) },
+    }));
   }
 }

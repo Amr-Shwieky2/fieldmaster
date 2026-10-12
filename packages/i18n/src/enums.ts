@@ -36,6 +36,8 @@ export const ENUM_NAMES = [
   "TaskCategory",
   "NotificationType",
   "OfflineSyncEventStatus",
+  "AttendanceListTab",
+  "AttendanceFlag",
 ] as const;
 
 export type EnumName = (typeof ENUM_NAMES)[number];

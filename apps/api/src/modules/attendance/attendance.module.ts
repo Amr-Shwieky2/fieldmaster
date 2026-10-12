@@ -9,10 +9,13 @@ import { TimeEntriesController } from "./time-entries.controller";
 import { AttendanceApprovalsService } from "./attendance-approvals.service";
 import { ManualCorrectionsService } from "./manual-corrections.service";
 import { ForgottenStampService } from "./forgotten-stamp.service";
+import { RejectedClockAttemptsService } from "./rejected-clock-attempts.service";
+import { AttendanceRecordsService } from "./attendance-records.service";
+import { AttendanceRecordsController } from "./attendance-records.controller";
 
 @Module({
   imports: [SitesModule, ShiftsModule],
-  controllers: [AttendanceController, TimeEntriesController],
+  controllers: [AttendanceController, TimeEntriesController, AttendanceRecordsController],
   providers: [
     ClockEventsService,
     LocationValidationService,
@@ -20,6 +23,8 @@ import { ForgottenStampService } from "./forgotten-stamp.service";
     AttendanceApprovalsService,
     ManualCorrectionsService,
     ForgottenStampService,
+    RejectedClockAttemptsService,
+    AttendanceRecordsService,
   ],
   exports: [ForgottenStampService, ClockEventsService],
 })

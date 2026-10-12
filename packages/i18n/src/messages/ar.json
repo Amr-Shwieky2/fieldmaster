@@ -315,6 +315,21 @@
       "FLAGGED": "مُعلَّم للمراجعة",
       "REJECTED": "مرفوض",
       "DUPLICATE": "مكرّر"
+    },
+    "AttendanceListTab": {
+      "PENDING": "بانتظار الموافقة",
+      "APPROVED": "معتمد",
+      "REJECTED": "مرفوض",
+      "ALL": "الكل"
+    },
+    "AttendanceFlag": {
+      "OUTSIDE_GEOFENCE_ATTEMPT": "محاولة خارج نطاق الموقع",
+      "SUSPICIOUS_LOCATION": "موقع وهمي أو مشبوه",
+      "OFFLINE": "تسجيل دون اتصال",
+      "FLEXI_CHECK": "تسجيل مرن",
+      "TEMPORARY_POINT": "نقطة تسجيل مؤقتة",
+      "EMERGENCY": "استدعاء طوارئ",
+      "DEV_REWOUND": "تعديل تجريبي"
     }
   },
   "units": {

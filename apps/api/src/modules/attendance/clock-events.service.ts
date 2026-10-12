@@ -9,7 +9,7 @@ import {
   ShiftStatus,
   TimeEntryStatus,
 } from "@fieldmaster/shared-types";
-import { calculateShiftCompensation, toBusinessDate } from "@fieldmaster/shared-validation";
+import { calculateShiftCompensation, rawDurationMinutes as minutesBetween, toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service";
@@ -20,6 +20,7 @@ import { TemporaryCheckInPointsService } from "../shifts/temporary-check-in-poin
 import { NotificationsService } from "../notifications/notifications.service";
 import { loadWorkerName, withoutFinancialData, type NotificationData } from "../notifications/notification-data";
 import { LocationValidationService } from "./location-validation.service";
+import { RejectedClockAttemptsService, type RejectedClockAttemptInput } from "./rejected-clock-attempts.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { ClockInDto } from "./dto/clock-in.dto";
 import type { ClockOutDto } from "./dto/clock-out.dto";
@@ -36,6 +37,7 @@ export class ClockEventsService {
     private readonly temporaryCheckInPoints: TemporaryCheckInPointsService,
     private readonly locationValidation: LocationValidationService,
     private readonly notifications: NotificationsService,
+    private readonly rejectedAttempts: RejectedClockAttemptsService,
   ) {}
 
   async clockIn(organizationId: string, dto: ClockInDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string) {
@@ -85,10 +87,34 @@ export class ClockEventsService {
     const mockSuspected = dto.mockLocationSuspected ?? false;
 
     const timeValidation = this.locationValidation.validateTime({ deviceTimestamp, mockLocationSuspected: mockSuspected, origin });
-    if (timeValidation.rejectOnlineDeviation) {
-      throw new AppException(400, ErrorCodes.DEVICE_TIME_DEVIATION_EXCEEDED, "Your device clock appears out of sync. Please check your device time and try again.", {
+
+    /** Stores the refused attempt as evidence (Step 5), then hands back the same error to throw. */
+    const refuse = async (error: AppException, evidence: Partial<RejectedClockAttemptInput> = {}) => {
+      await this.rejectedAttempts.record({
+        organizationId,
+        workerProfileId: actor.workerProfileId!,
+        shiftId: shift.id,
+        timeEntryId: null,
+        eventType: ClockEventType.CLOCK_IN,
+        origin,
+        code: error.code,
+        deviceTimestamp,
         deviationSeconds: timeValidation.deviationSeconds,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        accuracyMeters: dto.accuracyMeters,
+        mockLocationSuspected: mockSuspected,
+        ...evidence,
       });
+      return error;
+    };
+
+    if (timeValidation.rejectOnlineDeviation) {
+      throw await refuse(
+        new AppException(400, ErrorCodes.DEVICE_TIME_DEVIATION_EXCEEDED, "Your device clock appears out of sync. Please check your device time and try again.", {
+          deviationSeconds: timeValidation.deviationSeconds,
+        }),
+      );
     }
 
     const locationValidationStatus = this.locationValidation.determineStatus(
@@ -96,10 +122,13 @@ export class ClockEventsService {
       timeValidation,
     );
     if (locationValidationStatus === LocationValidationStatus.BLOCKED) {
-      throw new AppException(403, ErrorCodes.MOCK_LOCATION_BLOCKED, "Location could not be verified as genuine. Please disable mock-location tools and try again.");
+      throw await refuse(
+        new AppException(403, ErrorCodes.MOCK_LOCATION_BLOCKED, "Location could not be verified as genuine. Please disable mock-location tools and try again."),
+      );
     }
 
     let distanceFromSiteMeters: number | null = null;
+    let temporaryCheckInPointId: string | null = null;
 
     if (shift.checkInMethod === CheckInMethod.GEOFENCED) {
       let center: { lat: number; lng: number; radius: number; minAccuracy: number };
@@ -112,6 +141,7 @@ export class ClockEventsService {
           throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "This temporary check-in point is not currently active.");
         }
         center = { lat: point.latitude, lng: point.longitude, radius: point.radiusMeters, minAccuracy: DEFAULT_TEMP_POINT_MIN_ACCURACY_METERS };
+        temporaryCheckInPointId = point.id;
       } else {
         if (!shift.geofence) {
           throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "This shift has no geofence configured for check-in.");
@@ -125,19 +155,25 @@ export class ClockEventsService {
       }
 
       if (dto.accuracyMeters > center.minAccuracy) {
-        throw new AppException(400, ErrorCodes.GPS_ACCURACY_TOO_LOW, "Your location accuracy is too low to verify your position. Move to an open area and try again.", {
-          accuracyMeters: dto.accuracyMeters,
-          requiredMeters: center.minAccuracy,
-        });
+        throw await refuse(
+          new AppException(400, ErrorCodes.GPS_ACCURACY_TOO_LOW, "Your location accuracy is too low to verify your position. Move to an open area and try again.", {
+            accuracyMeters: dto.accuracyMeters,
+            requiredMeters: center.minAccuracy,
+          }),
+          { requiredAccuracyMeters: center.minAccuracy, temporaryCheckInPointId },
+        );
       }
 
       const geofenceCheck = await this.geofenceValidation.check(dto.latitude, dto.longitude, center.lat, center.lng, center.radius);
       distanceFromSiteMeters = geofenceCheck.distanceMeters;
       if (!geofenceCheck.withinRadius) {
-        throw new AppException(400, ErrorCodes.GEOFENCE_OUTSIDE_ALLOWED_RADIUS, "You are outside the permitted check-in area.", {
-          distanceMeters: geofenceCheck.distanceMeters,
-          allowedRadiusMeters: geofenceCheck.allowedRadiusMeters,
-        });
+        throw await refuse(
+          new AppException(400, ErrorCodes.GEOFENCE_OUTSIDE_ALLOWED_RADIUS, "You are outside the permitted check-in area.", {
+            distanceMeters: geofenceCheck.distanceMeters,
+            allowedRadiusMeters: geofenceCheck.allowedRadiusMeters,
+          }),
+          { distanceMeters: geofenceCheck.distanceMeters, allowedRadiusMeters: geofenceCheck.allowedRadiusMeters, temporaryCheckInPointId },
+        );
       }
     } else if (shift.site) {
       const distanceCheck = await this.geofenceValidation.check(dto.latitude, dto.longitude, shift.site.latitude, shift.site.longitude, shift.site.defaultGeofenceRadiusMeters);
@@ -188,9 +224,12 @@ export class ClockEventsService {
           mockLocationSuspected: mockSuspected,
           distanceFromSiteMeters,
           locationValidationStatus,
+          temporaryCheckInPointId,
           appVersion: dto.appVersion,
         },
       });
+
+      await this.rejectedAttempts.linkToNewEntry(tx, timeEntry);
 
       return { timeEntry, clockEvent };
     });
@@ -255,17 +294,42 @@ export class ClockEventsService {
     const mockSuspected = dto.mockLocationSuspected ?? false;
 
     const timeValidation = this.locationValidation.validateTime({ deviceTimestamp, mockLocationSuspected: mockSuspected, origin });
-    if (timeValidation.rejectOnlineDeviation) {
-      throw new AppException(400, ErrorCodes.DEVICE_TIME_DEVIATION_EXCEEDED, "Your device clock appears out of sync. Please check your device time and try again.", {
+
+    /** Stores the refused clock-out as evidence on the open entry (Step 5), then hands back the same error to throw. */
+    const refuse = async (error: AppException) => {
+      await this.rejectedAttempts.record({
+        organizationId,
+        workerProfileId: actor.workerProfileId!,
+        shiftId: timeEntry.shiftId,
+        timeEntryId: timeEntry.id,
+        eventType: ClockEventType.CLOCK_OUT,
+        origin,
+        code: error.code,
+        deviceTimestamp,
         deviationSeconds: timeValidation.deviationSeconds,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        accuracyMeters: dto.accuracyMeters,
+        mockLocationSuspected: mockSuspected,
       });
+      return error;
+    };
+
+    if (timeValidation.rejectOnlineDeviation) {
+      throw await refuse(
+        new AppException(400, ErrorCodes.DEVICE_TIME_DEVIATION_EXCEEDED, "Your device clock appears out of sync. Please check your device time and try again.", {
+          deviationSeconds: timeValidation.deviationSeconds,
+        }),
+      );
     }
     const locationValidationStatus = this.locationValidation.determineStatus(
       { deviceTimestamp, mockLocationSuspected: mockSuspected, origin },
       timeValidation,
     );
     if (locationValidationStatus === LocationValidationStatus.BLOCKED) {
-      throw new AppException(403, ErrorCodes.MOCK_LOCATION_BLOCKED, "Location could not be verified as genuine. Please disable mock-location tools and try again.");
+      throw await refuse(
+        new AppException(403, ErrorCodes.MOCK_LOCATION_BLOCKED, "Location could not be verified as genuine. Please disable mock-location tools and try again."),
+      );
     }
 
     const serverReceivedAt = new Date();
@@ -273,7 +337,7 @@ export class ClockEventsService {
     if (effectiveAt.getTime() <= timeEntry.clockInAt!.getTime()) {
       throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Clock-out must be after clock-in.");
     }
-    const rawDurationMinutes = Math.max(0, Math.round((effectiveAt.getTime() - timeEntry.clockInAt!.getTime()) / 60_000));
+    const rawDurationMinutes = minutesBetween(timeEntry.clockInAt!, effectiveAt);
 
     const clockEvent = await this.prisma.$transaction(async (tx) => {
       const clockEvent = await tx.clockEvent.create({

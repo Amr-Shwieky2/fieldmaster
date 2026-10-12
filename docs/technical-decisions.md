@@ -877,3 +877,146 @@ the worker's own session), returns what the worker-facing API does not
 expose: the worker's Turan assignments, whether one makes them eligible for
 an emergency call-out now (the same check the emergency endpoint runs), and
 their active temporary-supervisor assignments.
+
+## Step 5: attendance screens
+
+The attendance list, the evidence page, the correction dialog, the
+forgotten-stamp report, the emergency call-out pages and the worker's
+attendance tab. No business rule changed. Where the screens needed a rule,
+the API's own implementation was moved into `@fieldmaster/shared-validation`
+and is called from both sides.
+
+### Refused clock attempts are stored as evidence
+
+The detail page's map must show rejected attempts with their distance, but
+the API only answered the worker with an error and kept nothing.
+
+- Refusals tied to the phone's location or clock are now stored in
+  `rejected_clock_attempts`:
+  - on clock-in: `GEOFENCE_OUTSIDE_ALLOWED_RADIUS`, `GPS_ACCURACY_TOO_LOW`,
+    `DEVICE_TIME_DEVIATION_EXCEEDED`, `MOCK_LOCATION_BLOCKED`;
+  - on clock-out: `DEVICE_TIME_DEVIATION_EXCEEDED`, `MOCK_LOCATION_BLOCKED`.
+  Each row keeps the device and server times, deviation, position, accuracy,
+  distance and the limit that was applied. Online and offline-synced events
+  use the same path, since both go through `clockInCore` / `clockOutCore`.
+- **The worker's answer does not change:**
+  - the row is written outside the refused operation;
+  - `RejectedClockAttemptsService.record` never throws (it logs a warning
+    instead), so a storage failure cannot turn a 400 into a 500.
+- **Linking:**
+  - a refused clock-out already has its entry;
+  - a refused clock-in has none yet. It is linked, in the same transaction,
+    to the entry the worker then opens for the same shift: by a clock-in,
+    or by a manager's "missing clock-in" correction.
+  - An attempt whose shift never gets an entry stays unlinked. It is still
+    tied to the shift and the worker.
+- The new rows are evidence only: no rule reads them. The list's "attempt
+  outside the geofence" and "mock or suspicious location" flags are derived
+  from them.
+
+A clock event also records the temporary check-in point it was validated
+against (`clock_events.temporary_check_in_point_id`). Before, only the
+distance was kept, so neither the map nor the "temporary point" flag could
+know which point was used.
+
+### Money stays in separate Owner-only responses
+
+The Field Manager's responses must contain no money at all, not even a key
+the client hides. Two shapes were possible:
+
+- **One endpoint with role-dependent fields.** Rejected: the same response
+  type would carry money for one role, and a single missed branch would
+  leak it.
+- **Separate responses (chosen).** The attendance list and the evidence
+  never contain money, for anyone. An Owner's page additionally calls:
+  - `GET /time-entries/:id/estimated-cost`;
+  - `GET /workers/:id/estimated-earnings?month=`.
+  Both require `VIEW_COMPENSATION`, so the permissions guard refuses a Field
+  Manager or Worker before any query runs. A Field Manager's page never even
+  makes the request.
+
+Emergency call-outs are one list for both roles, so their DTO is built per
+role, by different code: only the Owner's path computes the cost and sets
+`estimatedCostAgorot`. A Field Manager's DTO has no such key.
+
+All estimates go through `PayrollCalculationService` (the effective
+compensation profile and `computeEntryCompensation`), the code the monthly
+payroll uses:
+- an approved entry uses its approved minutes;
+- a pending entry uses the split approval would apply ("estimated");
+- an open or rejected entry, or one with no compensation profile, has no
+  amount, and the card says why.
+
+The financial leak scanner needed no route list: it finds every GET route
+from Nest's metadata. It only needed a seeded id for each new `:id`
+parameter, so its seed now includes an emergency call-out.
+
+### Shared rules instead of copies
+
+The admin web previews what the API will do, so both run the same code:
+- `rawDurationMinutes` and `splitWorkedMinutes`: the first 540 worked
+  minutes regular, the rest overtime, with full-day credit topping a short
+  day up to 540. Approval, the cost estimate, the detail page, the worker
+  tab and the correction preview all use them.
+- `forgottenStampInfractionMonth`: an infraction counts in the month of the
+  correction, or, when the correction creates the entry, the month of its
+  clock-in. The correction service and the dialog's "هذه المخالفة رقم N"
+  both use it, so the preview cannot disagree with the infraction that is
+  saved.
+- `evaluateForgottenStampInfraction` (existing): the dialog shows the
+  Owner's deduction from it.
+
+### List tabs, flags and filters
+
+- **Tabs:**
+  - بانتظار الموافقة = `PENDING_APPROVAL` + `CORRECTION_REQUESTED`;
+  - معتمد = `APPROVED`;
+  - مرفوض = `REJECTED`;
+  - الكل = every status, open entries included.
+  The counts come from the same filters in one transaction.
+- **Order:** waiting entries oldest first (an approval queue); the other
+  tabs newest first.
+- **Flags** are computed from stored facts, both as row badges and as
+  filters. A filter requires every chosen flag.
+  - attempt outside the geofence: a stored `GEOFENCE_OUTSIDE_ALLOWED_RADIUS`
+    attempt;
+  - mock or suspicious location: a `FLAGGED` or mock-suspected clock event,
+    or a stored `MOCK_LOCATION_BLOCKED` attempt;
+  - offline: an `OFFLINE`-origin clock event;
+  - Flexi-Check: `FLEXI_CHECK` and not an emergency (emergencies are
+    Flexi-Check too, but have their own flag);
+  - temporary point: a clock event with a temporary point;
+  - emergency: `isEmergency`;
+  - "تعديل تجريبي": `devRewoundAt`.
+- **Dates and URL:**
+  - Date filters compare business dates (`YYYY-MM-DD`, Asia/Jerusalem),
+    like payroll.
+  - Every filter and the page live in the URL, so a view can be shared and
+    the back button works.
+  - A page past the end (its last row was just approved, or an old link)
+    sends the user to the last page.
+
+### Correction times are entered in Asia/Jerusalem
+
+A `datetime-local` input has no time zone, and a manager outside Israel
+would otherwise enter times in their own. The dialog reads and fills it as
+Asia/Jerusalem wall time (`lib/jerusalem-time.ts`, using the same offset
+rules as the rest of the app), and says so in its label.
+
+### Small validation fixes, no rule change
+
+- **A manual correction that creates an entry** now checks:
+  - the worker belongs to the caller's organization (404);
+  - the worker has no open entry. That was already impossible (one open
+    entry per worker is a database constraint), but it surfaced as a 500.
+    It is now 409 `ACTIVE_TIME_ENTRY_EXISTS`, like a second clock-in.
+- **Reversing a forgotten-stamp deduction** requires a non-blank reason
+  (400 otherwise). The reason was always mandatory, but the endpoint
+  accepted an empty string.
+- **Correcting an existing clock-in or clock-out** was already supported,
+  with the same audit and finalized-period rules as the other corrections.
+  New e2e tests prove that:
+  - it keeps the original clock event (the device and server times never
+    change);
+  - it writes old → new to the audit log;
+  - it answers 409 in a finalized period.

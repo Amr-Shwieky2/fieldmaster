@@ -7,7 +7,7 @@ live dev database, then applied with `prisma migrate deploy` — this
 environment's non-interactive shell doesn't support `prisma migrate dev`;
 see `troubleshooting.md`).
 
-## Tables (39)
+## Tables (41)
 
 Organizations & RBAC: `organizations`, `organization_settings`, `users`,
 `organization_memberships`.
@@ -29,7 +29,20 @@ Turan & emergency: `turan_assignments`, `emergency_callouts`.
 
 Attendance: `time_entries`, `clock_events`, `unpaid_breaks`,
 `daily_summaries`, `attendance_approvals`, `manual_time_corrections`,
-`forgotten_stamp_infractions`.
+`forgotten_stamp_infractions`, `rejected_clock_attempts`.
+
+`rejected_clock_attempts` (Step 5, migration
+`20261012100000_attendance_evidence`) is evidence only: clock-ins and
+clock-outs the server refused for the phone's location or clock, with the
+error code, times, position, accuracy, distance and the limit applied.
+- It references the organization, worker and shift (`RESTRICT`).
+- It also references the time entry it was later linked to and the
+  temporary point (`SET NULL`).
+- Indexes: (organization, shift), (worker, shift), (time entry).
+- No business rule reads it.
+
+The same migration adds `clock_events.temporary_check_in_point_id` (the
+point a clock-in was validated against, `SET NULL`).
 
 Offline sync: `offline_sync_batches`, `offline_sync_events`.
 

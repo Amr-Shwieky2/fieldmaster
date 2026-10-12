@@ -56,6 +56,9 @@ const EXPECTED_DECORATED_FINANCIAL_ROUTES = [
   "POST /api/v1/workers/:id/approve",
   "POST /api/v1/workers/:id/compensation-profiles",
   "POST /api/v1/forgotten-stamp-infractions/:id/reverse",
+  // Step 5: Owner-only cost estimates of the attendance screens.
+  "GET /api/v1/time-entries/:id/estimated-cost",
+  "GET /api/v1/workers/:id/estimated-earnings",
 ].sort();
 
 /**

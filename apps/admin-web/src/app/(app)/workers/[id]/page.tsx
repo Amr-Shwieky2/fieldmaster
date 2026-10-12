@@ -1,12 +1,12 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Suspense, useId, type ReactNode } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { Worker } from "@fieldmaster/api-client";
-import { AccountStatus, CompensationType } from "@fieldmaster/shared-types";
+import { AccountStatus, CompensationType, OrgRole } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
 import { isNotFound } from "@fieldmaster/i18n";
 import { useEnumLabel } from "@/i18n/enums";
@@ -17,6 +17,9 @@ import { PageHeader } from "@/components/page-header";
 import { BusinessDateText, DateTimeText, Money, Phone } from "@/components/formatted";
 import { ArrowStartIcon } from "@/components/icons";
 import { RateText } from "../_components/rate-text";
+import { WorkerAttendanceTab } from "../_components/worker-attendance-tab";
+import { currentYearMonth } from "@/lib/business-date";
+import { YEAR_MONTH_PATTERN } from "@/lib/jerusalem-time";
 
 /**
  * The API serializes the date-only `effectiveStartDate` column as an ISO
@@ -29,6 +32,14 @@ function toBusinessDate(value: string | null | undefined): string | null {
 }
 
 export default function WorkerDetailPage() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <WorkerDetailContent />
+    </Suspense>
+  );
+}
+
+function WorkerDetailContent() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("workers");
   const tStates = useTranslations("states");
@@ -47,7 +58,7 @@ export default function WorkerDetailPage() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-5xl space-y-6">
       <Link href="/workers" className="inline-flex items-center gap-1 text-sm font-medium text-brand-700 hover:underline">
         <ArrowStartIcon />
         {t("backToList")}
@@ -57,16 +68,69 @@ export default function WorkerDetailPage() {
   );
 }
 
+const WORKER_TABS = ["profile", "attendance"] as const;
+type WorkerTab = (typeof WORKER_TABS)[number];
+
 function WorkerDetail({ worker }: { worker: Worker }) {
+  const t = useTranslations("workers");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { session } = useAuth();
+  const panelId = useId();
+  const tab: WorkerTab = searchParams?.get("tab") === "attendance" ? "attendance" : "profile";
+  const monthParam = searchParams?.get("month") ?? "";
+  const month = YEAR_MONTH_PATTERN.test(monthParam) ? monthParam : currentYearMonth();
+  const show = (next: WorkerTab, nextMonth = month) => router.replace(next === "profile" ? `${pathname}` : `${pathname}?tab=attendance&month=${nextMonth}`);
+
+  return (
+    <>
+      <PageHeader title={worker.fullLegalName} description={<Phone value={worker.phoneNumber} />} />
+
+      <div role="tablist" aria-label={t("tabs.label")} className="flex flex-wrap gap-2 border-b border-slate-200">
+        {WORKER_TABS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            aria-controls={panelId}
+            onClick={() => show(key)}
+            className={
+              tab === key
+                ? "-mb-px border-b-2 border-brand-600 px-3 py-2 text-sm font-semibold text-brand-700"
+                : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-900"
+            }
+          >
+            {t(`tabs.${key}`)}
+          </button>
+        ))}
+      </div>
+
+      <div id={panelId} role="tabpanel">
+        {tab === "profile" ? (
+          <WorkerProfile worker={worker} />
+        ) : (
+          <WorkerAttendanceTab
+            workerId={worker.id}
+            month={month}
+            onMonthChange={(next) => show("attendance", next)}
+            isOwner={session?.role === OrgRole.OWNER}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+function WorkerProfile({ worker }: { worker: Worker }) {
   const t = useTranslations("workers");
   const tc = useTranslations("common");
   const label = useEnumLabel();
   const compensation = worker.compensation;
 
   return (
-    <>
-      <PageHeader title={worker.fullLegalName} description={<Phone value={worker.phoneNumber} />} />
-
+    <div className="max-w-2xl space-y-6">
       <Card>
         <CardHeader>
           <CardTitle>{t("detail.profile")}</CardTitle>
@@ -116,7 +180,7 @@ function WorkerDetail({ worker }: { worker: Worker }) {
           )}
         </CardContent>
       </Card>
-    </>
+    </div>
   );
 }
 

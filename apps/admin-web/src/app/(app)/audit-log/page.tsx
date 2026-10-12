@@ -3,11 +3,10 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { CorrectionReason } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
 import { useErrorMessage } from "@/lib/use-error-message";
+import { useAuditReason } from "@/lib/use-audit-reason";
 import { EM_DASH } from "@fieldmaster/i18n";
-import { useEnumLabel } from "@/i18n/enums";
 import { OwnerOnly } from "@/components/owner-only";
 import { PageHeader } from "@/components/page-header";
 import { DateTimeText, LtrText } from "@/components/formatted";
@@ -16,39 +15,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 
-/**
- * Manual time corrections store a CorrectionReason code, and some system events
- * (e.g. a rejected offline sync) store an API error code. Everything else is
- * free text typed by a person and is shown as written (except the legacy
- * English defaults below).
- */
-const CORRECTION_REASONS = new Set<string>(Object.values(CorrectionReason));
-const ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]+$/;
-
-/**
- * Fixed English reasons the web app itself sent before it became Arabic only
- * (rows written then still hold them). They are system defaults, not text a
- * person typed, so they are shown with today's Arabic wording.
- */
-type LegacyReason = "initialApproval" | "workerRejected" | "payrollReopened" | "attendanceRejected" | "fullDayCreditWeather";
-const LEGACY_ENGLISH_REASONS: Record<string, LegacyReason> = {
-  "Initial onboarding approval": "initialApproval",
-  "Rejected during admin review.": "workerRejected",
-  "Correction needed after review": "payrollReopened",
-  "Rejected during review.": "attendanceRejected",
-  "Weather stopped work": "fullDayCreditWeather",
-};
-
 const ltr = (chunks: ReactNode) => <LtrText>{chunks}</LtrText>;
 
 function AuditLogContent() {
   const t = useTranslations("auditLog");
-  const tErrors = useTranslations("errors");
-  const tWorkers = useTranslations("workers");
-  const tPayroll = useTranslations("payroll");
-  const tAttendance = useTranslations("attendance");
-  const enumLabel = useEnumLabel();
   const errorMessage = useErrorMessage();
+  const auditReason = useAuditReason();
   const { client } = useAuth();
   const auditQuery = useQuery({ queryKey: ["audit-logs"], queryFn: () => client.listAuditLogs() });
   const [verifyResult, setVerifyResult] = useState<{ valid: boolean; brokenAtId?: string } | null>(null);
@@ -62,33 +34,7 @@ function AuditLogContent() {
   // Known codes get a translated label; a code added by the API later is shown as-is (left-to-right).
   const actionLabel = (code: string): ReactNode => (t.has(`actions.${code}`) ? t(`actions.${code}`) : <LtrText className="font-mono text-xs">{code}</LtrText>);
   const entityLabel = (type: string): ReactNode => (t.has(`entityTypes.${type}`) ? t(`entityTypes.${type}`) : <LtrText>{type}</LtrText>);
-  const legacyReasonLabel = (reason: LegacyReason): string => {
-    switch (reason) {
-      case "initialApproval":
-        return tWorkers("approve.reasons.initialApproval");
-      case "workerRejected":
-        return tWorkers("approve.reasons.rejected");
-      case "payrollReopened":
-        return tPayroll("period.reopenReason");
-      case "attendanceRejected":
-        return tAttendance("reasonPrompt.rejectDefault");
-      case "fullDayCreditWeather":
-        return tAttendance("reasonPrompt.fullDayCreditDefault");
-    }
-  };
-  const reasonLabel = (reason: string | null): string => {
-    if (!reason) return EM_DASH;
-    if (CORRECTION_REASONS.has(reason)) return enumLabel("CorrectionReason", reason);
-    const legacy = LEGACY_ENGLISH_REASONS[reason.trim()];
-    if (legacy) return legacyReasonLabel(legacy);
-    if (ERROR_CODE_PATTERN.test(reason)) {
-      // Audit rows carry no error details, so prefer the wording without placeholders.
-      const noDetailsKey = `${reason}_NO_DETAILS`;
-      if (tErrors.has(noDetailsKey)) return tErrors(noDetailsKey);
-      if (tErrors.has(reason)) return tErrors(reason);
-    }
-    return reason;
-  };
+  const reasonLabel = (reason: string | null): string => (reason ? auditReason(reason) : EM_DASH);
 
   return (
     <div className="space-y-6">

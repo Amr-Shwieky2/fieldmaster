@@ -1,13 +1,22 @@
 import type {
   AccountStatus,
+  ApprovalAction,
+  AttendanceFlag,
+  AttendanceListTab,
   CheckInMethod,
+  ClockEventType,
   CompensationType,
+  CorrectionReason,
+  EmergencyAuthorizationSource,
+  EventOrigin,
+  LocationValidationStatus,
   NotificationType,
   OfflineSyncEventStatus,
   OrgRole,
   PayrollPeriodStatus,
   ShiftStatus,
   ShiftType,
+  TaskCategory,
   TemporaryPointStatus,
   TimeEntryStatus,
   TuranStatus,
@@ -325,4 +334,324 @@ export interface GeneratedReport {
   includesFinancials: boolean;
   sha256Hash: string;
   generatedAt: string;
+}
+
+// ── Step 5: attendance screens ──────────────────────────────────────────
+
+/** A page of a paginated list. */
+export interface Paginated<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** Filters of `GET /attendance/entries`; all optional. Dates are business dates (YYYY-MM-DD, Asia/Jerusalem). */
+export interface AttendanceListFilters {
+  tab?: AttendanceListTab;
+  workerProfileId?: string;
+  from?: string;
+  to?: string;
+  projectId?: string;
+  siteId?: string;
+  shiftType?: ShiftType;
+  /** An entry must carry every listed flag. */
+  flags?: AttendanceFlag[];
+  page?: number;
+  pageSize?: number;
+}
+
+/** One row of the attendance list. Never carries money. */
+export interface AttendanceListItem {
+  id: string;
+  status: TimeEntryStatus;
+  businessDate: string;
+  clockInAt: string | null;
+  clockOutAt: string | null;
+  rawDurationMinutes: number | null;
+  unpaidBreakMinutes: number;
+  approvedRegularMinutes: number | null;
+  approvedOvertimeMinutes: number | null;
+  fullDayCredit: boolean;
+  isEmergency: boolean;
+  devRewoundAt: string | null;
+  checkInMethod: CheckInMethod;
+  worker: { id: string; fullLegalName: string };
+  shift: { id: string; title: string; shiftType: ShiftType; project: { id: string; name: string } | null; site: { id: string; name: string } | null };
+  dailySummary: { text: string | null; taskCategory: string } | null;
+  flags: AttendanceFlag[];
+}
+
+export interface AttendanceListResponse extends Paginated<AttendanceListItem> {
+  /** Entries per tab under the same filters. */
+  tabCounts: Record<AttendanceListTab, number>;
+}
+
+export interface EvidenceTemporaryPoint {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  status: TemporaryPointStatus;
+  expiresAt: string;
+}
+
+export interface EvidenceClockEvent {
+  id: string;
+  eventType: ClockEventType;
+  origin: EventOrigin;
+  deviceId: string | null;
+  /** What the phone's clock said. */
+  deviceTimestamp: string;
+  /** When the server received the event. */
+  serverReceivedAt: string;
+  /** The entry's current (validated, possibly corrected) time for this event. */
+  validatedAt: string | null;
+  deviceTimeDeviationSeconds: number;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  mockLocationSuspected: boolean;
+  /** From the site, or from the temporary point the clock-in used. */
+  distanceFromSiteMeters: number | null;
+  locationValidationStatus: LocationValidationStatus;
+  isManualCorrection: boolean;
+  appVersion: string | null;
+  temporaryCheckInPoint: EvidenceTemporaryPoint | null;
+  offlineSync: { status: OfflineSyncEventStatus; syncedAt: string; offlineEventAgeSeconds: number | null; batchId: string; duplicateSyncs: number } | null;
+}
+
+/** A clock-in/out the server refused for the phone's location or clock. */
+export interface RejectedClockAttempt {
+  id: string;
+  eventType: ClockEventType;
+  origin: EventOrigin;
+  /** The error code the worker received. */
+  code: string;
+  deviceTimestamp: string;
+  serverReceivedAt: string;
+  deviationSeconds: number | null;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  mockLocationSuspected: boolean;
+  distanceMeters: number | null;
+  allowedRadiusMeters: number | null;
+  requiredAccuracyMeters: number | null;
+  temporaryCheckInPoint: EvidenceTemporaryPoint | null;
+}
+
+export interface EvidenceInfraction {
+  id: string;
+  businessMonth: string;
+  monthlySequenceNumber: number;
+  reversedAt: string | null;
+  reversalReason: string | null;
+}
+
+/** `GET /time-entries/:id/evidence`: everything a manager needs to decide on one entry. Never carries money. */
+export interface TimeEntryEvidence {
+  id: string;
+  status: TimeEntryStatus;
+  businessDate: string;
+  /** Same flags (and rules) as the attendance list. */
+  flags: AttendanceFlag[];
+  checkInMethod: CheckInMethod;
+  isEmergency: boolean;
+  devRewoundAt: string | null;
+  createdAt: string;
+  clockInAt: string | null;
+  clockOutAt: string | null;
+  rejectedReason: string | null;
+  approvedAt: string | null;
+  approvedByName: string | null;
+  periodFinalized: boolean;
+  worker: { id: string; fullLegalName: string; phoneNumber: string };
+  shift: {
+    id: string;
+    title: string;
+    shiftType: ShiftType;
+    status: ShiftStatus;
+    scheduledStart: string;
+    scheduledEnd: string;
+    checkInMethod: CheckInMethod;
+    project: { id: string; name: string; client: string | null; projectCode: string } | null;
+    site: { id: string; name: string; address: string | null; latitude: number; longitude: number; defaultGeofenceRadiusMeters: number } | null;
+    geofence: { id: string; centerLatitude: number; centerLongitude: number; radiusMeters: number; minAccuracyMeters: number } | null;
+  };
+  duration: {
+    rawDurationMinutes: number | null;
+    unpaidBreakMinutes: number;
+    workedMinutes: number | null;
+    regularMinutes: number | null;
+    overtimeMinutes: number | null;
+    basis: "APPROVED" | "EXPECTED" | "OPEN";
+    approvedSplitOutdated: boolean;
+  };
+  fullDayCredit: { applied: boolean; reason: string | null; appliedByName: string | null; appliedAt: string | null; eligible: boolean };
+  emergency: {
+    id: string;
+    authorizationSource: EmergencyAuthorizationSource;
+    authorizedByName: string | null;
+    turanAssignmentId: string | null;
+    actualStartClick: string;
+    compensatedStart: string;
+    actualEndClick: string | null;
+    compensatedEnd: string | null;
+    actualWorkedMinutes: number | null;
+    retroactiveMinutes: number;
+    returnBufferMinutes: number | null;
+    compensatedDurationMinutes: number | null;
+    start: { latitude: number; longitude: number };
+    end: { latitude: number; longitude: number } | null;
+  } | null;
+  clockEvents: EvidenceClockEvent[];
+  rejectedAttempts: RejectedClockAttempt[];
+  dailySummary: {
+    text: string | null;
+    voiceNoteUrl: string | null;
+    taskCategory: TaskCategory;
+    materialsUsed: string | null;
+    problemsEncountered: string | null;
+    followUpRequired: boolean;
+    createdAt: string;
+  } | null;
+  history: {
+    corrections: {
+      id: string;
+      field: string;
+      oldValue: string | null;
+      newValue: string | null;
+      reason: CorrectionReason;
+      note: string | null;
+      editedByName: string | null;
+      createdAt: string;
+      infraction: EvidenceInfraction | null;
+    }[];
+    approvals: { id: string; action: ApprovalAction; actedByName: string | null; notes: string | null; createdAt: string }[];
+    auditEvents: {
+      id: string;
+      action: string;
+      entityType: string;
+      actorName: string | null;
+      field: string | null;
+      oldValue: string | null;
+      newValue: string | null;
+      reason: string | null;
+      note: string | null;
+      createdAt: string;
+    }[];
+  };
+  allowedActions: { approve: boolean; reject: boolean; requestCorrection: boolean; fullDayCredit: boolean; correct: boolean };
+}
+
+/** `GET /time-entries/:id/estimated-cost` (Owner only). */
+export interface EntryCostEstimate {
+  timeEntryId: string;
+  basis: "APPROVED" | "ESTIMATED" | "OPEN" | "REJECTED" | "NO_COMPENSATION_PROFILE";
+  compensationType: CompensationType | null;
+  regularMinutes: number | null;
+  overtimeMinutes: number | null;
+  baseAgorot: number | null;
+  overtimeAgorot: number | null;
+  estimatedCostAgorot: number | null;
+}
+
+/** `GET /workers/:id/estimated-earnings?month=` (Owner only). */
+export interface WorkerMonthEarnings {
+  workerProfileId: string;
+  month: string;
+  approvedAgorot: number;
+  pendingEstimateAgorot: number;
+  adjustmentsAgorot: number;
+  totalEstimatedAgorot: number;
+  approvedEntries: number;
+  pendingEntries: number;
+  openEntries: number;
+  entriesWithoutCompensationProfile: number;
+}
+
+export interface EmergencyCalloutFilters {
+  workerProfileId?: string;
+  from?: string;
+  to?: string;
+  status?: TimeEntryStatus;
+  page?: number;
+  pageSize?: number;
+}
+
+/** An emergency call-out. `estimatedCostAgorot` exists only in an Owner's response (the key is absent for anyone else). */
+export interface EmergencyCalloutRecord {
+  id: string;
+  worker: { id: string; fullLegalName: string };
+  authorizationSource: EmergencyAuthorizationSource;
+  authorizedByName: string | null;
+  turanAssignment: { id: string; turanType: TuranType; startAt: string; endAt: string } | null;
+  actualStartClick: string;
+  compensatedStart: string;
+  actualEndClick: string | null;
+  compensatedEnd: string | null;
+  actualWorkedMinutes: number | null;
+  retroactiveMinutes: number;
+  returnBufferMinutes: number | null;
+  compensatedDurationMinutes: number | null;
+  start: { latitude: number; longitude: number; accuracyMeters: number | null };
+  end: { latitude: number; longitude: number; accuracyMeters: number | null } | null;
+  timeEntryId: string | null;
+  status: TimeEntryStatus | null;
+  businessDate: string | null;
+  summary: {
+    text: string | null;
+    taskCategory: TaskCategory;
+    materialsUsed: string | null;
+    problemsEncountered: string | null;
+    followUpRequired: boolean;
+  } | null;
+  createdAt: string;
+  estimatedCostAgorot?: number | null;
+}
+
+/** A forgotten-stamp infraction. `deductionAgorot` exists only in an Owner's response. */
+export interface ForgottenStampInfraction {
+  id: string;
+  workerProfileId: string;
+  timeEntryId: string;
+  correctionId: string;
+  businessMonth: string;
+  monthlySequenceNumber: number;
+  reversedAt: string | null;
+  reversedBy: string | null;
+  reversedByName: string | null;
+  reversalReason: string | null;
+  reversalAdjustmentId: string | null;
+  createdAt: string;
+  deductionAgorot?: number;
+  worker: { id: string; fullLegalName: string };
+  correction: {
+    id: string;
+    field: string;
+    oldValue: string | null;
+    newValue: string | null;
+    reason: CorrectionReason;
+    note: string | null;
+    editedBy: string;
+    editedByName: string | null;
+    createdAt: string;
+  };
+  timeEntry: { id: string; businessDate: string; status: TimeEntryStatus };
+}
+
+/** Body of `POST /manual-corrections`. */
+export interface ManualCorrectionInput {
+  /** Omit (with shiftId + workerProfileId) to add a missing clock-in as a new entry. */
+  timeEntryId?: string;
+  shiftId?: string;
+  workerProfileId?: string;
+  field: "CLOCK_IN" | "CLOCK_OUT" | "UNPAID_BREAK_MINUTES";
+  /** ISO instant for CLOCK_IN/CLOCK_OUT, whole minutes for UNPAID_BREAK_MINUTES. */
+  newValue: string;
+  reason: CorrectionReason;
+  /** Required when reason is OTHER. */
+  note?: string;
 }

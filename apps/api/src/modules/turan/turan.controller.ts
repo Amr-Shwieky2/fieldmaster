@@ -10,6 +10,8 @@ import { TuranAssignmentsService } from "./turan-assignments.service";
 import { CreateTuranAssignmentDto } from "./dto/create-turan-assignment.dto";
 import { EmergencyCalloutsService } from "./emergency-callouts.service";
 import { StartEmergencyCalloutDto, EndEmergencyCalloutDto } from "./dto/emergency-callout.dto";
+import { EmergencyCalloutRecordsService } from "./emergency-callout-records.service";
+import { ListEmergencyCalloutsQueryDto } from "./dto/list-emergency-callouts.dto";
 
 @ApiBearerAuth()
 @ApiTags("turan")
@@ -18,6 +20,7 @@ export class TuranController {
   constructor(
     private readonly turanAssignmentsService: TuranAssignmentsService,
     private readonly emergencyCalloutsService: EmergencyCalloutsService,
+    private readonly emergencyCalloutRecords: EmergencyCalloutRecordsService,
   ) {}
 
   @Post("turan-assignments")
@@ -42,6 +45,19 @@ export class TuranController {
   @RequirePermissions(Permission.MANAGE_TURAN)
   cancel(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
     return this.turanAssignmentsService.cancel(user.organizationId, id, user, correlationId);
+  }
+
+  /** Owners and Field Managers; an Owner's items also carry `estimatedCostAgorot`. */
+  @Get("emergency-callouts")
+  @RequirePermissions(Permission.APPROVE_ATTENDANCE)
+  listEmergencyCallouts(@Query() query: ListEmergencyCalloutsQueryDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.emergencyCalloutRecords.list(user.organizationId, user, query);
+  }
+
+  @Get("emergency-callouts/:id")
+  @RequirePermissions(Permission.APPROVE_ATTENDANCE)
+  getEmergencyCallout(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.emergencyCalloutRecords.getById(user.organizationId, id, user);
   }
 
   @Post("emergency-callouts/start")

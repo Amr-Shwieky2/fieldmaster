@@ -12,7 +12,9 @@
     "sitesProjects": "المواقع والمشاريع",
     "scheduling": "الجدولة",
     "turanEmergency": "المناوبات والطوارئ",
-    "attendanceApproval": "الموافقة على الحضور",
+    "attendanceApproval": "الحضور",
+    "forgottenStamps": "نسيان التسجيل",
+    "emergencies": "استدعاءات الطوارئ",
     "payroll": "الرواتب",
     "reports": "التقارير",
     "notifications": "الإشعارات",
@@ -39,20 +41,23 @@
     "body": "لوحة الإدارة مخصّصة للمالك ومدير الميدان. بصفتك عاملًا، استخدم تطبيق FieldMaster على الهاتف لبدء الدوام وإنهائه ولمتابعة ورديّاتك وسجل حضورك."
   },
   "attendance": {
-    "title": "الموافقة على الحضور",
-    "description": "راجع الورديات المسجّلة التي تنتظر موافقتك. لا تظهر في هذه الصفحة أي مبالغ مالية.",
+    "title": "الحضور",
+    "description": "سجلات الحضور مع إثباتات الوقت والموقع. افتح أي سجل لرؤية كل التفاصيل. لا تظهر في هذه الصفحة أي مبالغ مالية.",
     "pendingCount": "{count, plural, zero {لا توجد ورديات بانتظار الموافقة} one {وردية واحدة بانتظار الموافقة} two {ورديتان بانتظار الموافقة} few {{count} ورديات بانتظار الموافقة} many {{count} وردية بانتظار الموافقة} other {{count} وردية بانتظار الموافقة}}",
-    "listLabel": "الورديات بانتظار الموافقة",
     "fullDayCreditApplied": "تم احتساب يوم كامل",
     "fields": {
-      "duration": "المدة"
+      "duration": "المدة",
+      "businessDate": "يوم العمل"
     },
     "actions": {
       "approving": "جارٍ الموافقة…",
       "rejecting": "جارٍ الرفض…",
       "applyingFullDayCredit": "جارٍ الاحتساب…",
       "confirmReject": "تأكيد الرفض",
-      "confirmFullDayCredit": "تأكيد احتساب يوم كامل"
+      "confirmFullDayCredit": "تأكيد احتساب يوم كامل",
+      "requestCorrection": "طلب تصحيح",
+      "confirmRequestCorrection": "تأكيد طلب التصحيح",
+      "requestingCorrection": "جارٍ إرسال الطلب…"
     },
     "reasonPrompt": {
       "rejectLabel": "سبب الرفض",
@@ -61,7 +66,10 @@
       "fullDayCreditLabel": "سبب احتساب يوم كامل",
       "fullDayCreditHint": "يُحفظ هذا السبب في سجل التدقيق.",
       "fullDayCreditDefault": "توقّف العمل بسبب الطقس",
-      "required": "اكتب السبب قبل المتابعة."
+      "required": "اكتب السبب قبل المتابعة.",
+      "requestCorrectionLabel": "ما الذي يجب تصحيحه؟",
+      "requestCorrectionHint": "تُحفظ الملاحظة مع الطلب في القرارات وفي سجل التدقيق.",
+      "requestCorrectionDefault": "يرجى مراجعة أوقات الدوام."
     },
     "empty": {
       "title": "لا توجد ورديات بانتظار الموافقة",
@@ -70,9 +78,206 @@
     "messages": {
       "approved": "تمت الموافقة على وردية {name}.",
       "rejected": "تم رفض وردية {name}.",
-      "fullDayCreditApplied": "تم احتساب يوم كامل لوردية {name}."
+      "fullDayCreditApplied": "تم احتساب يوم كامل لوردية {name}.",
+      "correctionRequested": "تم طلب تصحيح لوردية {name}.",
+      "corrected": "تم حفظ التصحيح لوردية {name}."
     },
-    "devRewound": "تعديل تجريبي"
+    "devRewound": "تعديل تجريبي",
+    "tabsLabel": "تصنيف سجلات الحضور حسب الحالة",
+    "listLabels": {
+      "PENDING": "الورديات بانتظار الموافقة",
+      "APPROVED": "الورديات المعتمدة",
+      "REJECTED": "الورديات المرفوضة",
+      "ALL": "كل سجلات الحضور"
+    },
+    "paginationLabel": "صفحات سجلات الحضور",
+    "forgottenStampsLink": "تقرير نسيان التسجيل",
+    "addMissingClockIn": "إضافة بدء دوام منسي",
+    "viewDetails": "عرض التفاصيل",
+    "viewDetailsFor": "عرض تفاصيل حضور {name}",
+    "emptyOther": {
+      "title": "لا توجد سجلات حضور مطابقة",
+      "description": "غيّر التبويب أو التصفية لعرض سجلات أخرى."
+    },
+    "filters": {
+      "title": "التصفية",
+      "clear": "مسح التصفية",
+      "worker": "العامل",
+      "allWorkers": "كل العمال",
+      "from": "من تاريخ",
+      "to": "إلى تاريخ",
+      "project": "المشروع",
+      "allProjects": "كل المشاريع",
+      "site": "الموقع",
+      "allSites": "كل المواقع",
+      "shiftType": "نوع الوردية",
+      "allShiftTypes": "كل الأنواع",
+      "flags": "العلامات",
+      "flagsHint": "تظهر السجلات التي تحمل كل العلامات المختارة.",
+      "dateHint": "التواريخ هي أيام العمل حسب توقيت القدس.",
+      "show": "عرض التصفية",
+      "hide": "إخفاء التصفية",
+      "activeCount": "{count, plural, one {عامل تصفية واحد} two {عاملا تصفية} few {{count} عوامل تصفية} many {{count} عامل تصفية} other {{count} عامل تصفية}}"
+    },
+    "detail": {
+      "backToList": "العودة إلى الحضور",
+      "notFound": "لم نعثر على سجل الحضور هذا. ربما أُزيل أو أنه لا يتبع مؤسستك.",
+      "subtitle": "حضور يوم <date></date>",
+      "actions": {
+        "title": "الإجراءات",
+        "rejectedReason": "سبب الرفض",
+        "periodFinalized": "فترة الرواتب لهذا الشهر مُقفلة، فلا يمكن الاعتماد أو التصحيح أو احتساب يوم كامل حتى يُعاد فتحها.",
+        "manualCorrection": "تصحيح يدوي",
+        "none": "لا توجد إجراءات متاحة لهذا السجل الآن."
+      },
+      "record": {
+        "title": "بيانات السجل",
+        "worker": "العامل",
+        "phone": "رقم الهاتف",
+        "shift": "الوردية",
+        "shiftType": "نوع الوردية",
+        "project": "المشروع",
+        "noProject": "بدون مشروع",
+        "site": "الموقع",
+        "noSite": "بدون موقع",
+        "checkInMethod": "طريقة تسجيل الحضور",
+        "businessDate": "يوم العمل",
+        "scheduled": "موعد الوردية",
+        "scheduledValue": "من <start></start> إلى <end></end>"
+      },
+      "timeline": {
+        "title": "التسلسل الزمني",
+        "description": "ما سجّله هاتف العامل، ومتى وصل إلى الخادم، والوقت المعتمد بعد أي تصحيح. التسجيلات الأصلية لا تتغير أبدًا.",
+        "corrected": "مُصحَّح",
+        "device": "وقت الجهاز",
+        "server": "وقت الخادم",
+        "validated": "الوقت المعتمد",
+        "deviation": "فرق ساعة الجهاز",
+        "seconds": "{value} ثانية",
+        "origin": "طريقة الإرسال",
+        "sync": "نتيجة المزامنة",
+        "duplicateSyncs": "{count, plural, one {أُرسل مرة أخرى وعدّه الخادم مكرّرًا} two {أُرسل مرتين أخريين وعدّه الخادم مكرّرًا} few {أُرسل {count} مرات أخرى وعدّه الخادم مكرّرًا} many {أُرسل {count} مرة أخرى وعدّه الخادم مكرّرًا} other {أُرسل {count} مرة أخرى وعدّه الخادم مكرّرًا}}",
+        "location": "نتيجة فحص الموقع",
+        "accuracy": "دقة GPS",
+        "distanceFromSite": "المسافة من الموقع",
+        "distanceFromPoint": "المسافة من النقطة المؤقتة",
+        "meters": "{value} م",
+        "temporaryPoint": "نقطة التسجيل المؤقتة",
+        "mockLocation": "موقع وهمي",
+        "mockLocationYes": "يُشتبه في موقع وهمي",
+        "addedByCorrection": "لا يوجد تسجيل من الهاتف: أُضيف هذا الوقت بتصحيح يدوي.",
+        "notYet": "لم يُسجَّل بعد."
+      },
+      "map": {
+        "title": "الخريطة وإثباتات الموقع",
+        "label": "خريطة إثباتات الموقع لهذا الحضور",
+        "help": "الدائرة الزرقاء نطاق الموقع، والخضراء نقطة تسجيل مؤقتة. النقطة الخضراء الداكنة بدء الدوام، والبنفسجية إنهاء الدوام، والحمراء محاولة مرفوضة. الدائرة المتقطعة حول كل نقطة بحجم دقة GPS.",
+        "geofence": "نطاق الموقع: نصف القطر {radius} م",
+        "site": "الموقع «{name}»: نصف القطر الافتراضي {radius} م (تسجيل مرن بلا فحص للنطاق)",
+        "temporaryPoint": "نقطة التسجيل المؤقتة «{name}»: نصف القطر {radius} م",
+        "eventPoint": "{event}: الدقة {accuracy} م، المسافة {distance} م، فحص الموقع: {outcome}",
+        "eventPointNoDistance": "{event}: الدقة {accuracy} م، فحص الموقع: {outcome}",
+        "attemptPoint": "محاولة {event} مرفوضة الساعة {time}: {reason}، المسافة {distance} م",
+        "attemptPointNoDistance": "محاولة {event} مرفوضة الساعة {time}: {reason}"
+      },
+      "attempts": {
+        "title": "{count, plural, zero {المحاولات المرفوضة} one {محاولة مرفوضة واحدة} two {محاولتان مرفوضتان} few {{count} محاولات مرفوضة} many {{count} محاولة مرفوضة} other {{count} محاولة مرفوضة}}",
+        "none": "لا توجد محاولات مرفوضة لهذه الوردية.",
+        "caption": "المحاولات التي رفضها الخادم لهذا الحضور",
+        "columns": {
+          "time": "الوقت",
+          "event": "الحدث",
+          "reason": "سبب الرفض",
+          "details": "التفاصيل",
+          "origin": "طريقة الإرسال"
+        },
+        "codes": {
+          "GEOFENCE_OUTSIDE_ALLOWED_RADIUS": "خارج نطاق الموقع",
+          "GPS_ACCURACY_TOO_LOW": "دقة GPS ضعيفة",
+          "DEVICE_TIME_DEVIATION_EXCEEDED": "ساعة الجهاز غير مضبوطة",
+          "MOCK_LOCATION_BLOCKED": "موقع وهمي"
+        },
+        "unknownCode": "رُفضت المحاولة",
+        "distanceValue": "المسافة {distance} م (المسموح {allowed} م)",
+        "distanceOnly": "المسافة {distance} م",
+        "accuracyValue": "الدقة {accuracy} م (المطلوب {required} م أو أقل)",
+        "deviationValue": "فرق الساعة {seconds} ثانية",
+        "atTemporaryPoint": "عند نقطة التسجيل المؤقتة «{name}»"
+      },
+      "duration": {
+        "title": "المدة",
+        "raw": "المدة المسجّلة",
+        "unpaidBreak": "استراحة غير مدفوعة",
+        "worked": "مدة العمل",
+        "regular": "ساعات عادية",
+        "overtime": "ساعات إضافية",
+        "basisApproved": "الدقائق كما اعتُمدت، وهي التي تدخل في الرواتب.",
+        "basisExpected": "تقسيم متوقع عند الاعتماد: أول 540 دقيقة عمل عادية، وما بعدها ساعات إضافية.",
+        "basisOpen": "الدوام جارٍ، ولم تُحتسب المدة بعد.",
+        "outdated": "تغيّرت أوقات هذا السجل بعد اعتماده، فالدقائق المعتمدة لم تعد تطابق الأوقات الحالية. اطلب تصحيحًا ثم اعتمده من جديد.",
+        "fullDayCredit": "احتساب يوم كامل",
+        "fullDayCreditApplied": "مُطبَّق. السبب: {reason}",
+        "fullDayCreditBy": "بواسطة {name}، <time></time>",
+        "fullDayCreditEligible": "غير مُطبَّق، ويمكن تطبيقه لأن مدة الدوام أقل من 9 ساعات.",
+        "fullDayCreditNotEligible": "غير مُطبَّق."
+      },
+      "emergency": {
+        "title": "استدعاء طوارئ",
+        "authorization": "مصدر الإذن",
+        "authorizedBy": "بإذن من {name}",
+        "viewCallout": "عرض استدعاء الطوارئ"
+      },
+      "summary": {
+        "category": "نوع العمل",
+        "text": "الملخص",
+        "voiceNote": "رسالة صوتية",
+        "voiceNoteLink": "فتح الرسالة الصوتية",
+        "materials": "المواد المستخدمة",
+        "problems": "مشاكل واجهتها",
+        "followUp": "يحتاج إلى متابعة",
+        "followUpYes": "نعم",
+        "followUpNo": "لا",
+        "none": "لم يُرسل ملخص العمل اليومي بعد."
+      },
+      "history": {
+        "title": "السجل الكامل",
+        "corrections": "التصحيحات",
+        "noCorrections": "لا توجد تصحيحات.",
+        "approvals": "القرارات",
+        "noApprovals": "لا توجد قرارات بعد.",
+        "audit": "أحداث سجل التدقيق",
+        "noAudit": "لا توجد أحداث.",
+        "change": "<field></field>: من <old></old> إلى <new></new>",
+        "reason": "السبب",
+        "infraction": "نسيان تسجيل رقم {number} في شهر <month></month>",
+        "infractionReversed": "أُلغي الخصم: {reason}",
+        "by": "{name}، <time></time>",
+        "unknownActor": "النظام",
+        "noValue": "لا شيء",
+        "yes": "نعم",
+        "no": "لا",
+        "fields": {
+          "clockInAt": "بدء الدوام",
+          "clockOutAt": "إنهاء الدوام",
+          "unpaidBreakMinutes": "الاستراحة غير المدفوعة",
+          "fullDayCredit": "احتساب يوم كامل"
+        }
+      },
+      "cost": {
+        "title": "التكلفة التقديرية",
+        "ownerOnly": "للمالك فقط",
+        "base": "الأجر الأساسي",
+        "overtime": "الساعات الإضافية",
+        "total": "الإجمالي",
+        "basis": {
+          "APPROVED": "حسب الدقائق المعتمدة، كما في الرواتب.",
+          "ESTIMATED": "تقدير قبل الاعتماد، حسب المدة المسجّلة.",
+          "OPEN": "الدوام جارٍ، فلا يوجد تقدير بعد.",
+          "REJECTED": "سجل مرفوض: لا يُدفع عنه.",
+          "NO_COMPENSATION_PROFILE": "لا يوجد أجر مسجّل لهذا العامل في هذا التاريخ، فلا يدخل في الرواتب."
+        }
+      }
+    }
   },
   "auditLog": {
     "title": "سجل التدقيق",
@@ -641,6 +846,46 @@
         "initialApproval": "موافقة أولية عند الانضمام",
         "rejected": "تم الرفض أثناء مراجعة الإدارة."
       }
+    },
+    "tabs": {
+      "label": "أقسام ملف العامل",
+      "profile": "الملف الشخصي",
+      "attendance": "سجل الحضور"
+    },
+    "attendanceTab": {
+      "month": "الشهر",
+      "title": "سجل الحضور",
+      "caption": "سجلات حضور العامل في الشهر المختار",
+      "empty": {
+        "title": "لا توجد سجلات حضور في هذا الشهر",
+        "description": "اختر شهرًا آخر."
+      },
+      "totals": "{count, plural, zero {لا توجد سجلات محسوبة} one {سجل واحد} two {سجلان} few {{count} سجلات} many {{count} سجلًا} other {{count} سجل}}: مدة العمل <worked></worked>، ساعات عادية <regular></regular>، ساعات إضافية <overtime></overtime>",
+      "rejectedNotCounted": "السجلات المرفوضة غير محسوبة في المجموع.",
+      "columns": {
+        "date": "يوم العمل",
+        "shift": "الوردية",
+        "clockIn": "بدء الدوام",
+        "clockOut": "إنهاء الدوام",
+        "worked": "مدة العمل",
+        "regular": "ساعات عادية",
+        "overtime": "ساعات إضافية",
+        "status": "الحالة",
+        "flags": "العلامات",
+        "details": "التفاصيل"
+      },
+      "viewDetails": "التفاصيل",
+      "truncated": "يظهر {shown} من أصل {total} سجلًا. اعرض الباقي من صفحة الحضور.",
+      "earnings": {
+        "title": "الأرباح التقديرية لهذا الشهر",
+        "ownerOnly": "للمالك فقط",
+        "approved": "حضور معتمد ({count})",
+        "pending": "بانتظار الموافقة، تقديرًا ({count})",
+        "adjustments": "خصومات وتعديلات",
+        "total": "الإجمالي التقديري",
+        "open": "{count, plural, one {دوام جارٍ واحد لم يُحتسب بعد.} two {دوامان جاريان لم يُحتسبا بعد.} few {{count} دوامات جارية لم تُحتسب بعد.} many {{count} دوامًا جاريًا لم يُحتسب بعد.} other {{count} دوام جارٍ لم يُحتسب بعد.}}",
+        "noProfile": "{count, plural, one {سجل واحد بلا أجر مسجّل، فلا يدخل في الرواتب.} two {سجلان بلا أجر مسجّل، فلا يدخلان في الرواتب.} few {{count} سجلات بلا أجر مسجّل، فلا تدخل في الرواتب.} many {{count} سجلًا بلا أجر مسجّل، فلا يدخل في الرواتب.} other {{count} سجل بلا أجر مسجّل، فلا يدخل في الرواتب.}}"
+      }
     }
   },
   "workerSimulator": {
@@ -923,6 +1168,186 @@
           "hint": "بعد السيناريو السابق اضغط «إرسال الدفعة السابقة نفسها مرة أخرى»."
         }
       }
+    }
+  },
+  "monthPicker": {
+    "previous": "الشهر السابق",
+    "next": "الشهر التالي"
+  },
+  "evidenceMap": {
+    "nothingToShow": "لا توجد مواقع لعرضها على الخريطة.",
+    "legendTitle": "ما يظهر على الخريطة"
+  },
+  "correction": {
+    "title": "تصحيح يدوي",
+    "titleCreate": "إضافة بدء دوام منسي",
+    "description": "يُحفظ التصحيح في سجل التدقيق مع القيمة القديمة والجديدة. يتغير الوقت المعتمد فقط، وتبقى تسجيلات الهاتف والخادم الأصلية كما هي.",
+    "type": "نوع التصحيح",
+    "types": {
+      "ADD_MISSING_CLOCK_IN": "إضافة بدء دوام منسي",
+      "ADD_MISSING_CLOCK_OUT": "إضافة إنهاء دوام منسي",
+      "CORRECT_CLOCK_IN": "تصحيح وقت بدء الدوام",
+      "CORRECT_CLOCK_OUT": "تصحيح وقت إنهاء الدوام",
+      "CORRECT_UNPAID_BREAK": "تصحيح دقائق الاستراحة غير المدفوعة"
+    },
+    "worker": "العامل",
+    "workerPlaceholder": "اختر عاملًا…",
+    "shift": "الوردية",
+    "shiftPlaceholder": "اختر وردية…",
+    "shiftOption": "{title} — {date}",
+    "noShifts": "لا توجد ورديات مخصّصة لهذا العامل.",
+    "time": "الوقت الجديد (توقيت القدس)",
+    "currentTime": "الوقت الحالي: <time></time>",
+    "breakMinutes": "دقائق الاستراحة غير المدفوعة",
+    "currentBreak": "{minutes, plural, zero {لا توجد استراحة مسجّلة الآن.} one {القيمة الحالية: دقيقة واحدة.} two {القيمة الحالية: دقيقتان.} few {القيمة الحالية: {minutes} دقائق.} many {القيمة الحالية: {minutes} دقيقة.} other {القيمة الحالية: {minutes} دقيقة.}}",
+    "reason": "السبب",
+    "reasonPlaceholder": "اختر السبب…",
+    "note": "ملاحظة (اختياري)",
+    "noteRequired": "ملاحظة (مطلوبة عند اختيار «أخرى»)",
+    "errors": {
+      "workerRequired": "اختر العامل.",
+      "shiftRequired": "اختر الوردية.",
+      "timeRequired": "أدخل التاريخ والوقت.",
+      "breakInvalid": "أدخل عددًا صحيحًا من الدقائق، صفرًا أو أكثر.",
+      "reasonRequired": "اختر سبب التصحيح.",
+      "noteRequired": "اكتب ملاحظة عند اختيار «أخرى».",
+      "clockOutBeforeClockIn": "يجب أن يكون إنهاء الدوام بعد بدء الدوام.",
+      "clockInAfterClockOut": "يجب أن يكون بدء الدوام قبل إنهاء الدوام."
+    },
+    "infraction": {
+      "number": "هذه المخالفة رقم {number} لهذا الشهر",
+      "month": "تُحتسب في شهر <month></month>.",
+      "deduction": "سيُخصم <money></money>",
+      "loading": "جارٍ حساب رقم المخالفة…",
+      "failed": "تعذّر حساب رقم المخالفة."
+    },
+    "preview": {
+      "title": "معاينة قبل الحفظ",
+      "now": "الآن",
+      "after": "بعد التصحيح",
+      "worked": "مدة العمل",
+      "regular": "ساعات عادية",
+      "overtime": "ساعات إضافية",
+      "stillOpen": "يبقى الدوام جاريًا حتى يُضاف وقت إنهاء الدوام، فلا تُحسب المدة بعد.",
+      "approvedNote": "هذا السجل معتمد: الدقائق المعتمدة لا تتغير حتى يُطلب تصحيح ويُعتمد السجل من جديد."
+    },
+    "submit": "حفظ التصحيح",
+    "submitting": "جارٍ الحفظ…",
+    "close": "إغلاق"
+  },
+  "forgottenStamps": {
+    "title": "نسيان التسجيل",
+    "description": "حالات نسيان تسجيل بدء الدوام أو إنهائه في كل شهر، مع رقم المخالفة والتصحيح الذي سجّلها.",
+    "backToAttendance": "العودة إلى الحضور",
+    "month": "الشهر",
+    "summary": "{workers, plural, one {عامل واحد} two {عاملان} few {{workers} عمال} many {{workers} عاملًا} other {{workers} عامل}}، {infractions, plural, one {مخالفة واحدة} two {مخالفتان} few {{infractions} مخالفات} many {{infractions} مخالفة} other {{infractions} مخالفة}}",
+    "listLabel": "العمال الذين نسوا التسجيل في هذا الشهر",
+    "infractionsCount": "{count, plural, one {مخالفة واحدة} two {مخالفتان} few {{count} مخالفات} many {{count} مخالفة} other {{count} مخالفة}}",
+    "workerDeduction": "الخصم هذا الشهر: <money></money>",
+    "caption": "مخالفات نسيان التسجيل لـ{name}",
+    "columns": {
+      "sequence": "رقم المخالفة",
+      "date": "يوم العمل",
+      "type": "التسجيل المنسي",
+      "correction": "التصحيح المرتبط",
+      "reversal": "إلغاء الخصم",
+      "deduction": "الخصم"
+    },
+    "sequenceValue": "المخالفة رقم {number}",
+    "types": {
+      "FORGOTTEN_CLOCK_IN": "بدء الدوام",
+      "FORGOTTEN_CLOCK_OUT": "إنهاء الدوام"
+    },
+    "viewEntry": "عرض الحضور",
+    "notReversed": "—",
+    "reversed": "أُلغي في <time></time>",
+    "reversedBy": "بواسطة {name}. السبب: {reason}",
+    "noDeduction": "بلا خصم",
+    "reverse": {
+      "action": "إلغاء الخصم",
+      "actionFor": "إلغاء خصم المخالفة رقم {number} لـ{name}",
+      "label": "سبب إلغاء الخصم",
+      "hint": "السبب مطلوب ويُحفظ في سجل التدقيق. يبقى الخصم الأصلي محفوظًا، ويُضاف تعديل يلغيه.",
+      "confirm": "تأكيد إلغاء الخصم",
+      "pending": "جارٍ الإلغاء…",
+      "success": "أُلغي خصم المخالفة رقم {number} لـ{name}."
+    },
+    "totals": {
+      "title": "إجماليات الشهر",
+      "deductions": "الخصومات",
+      "reversed": "خصومات أُلغيت",
+      "net": "صافي الخصومات"
+    },
+    "empty": {
+      "title": "لا توجد حالات نسيان تسجيل في هذا الشهر",
+      "description": "تُسجَّل المخالفة عند تصحيح يدوي سببه نسيان تسجيل بدء الدوام أو إنهائه."
+    }
+  },
+  "emergencies": {
+    "title": "استدعاءات الطوارئ",
+    "description": "كل استدعاء طوارئ مع أوقاته الفعلية والمحتسبة: تبدأ المدة المحتسبة قبل 60 دقيقة من الضغط على البدء، وتنتهي بعد 15 دقيقة من الضغط على الإنهاء.",
+    "notEnded": "لم ينتهِ بعد",
+    "paginationLabel": "صفحات استدعاءات الطوارئ",
+    "filters": {
+      "title": "التصفية",
+      "clear": "مسح التصفية",
+      "worker": "العامل",
+      "allWorkers": "كل العمال",
+      "from": "من تاريخ",
+      "to": "إلى تاريخ",
+      "status": "حالة الموافقة",
+      "allStatuses": "كل الحالات"
+    },
+    "list": {
+      "caption": "استدعاءات الطوارئ",
+      "viewDetails": "التفاصيل",
+      "viewDetailsFor": "عرض تفاصيل استدعاء {name}",
+      "columns": {
+        "worker": "العامل",
+        "authorization": "مصدر الإذن",
+        "actualStart": "البداية الفعلية",
+        "compensatedStart": "البداية المحتسبة",
+        "actualEnd": "النهاية الفعلية",
+        "compensatedEnd": "النهاية المحتسبة",
+        "actualWorked": "مدة العمل الفعلية",
+        "totalCompensated": "المدة المحتسبة",
+        "status": "الحالة",
+        "cost": "التكلفة التقديرية",
+        "details": "التفاصيل"
+      }
+    },
+    "empty": {
+      "title": "لا توجد استدعاءات طوارئ",
+      "description": "تظهر هنا الاستدعاءات التي تبدأ من مناوبة ليلية أو بإذن من المدير."
+    },
+    "times": {
+      "actualStart": "البداية الفعلية (الضغط على البدء)",
+      "compensatedStart": "البداية المحتسبة (قبل {minutes} دقيقة)",
+      "actualEnd": "النهاية الفعلية (الضغط على الإنهاء)",
+      "compensatedEnd": "النهاية المحتسبة (بعد {minutes} دقيقة)",
+      "actualWorked": "مدة العمل الفعلية",
+      "totalCompensated": "إجمالي المدة المحتسبة",
+      "notEnded": "لم ينتهِ بعد"
+    },
+    "detail": {
+      "backToList": "العودة إلى استدعاءات الطوارئ",
+      "notFound": "لم نعثر على استدعاء الطوارئ هذا.",
+      "times": "الأوقات",
+      "map": "موقعا البدء والإنهاء",
+      "mapLabel": "خريطة موقعي بدء استدعاء الطوارئ وإنهائه",
+      "mapHelp": "النقطة البرتقالية موقع البدء، والزرقاء موقع الإنهاء. الدائرة المتقطعة حول كل نقطة بحجم دقة GPS.",
+      "startPoint": "موقع البدء: الدقة {accuracy} م",
+      "endPoint": "موقع الإنهاء: الدقة {accuracy} م",
+      "noEnd": "لم ينتهِ الاستدعاء بعد، فلا يوجد موقع إنهاء.",
+      "noSummary": "لم يُرسل الملخص بعد.",
+      "authorization": "الإذن",
+      "authorizedBy": "بإذن من {name}",
+      "turanWindow": "{type}: من <start></start> إلى <end></end>",
+      "approval": "حالة الموافقة",
+      "viewAttendance": "عرض سجل الحضور",
+      "cost": "التكلفة التقديرية",
+      "ownerOnly": "للمالك فقط",
+      "noCost": "لا يوجد تقدير بعد (الاستدعاء جارٍ أو لا يوجد أجر مسجّل)."
     }
   }
 }

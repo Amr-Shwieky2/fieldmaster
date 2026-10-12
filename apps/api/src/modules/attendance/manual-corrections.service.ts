@@ -1,12 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { CorrectionReason, PayrollPeriodStatus, TimeEntryStatus } from "@fieldmaster/shared-types";
-import { toBusinessDate } from "@fieldmaster/shared-validation";
+import { forgottenStampInfractionMonth, rawDurationMinutes, toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { ForgottenStampService } from "./forgotten-stamp.service";
+import { RejectedClockAttemptsService } from "./rejected-clock-attempts.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { CorrectionField, type CreateManualCorrectionDto } from "./dto/manual-correction.dto";
 
@@ -24,6 +25,7 @@ export class ManualCorrectionsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly forgottenStampService: ForgottenStampService,
+    private readonly rejectedAttempts: RejectedClockAttemptsService,
   ) {}
 
   async create(organizationId: string, dto: CreateManualCorrectionDto, actor: AuthenticatedUser, meta: CorrectionRequestMeta) {
@@ -47,6 +49,14 @@ export class ManualCorrectionsService {
         }
         const shift = await tx.shift.findFirst({ where: { id: dto.shiftId, organizationId } });
         if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
+        // The new entry belongs to the caller's organization, so its worker must too.
+        const worker = await tx.workerProfile.findFirst({ where: { id: dto.workerProfileId, organizationId }, select: { id: true } });
+        if (!worker) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
+        // One open entry per worker (a database constraint): answer it as a conflict, not a server error.
+        const openEntry = await tx.timeEntry.findFirst({ where: { workerProfileId: dto.workerProfileId, status: TimeEntryStatus.ACTIVE }, select: { id: true } });
+        if (openEntry) {
+          throw new AppException(409, ErrorCodes.ACTIVE_TIME_ENTRY_EXISTS, "This worker already has an open time entry. Correct its clock-out first.");
+        }
 
         const clockInAt = new Date(dto.newValue);
         await this.assertPeriodNotFinalized(tx, organizationId, toBusinessDate(clockInAt));
@@ -62,6 +72,7 @@ export class ManualCorrectionsService {
             checkInMethod: shift.checkInMethod,
           },
         });
+        await this.rejectedAttempts.linkToNewEntry(tx, timeEntry);
 
         const correction = await tx.manualTimeCorrection.create({
           data: {
@@ -86,7 +97,7 @@ export class ManualCorrectionsService {
             dto.workerProfileId,
             timeEntry.id,
             correction.id,
-            clockInAt,
+            forgottenStampInfractionMonth({ createsTimeEntry: true, clockInAt }),
             actor,
             meta.correlationId,
           );
@@ -126,7 +137,7 @@ export class ManualCorrectionsService {
           if (timeEntry.clockOutAt.getTime() <= newDate.getTime()) {
             throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Clock-in must be before clock-out.");
           }
-          updateData.rawDurationMinutes = Math.round((timeEntry.clockOutAt.getTime() - newDate.getTime()) / 60_000);
+          updateData.rawDurationMinutes = rawDurationMinutes(newDate, timeEntry.clockOutAt);
         }
       } else if (dto.field === CorrectionField.CLOCK_OUT) {
         field = "clockOutAt";
@@ -138,7 +149,7 @@ export class ManualCorrectionsService {
           if (newDate.getTime() <= timeEntry.clockInAt.getTime()) {
             throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Clock-out must be after clock-in.");
           }
-          updateData.rawDurationMinutes = Math.round((newDate.getTime() - timeEntry.clockInAt.getTime()) / 60_000);
+          updateData.rawDurationMinutes = rawDurationMinutes(timeEntry.clockInAt, newDate);
         }
         if (timeEntry.status === TimeEntryStatus.ACTIVE) {
           updateData.status = TimeEntryStatus.PENDING_APPROVAL;
@@ -179,7 +190,7 @@ export class ManualCorrectionsService {
           timeEntry.workerProfileId,
           timeEntry.id,
           correction.id,
-          new Date(),
+          forgottenStampInfractionMonth({ createsTimeEntry: false }),
           actor,
           meta.correlationId,
         );

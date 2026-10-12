@@ -17,6 +17,8 @@ type NavKey =
   | "scheduling"
   | "turanEmergency"
   | "attendanceApproval"
+  | "forgottenStamps"
+  | "emergencies"
   | "payroll"
   | "reports"
   | "notifications"
@@ -31,6 +33,8 @@ const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[]; devOnly?: boolea
   { href: "/shifts", key: "scheduling", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/turan", key: "turanEmergency", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/attendance", key: "attendanceApproval", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
+  { href: "/attendance/forgotten-stamps", key: "forgottenStamps", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
+  { href: "/emergencies", key: "emergencies", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   // Payroll is intentionally Owner-only -- Field Managers must never see it (spec 6.2 / 23.5).
   { href: "/payroll", key: "payroll", roles: [OrgRole.OWNER] },
   { href: "/reports", key: "reports", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
@@ -38,6 +42,12 @@ const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[]; devOnly?: boolea
   { href: "/audit-log", key: "auditLog", roles: [OrgRole.OWNER] },
   { href: "/dev/worker-simulator", key: "workerSimulator", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER], devOnly: true },
 ];
+
+/** The item to highlight: the longest href that is the path or a parent of it (`/attendance/x` is not also `/attendance`'s page when x has its own item). */
+function activeHref(pathname: string | null, hrefs: string[]): string | undefined {
+  if (!pathname) return undefined;
+  return hrefs.filter((href) => pathname === href || pathname.startsWith(`${href}/`)).sort((a, b) => b.length - a.length)[0];
+}
 
 /** Sidebar on the inline-start side (the right, since the app is RTL). */
 export function Nav() {
@@ -49,6 +59,11 @@ export function Nav() {
   // Same signal as the login page: the API answers 404 (-> null) when dev login is off.
   const devMode = useDevLoginUsers().data != null;
   if (!session) return null;
+  const visibleItems = NAV_ITEMS.filter((item) => item.roles.includes(session.role) && (!item.devOnly || devMode));
+  const current = activeHref(
+    pathname,
+    visibleItems.map((item) => item.href),
+  );
 
   return (
     <nav aria-label={t("mainNavigation")} className="flex w-60 shrink-0 flex-col border-e border-slate-200 bg-white px-4 py-6">
@@ -57,8 +72,8 @@ export function Nav() {
         <p className="text-xs text-slate-500">{enumLabel("OrgRole", session.role)}</p>
       </div>
       <ul className="space-y-1">
-        {NAV_ITEMS.filter((item) => item.roles.includes(session.role) && (!item.devOnly || devMode)).map((item) => {
-          const active = pathname?.startsWith(item.href) ?? false;
+        {visibleItems.map((item) => {
+          const active = item.href === current;
           return (
             <li key={item.href}>
               <Link

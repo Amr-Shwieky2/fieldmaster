@@ -1,4 +1,5 @@
 import { FORGOTTEN_STAMP_FREE_INFRACTIONS, FORGOTTEN_STAMP_PENALTY_AGOROT } from "@fieldmaster/shared-types";
+import { toBusinessYearMonth } from "./business-date";
 
 export interface ForgottenStampEvaluation {
   monthlySequenceNumber: number;
@@ -20,4 +21,22 @@ export function evaluateForgottenStampInfraction(monthlySequenceNumber: number):
   const deductionAgorot =
     monthlySequenceNumber > FORGOTTEN_STAMP_FREE_INFRACTIONS ? FORGOTTEN_STAMP_PENALTY_AGOROT : 0;
   return { monthlySequenceNumber, deductionAgorot };
+}
+
+/**
+ * The business month (YYYY-MM, Asia/Jerusalem) a forgotten-stamp infraction
+ * is counted in. A correction that creates the missing time entry (a
+ * forgotten clock-in with no entry at all) counts in the month of the
+ * clock-in it adds; a correction to an existing entry counts in the month the
+ * correction is made.
+ *
+ * The API records infractions with this month, and the admin web uses it to
+ * tell the manager "this is infraction number N this month" before saving.
+ */
+export function forgottenStampInfractionMonth(correction: { createsTimeEntry: boolean; clockInAt?: Date }, now: Date = new Date()): string {
+  if (correction.createsTimeEntry) {
+    if (!correction.clockInAt) throw new Error("clockInAt is required when the correction creates the time entry");
+    return toBusinessYearMonth(correction.clockInAt);
+  }
+  return toBusinessYearMonth(now);
 }

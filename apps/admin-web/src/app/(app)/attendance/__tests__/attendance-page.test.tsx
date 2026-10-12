@@ -1,18 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { ApiRequestError, type ApiError, type TimeEntry, type Worker } from "@fieldmaster/api-client";
+import { ApiRequestError, type ApiError, type AttendanceListItem, type AttendanceListResponse, type Worker } from "@fieldmaster/api-client";
 import { renderWithIntl } from "@/test/render-with-intl";
 import AttendancePage from "../page";
 
 // ── API mock ────────────────────────────────────────────────────────────
+// Step 5: the page reads the paginated `GET /attendance/entries` (pending tab by default) instead of
+// `GET /attendance-approvals/pending`; the workers, projects and sites feed the filters.
 const client = vi.hoisted(() => ({
-  listPendingAttendanceApprovals: vi.fn(),
+  listAttendanceEntries: vi.fn(),
   listWorkers: vi.fn(),
+  listProjects: vi.fn(),
+  listSites: vi.fn(),
   approveTimeEntry: vi.fn(),
   rejectTimeEntry: vi.fn(),
   applyFullDayCredit: vi.fn(),
 }));
-vi.mock("@/lib/auth-context", () => ({ useAuth: () => ({ client }) }));
+vi.mock("@/lib/auth-context", () => ({ useAuth: () => ({ client, session: { role: "FIELD_MANAGER" } }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  usePathname: () => "/attendance",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 function apiError(status: number, code: string, message: string, details: Record<string, unknown> = {}) {
   const body: ApiError = { statusCode: status, code, message, details, correlationId: "corr-1" };
@@ -29,32 +38,40 @@ const WORKERS = [
   { id: "wp-2", fullLegalName: "Samir Haddad", compensation: null },
 ] as unknown as Worker[];
 
-const SHORT_SHIFT = {
+const SHORT_SHIFT: AttendanceListItem = {
   id: "te-1",
-  organizationId: "org-1",
-  workerProfileId: "wp-1",
-  shiftId: "s-1",
   status: "PENDING_APPROVAL",
   businessDate: "2026-10-04",
   clockInAt: "2026-10-04T04:00:00.000Z", // 07:00 in Asia/Jerusalem (IDT)
   clockOutAt: "2026-10-04T12:00:00.000Z", // 15:00
   rawDurationMinutes: 480,
+  unpaidBreakMinutes: 0,
   approvedRegularMinutes: null,
   approvedOvertimeMinutes: null,
   fullDayCredit: false,
-  shift: { title: "Ayalon road works" },
+  isEmergency: false,
+  devRewoundAt: null,
+  checkInMethod: "GEOFENCED",
+  worker: { id: "wp-1", fullLegalName: "Eli Ramzani" },
+  shift: { id: "s-1", title: "Ayalon road works", shiftType: "STANDARD", project: null, site: null },
   dailySummary: { text: "Installed 12 traffic signs", taskCategory: "TRAFFIC_SIGN" },
-} as unknown as TimeEntry;
+  flags: [],
+};
 
-const CREDITED_SHIFT = {
+const CREDITED_SHIFT: AttendanceListItem = {
   ...SHORT_SHIFT,
   id: "te-2",
-  workerProfileId: "wp-2",
   rawDurationMinutes: 300,
   fullDayCredit: true,
-  shift: { title: "Night signal repair" },
+  worker: { id: "wp-2", fullLegalName: "Samir Haddad" },
+  shift: { id: "s-2", title: "Night signal repair", shiftType: "STANDARD", project: null, site: null },
   dailySummary: null,
-} as unknown as TimeEntry;
+};
+
+/** A page of the pending tab. */
+function pendingPage(items: AttendanceListItem[]): AttendanceListResponse {
+  return { items, page: 1, pageSize: 20, total: items.length, tabCounts: { PENDING: items.length, APPROVED: 0, REJECTED: 0, ALL: items.length } };
+}
 
 function renderPage() {
   return renderWithIntl(<AttendancePage />, { queryClient: true });
@@ -68,8 +85,10 @@ function cardOf(workerName: string): HTMLElement {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  client.listPendingAttendanceApprovals.mockResolvedValue([SHORT_SHIFT, CREDITED_SHIFT]);
+  client.listAttendanceEntries.mockResolvedValue(pendingPage([SHORT_SHIFT, CREDITED_SHIFT]));
   client.listWorkers.mockResolvedValue(WORKERS);
+  client.listProjects.mockResolvedValue([]);
+  client.listSites.mockResolvedValue([]);
   client.approveTimeEntry.mockResolvedValue({});
   client.rejectTimeEntry.mockResolvedValue({});
   client.applyFullDayCredit.mockResolvedValue({});
@@ -78,8 +97,10 @@ beforeEach(() => {
 describe("Attendance approval page", () => {
   it("renders the pending shifts with Western digits and no money", async () => {
     renderPage();
-    expect(screen.getByRole("heading", { level: 1, name: "الموافقة على الحضور" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "الحضور" })).toBeTruthy();
     await screen.findByText("Eli Ramzani");
+    // The pending tab is the default.
+    expect(client.listAttendanceEntries).toHaveBeenCalledWith(expect.objectContaining({ tab: "PENDING", page: 1, pageSize: 20 }));
 
     expect(screen.getByText("ورديتان بانتظار الموافقة")).toBeTruthy();
     const card = within(cardOf("Eli Ramzani"));
@@ -105,7 +126,7 @@ describe("Attendance approval page", () => {
   });
 
   it("marks an entry whose clock-in was moved by the test-mode rewind", async () => {
-    client.listPendingAttendanceApprovals.mockResolvedValue([{ ...SHORT_SHIFT, devRewoundAt: "2026-10-04T12:00:00.000Z" }, CREDITED_SHIFT]);
+    client.listAttendanceEntries.mockResolvedValue(pendingPage([{ ...SHORT_SHIFT, devRewoundAt: "2026-10-04T12:00:00.000Z", flags: ["DEV_REWOUND"] }, CREDITED_SHIFT]));
     renderPage();
     await screen.findByText("Eli Ramzani");
     expect(within(cardOf("Eli Ramzani")).getByText("تعديل تجريبي")).toBeTruthy();
@@ -113,25 +134,25 @@ describe("Attendance approval page", () => {
   });
 
   it("shows the page-specific empty state", async () => {
-    client.listPendingAttendanceApprovals.mockResolvedValue([]);
+    client.listAttendanceEntries.mockResolvedValue(pendingPage([]));
     renderPage();
     expect(await screen.findByText("لا توجد ورديات بانتظار الموافقة")).toBeTruthy();
     expect(screen.getByText("تمت مراجعة كل الورديات المسجّلة.")).toBeTruthy();
   });
 
   it("shows a translated error with a working retry", async () => {
-    client.listPendingAttendanceApprovals.mockRejectedValueOnce(apiError(500, "INTERNAL_ERROR", "Internal server error"));
+    client.listAttendanceEntries.mockRejectedValueOnce(apiError(500, "INTERNAL_ERROR", "Internal server error"));
     renderPage();
     expect(await screen.findByText("حدث خطأ في الخادم. يُرجى المحاولة لاحقًا.")).toBeTruthy();
     expect(screen.queryByText("Internal server error")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "إعادة المحاولة" }));
     expect(await screen.findByText("Eli Ramzani")).toBeTruthy();
-    expect(client.listPendingAttendanceApprovals).toHaveBeenCalledTimes(2);
+    expect(client.listAttendanceEntries).toHaveBeenCalledTimes(2);
   });
 
   it("shows access denied when the API answers 403", async () => {
-    client.listPendingAttendanceApprovals.mockRejectedValue(apiError(403, "FORBIDDEN", "Forbidden"));
+    client.listAttendanceEntries.mockRejectedValue(apiError(403, "FORBIDDEN", "Forbidden"));
     renderPage();
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();
     expect(screen.queryByText("Eli Ramzani")).toBeNull();

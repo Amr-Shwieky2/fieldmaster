@@ -196,6 +196,37 @@ export const OfflineSyncEventStatus = {
 } as const;
 export type OfflineSyncEventStatus = (typeof OfflineSyncEventStatus)[keyof typeof OfflineSyncEventStatus];
 
+/**
+ * Tabs of the admin attendance list (`GET /attendance/entries?tab=`). PENDING
+ * holds everything still waiting for a manager: PENDING_APPROVAL and
+ * CORRECTION_REQUESTED entries.
+ */
+export const AttendanceListTab = {
+  PENDING: "PENDING",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+  ALL: "ALL",
+} as const;
+export type AttendanceListTab = (typeof AttendanceListTab)[keyof typeof AttendanceListTab];
+
+/** Flags of a time entry in the admin attendance list; also its filters (`flags=`). */
+export const AttendanceFlag = {
+  /** The worker was refused at least once for being outside the geofence (or temporary point) of this shift. */
+  OUTSIDE_GEOFENCE_ATTEMPT: "OUTSIDE_GEOFENCE_ATTEMPT",
+  /** A mock location was suspected (and refused), or a clock event was flagged for review. */
+  SUSPICIOUS_LOCATION: "SUSPICIOUS_LOCATION",
+  /** A clock event was captured offline and synced later. */
+  OFFLINE: "OFFLINE",
+  /** A Flexi-Check shift (not an emergency call-out). */
+  FLEXI_CHECK: "FLEXI_CHECK",
+  /** The clock-in was validated at a temporary check-in point. */
+  TEMPORARY_POINT: "TEMPORARY_POINT",
+  EMERGENCY: "EMERGENCY",
+  /** The clock-in was moved by the test-mode rewind (dev login only). */
+  DEV_REWOUND: "DEV_REWOUND",
+} as const;
+export type AttendanceFlag = (typeof AttendanceFlag)[keyof typeof AttendanceFlag];
+
 /** Every business table's timezone anchor for monthly/daily grouping. */
 export const BUSINESS_TIMEZONE = "Asia/Jerusalem";
 
