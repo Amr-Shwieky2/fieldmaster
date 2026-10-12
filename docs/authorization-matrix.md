@@ -33,8 +33,16 @@ between a Field Manager and a compensation figure.
 | `VIEW_FINANCIAL_DASHBOARD` **(financial)** | ✅ | | |
 | `CLOCK_IN_OUT` | ✅ | ✅ | ✅ |
 | `VIEW_OWN_ATTENDANCE` | ✅ | ✅ | ✅ |
+| `VIEW_OPERATIONS` (Step 6) | ✅ | ✅ | |
+| `VIEW_ORG_SETTINGS` (Step 6) | ✅ | ✅ | |
+| `MANAGE_ORG_SETTINGS` (Step 6) | ✅ | | |
 
 Owner holds every permission (`OWNER_PERMISSIONS = Object.values(Permission)`).
+
+Since Step 6 the guard takes the role and the time-tracking flag from the
+membership on every request, not from the token. A role change on the users
+page applies to the very next request; turning time tracking off removes the
+worker profile from the request context (no clock-in).
 A Field Manager or Worker who is also time-trackable (`isTimeTrackable`)
 gets `CLOCK_IN_OUT`/`VIEW_OWN_ATTENDANCE` through their role's own set —
 there's no separate "time-trackable" permission layer, since role already
@@ -62,12 +70,68 @@ organization is a 404, never someone else's data (`attendance-screens.e2e-spec.t
 ## Temporary Supervisor
 
 Not a role — a time-boxed capability. `TemporarySupervisorAssignment` has
-`activatedAt`/`expiresAt`/`revokedAt`; whether someone currently holds it is
-checked live against those columns at the point of action (opening a
-temporary check-in point), not baked into a JWT claim. A Temporary
-Supervisor's underlying `OrgRole` is still `WORKER`, so outside their
-assignment window they have exactly a Worker's permissions — no elevated
-access lingers.
+`activatedAt` / `expiresAt` / `revokedAt` and (Step 6)
+`canOpenCheckInPoints`.
+
+**Live check.** On every call, the assignment must be the caller's and
+ACTIVE right now: not revoked, inside its window, and its shift neither
+closed nor cancelled. Nothing is baked into a JWT claim. A Temporary
+Supervisor's underlying `OrgRole` is still `WORKER`, so outside the window
+they have exactly a Worker's permissions; no elevated access lingers.
+
+**Assigning:**
+- `POST /shifts/:id/temporary-supervisors` (Owner / Field Manager,
+  `MANAGE_TEMP_SUPERVISORS`).
+- Only an active, time-trackable worker assigned to that shift.
+- No overlapping assignment for the same worker and shift.
+- The shift must be open.
+
+**Revoking:** `DELETE /shifts/temporary-supervisors/:assignmentId`.
+
+**Routes:**
+
+| Route | Who | Not allowed |
+|---|---|---|
+| `GET /temporary-supervisors/me` | the caller's ACTIVE assignments | (empty list) |
+| `GET /temporary-supervisors/:assignmentId/shift` | the supervisor, while ACTIVE | another member's assignment: 404; own but inactive: 403 `TEMPORARY_SUPERVISOR_INACTIVE` |
+| `POST /temporary-supervisors/:assignmentId/report-issue` | the supervisor, while ACTIVE | same |
+| `POST /shifts/temporary-check-in-points` (open) | managers; the shift's ACTIVE supervisor with `canOpenCheckInPoints` | 403 `FORBIDDEN` / `TEMPORARY_SUPERVISOR_CANNOT_OPEN_POINTS` |
+| `DELETE /shifts/temporary-check-in-points/:pointId` (close) | same as opening | same |
+
+**What the supervised-shift view contains:**
+- the shift's own data (title, times, site, project name);
+- its workers' operational attendance only: presence, times, location
+  outcome, flags.
+
+It has no money, no phone numbers, and nothing about other shifts or
+projects. The financial leak scanner signs in as a Temporary Supervisor as
+its third role.
+
+## Live operations, settings, users (Step 6)
+
+| Route | Permission | Owner | Field Manager | Worker |
+|---|---|---|---|---|
+| `GET /operations/live` | `VIEW_OPERATIONS` | ✅ (no money) | ✅ (no money) | 403 |
+| `GET /organizations/me/settings` | `VIEW_ORG_SETTINGS` | ✅ with the penalty amount | ✅ read-only, no money key | 403 |
+| `PATCH /organizations/me/settings/workday`, `/onboarding`, `/notifications` | `MANAGE_ORG_SETTINGS` | ✅ (audited) | 403 | 403 |
+| `GET /memberships`, `GET /memberships/:id/devices` | `MANAGE_ORG_USERS` | ✅ | 403 | 403 |
+| `PATCH /memberships/:id/role`, `PATCH /memberships/:id/time-tracking`, `POST /memberships/:id/suspend` / `reactivate` / `archive` | `MANAGE_ORG_USERS` | ✅ (reason required, audited) | 403 | 403 |
+| `POST /memberships/:id/sessions/:sessionId/revoke`, `POST /memberships/:id/devices/:deviceId/revoke-key` | `MANAGE_ORG_USERS` | ✅ (reason required, audited) | 403 | 403 |
+
+- **Owners:** an organization keeps at least one active Owner. Demoting,
+  suspending or archiving the last one is 409 `LAST_ACTIVE_OWNER`. The
+  existing maximum of two active Owners also applies to role changes and
+  reactivation (`MAX_OWNERS_REACHED` plus the database trigger).
+- **Suspending or archiving a member** ends their sessions at once:
+  - refresh-token families revoked;
+  - REST calls refused by the guard's live status check;
+  - WebSocket and SSE connections closed.
+- **Ending a session** refuses its access token at once too: tokens carry
+  the session id (`sid`), and the guard checks it.
+- **Organization scoping:** every route answers 404 for another
+  organization's member. The older `POST /devices/:userId/:deviceId/revoke-key`
+  now checks that the user is a member of the caller's organization too
+  (before, it did not).
 
 ## Defense in depth for financial data (spec section 6.2 / 23.5)
 

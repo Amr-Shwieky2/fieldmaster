@@ -17,6 +17,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { LoadingState, ErrorState } from "@/components/ui/states";
+import { TemporarySupervisorsCard } from "@/components/shifts/temporary-supervisors-card";
 
 function BackToShifts() {
   const t = useTranslations("shifts");
@@ -66,6 +67,7 @@ export default function ShiftDetailPage() {
   const assignedIds = new Set(assignments.map((a) => a.workerProfileId));
   const unassignedWorkers = (workersQuery.data ?? []).filter((w) => !assignedIds.has(w.id) && w.accountStatus === "ACTIVE");
   const canAssign = !!selectedWorkerId && !assignWorker.isPending;
+  const workerNames = new Map((workersQuery.data ?? []).map((worker) => [worker.id, worker.fullLegalName]));
 
   function submitAssignment(event: FormEvent) {
     event.preventDefault();
@@ -166,6 +168,8 @@ export default function ShiftDetailPage() {
           </form>
         </CardContent>
       </Card>
+
+      <TemporarySupervisorsCard shift={shift} workerNames={workerNames} />
     </div>
   );
 }

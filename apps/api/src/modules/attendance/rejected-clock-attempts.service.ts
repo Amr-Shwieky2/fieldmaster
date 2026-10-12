@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import type { ClockEventType, EventOrigin } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { generateId } from "../../common/ids";
+import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 
 export interface RejectedClockAttemptInput {
   organizationId: string;
@@ -37,7 +38,10 @@ export interface RejectedClockAttemptInput {
 export class RejectedClockAttemptsService {
   private readonly logger = new Logger(RejectedClockAttemptsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeEventsService,
+  ) {}
 
   /**
    * Stores the attempt. Never throws: the worker's request is already being
@@ -67,6 +71,8 @@ export class RejectedClockAttemptsService {
           temporaryCheckInPointId: input.temporaryCheckInPointId ?? null,
         },
       });
+      // The live operations page lists recent rejected attempts.
+      this.realtime.operationsChanged(input.organizationId, OperationsChangeKind.REJECTED_ATTEMPT);
     } catch (error) {
       this.logger.warn(`Could not store a rejected ${input.eventType} attempt (${input.code}): ${error instanceof Error ? error.message : String(error)}`);
     }

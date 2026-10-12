@@ -173,6 +173,7 @@ enum NotificationType {
   OFFLINE_EVENT_SYNCED
   OFFLINE_EVENT_REJECTED
   SUSPICIOUS_LOCATION_DETECTED
+  TEMPORARY_SUPERVISOR_ISSUE_REPORTED
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -220,6 +221,18 @@ model OrganizationSettings {
   onboardingInvitationTtlHours Int     @default(72) @map("onboarding_invitation_ttl_hours")
   defaultLanguage              String  @default("en") @map("default_language")
 
+  /// Step 6: defaults the API used to hard-code. A shift, site, geofence or
+  /// temporary point keeps the value it was created with.
+  defaultGraceMinutes             Int  @default(10) @map("default_grace_minutes")
+  defaultGeofenceRadiusMeters     Int  @default(100) @map("default_geofence_radius_meters")
+  defaultMinGpsAccuracyMeters     Int  @default(50) @map("default_min_gps_accuracy_meters")
+  temporaryPointRadiusMeters      Int  @default(100) @map("temporary_point_radius_meters")
+  temporaryPointMinAccuracyMeters Int  @default(75) @map("temporary_point_min_accuracy_meters")
+  /// Which manager-facing notification events reach Owners / Field Managers:
+  /// { [NotificationType]: { owners?: boolean, fieldManagers?: boolean } }.
+  /// A missing entry means the default (who received it before Step 6).
+  notificationPreferences         Json @default("{}") @map("notification_preferences")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -258,9 +271,10 @@ model OrganizationMembership {
   updatedAt       DateTime      @updatedAt @map("updated_at")
   archivedAt      DateTime?     @map("archived_at")
 
-  organization  Organization   @relation(fields: [organizationId], references: [id])
-  user          User           @relation(fields: [userId], references: [id])
-  workerProfile WorkerProfile?
+  organization         Organization         @relation(fields: [organizationId], references: [id])
+  user                 User                 @relation(fields: [userId], references: [id])
+  workerProfile        WorkerProfile?
+  refreshTokenFamilies RefreshTokenFamily[]
 
   @@unique([organizationId, userId])
   @@index([organizationId, role, status])
@@ -421,13 +435,21 @@ model RefreshTokenFamily {
   currentTokenHash String    @map("current_token_hash")
   revokedAt        DateTime? @map("revoked_at")
   revokedReason    String?   @map("revoked_reason")
+
+  /// Step 6: the membership the session belongs to (null only for sessions
+  /// of multi-organization users started before Step 6). Refresh keeps it.
+  membershipId String?                 @map("membership_id") @db.Uuid
+  membership   OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  /// Last sign-in or refresh: the member's "last active" time.
+  lastUsedAt   DateTime                @default(now()) @map("last_used_at")
   /// How the session started: OTP | DEV_LOGIN | DEV_FIXED_OTP (see src/common/auth/login-method.ts).
-  origin           String    @default("OTP")
+  origin       String                  @default("OTP")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([userId])
+  @@index([membershipId])
   @@map("refresh_token_families")
 }
 
@@ -670,6 +692,10 @@ model TemporarySupervisorAssignment {
   revokedBy   String?   @map("revoked_by") @db.Uuid
   assignedBy  String    @map("assigned_by") @db.Uuid
 
+  /// May open (and close) temporary check-in points for the shift. Rows from
+  /// before Step 6 keep the old behavior (true).
+  canOpenCheckInPoints Boolean @default(true) @map("can_open_check_in_points")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([shiftId])
@@ -811,6 +837,10 @@ model TimeEntry {
   /// Set when the test-mode rewind (POST /dev/time-entries/:id/rewind, dev
   /// login only) moved clockInAt back; admin pages show a "test edit" badge.
   devRewoundAt DateTime? @map("dev_rewound_at")
+
+  /// Step 6: when the "open for more than 9 hours" alert was sent (the job
+  /// sends it once per entry).
+  longOpenNotifiedAt DateTime? @map("long_open_notified_at")
 
   approvedBy     String?   @map("approved_by") @db.Uuid
   approvedAt     DateTime? @map("approved_at")

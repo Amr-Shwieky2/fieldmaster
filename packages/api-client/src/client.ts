@@ -32,7 +32,16 @@ import type {
   Worker,
   WorkerMonthEarnings,
   WorkerSimulatorContext,
+  Member,
+  MemberDevice,
+  MyTemporarySupervision,
+  OperationsSnapshot,
+  OrganizationSettingsView,
+  SupervisedShift,
+  TemporarySupervisorListItem,
+  WorkdaySettings,
 } from "./types";
+import type { NotificationType, OrgRole } from "@fieldmaster/shared-types";
 
 /** `?a=1&b=x,y` from the defined values (arrays joined with commas); "" when there are none. */
 function queryString(params: Record<string, string | number | string[] | undefined>): string {
@@ -202,8 +211,15 @@ export class FieldMasterClient {
   assignWorkerToShift(shiftId: string, workerProfileId: string) {
     return this.request("POST", `/shifts/${shiftId}/assignments`, { workerProfileId });
   }
-  assignTemporarySupervisor(shiftId: string, input: { workerProfileId: string; activatedAt?: string; expiresAt?: string }) {
+  assignTemporarySupervisor(shiftId: string, input: { workerProfileId: string; activatedAt?: string; expiresAt?: string; canOpenCheckInPoints?: boolean }) {
     return this.request<TemporarySupervisorAssignment>("POST", `/shifts/${shiftId}/temporary-supervisors`, input);
+  }
+  /** A shift's temporary-supervisor assignments with their state now (Owners and Field Managers). */
+  listShiftTemporarySupervisors(shiftId: string) {
+    return this.request<TemporarySupervisorListItem[]>("GET", `/shifts/${shiftId}/temporary-supervisors`);
+  }
+  revokeTemporarySupervisor(assignmentId: string) {
+    return this.request<TemporarySupervisorAssignment>("DELETE", `/shifts/temporary-supervisors/${assignmentId}`);
   }
   /** Allowed for Owners, Field Managers and the shift's active Temporary Supervisor. */
   createTemporaryCheckInPoint(input: { shiftId: string; name: string; latitude: number; longitude: number; radiusMeters?: number }) {
@@ -211,6 +227,79 @@ export class FieldMasterClient {
   }
   listTemporaryCheckInPoints(shiftId: string) {
     return this.request<TemporaryCheckInPoint[]>("GET", `/shifts/${shiftId}/temporary-check-in-points`);
+  }
+  /** Closes a temporary check-in point: managers, or the shift's active Temporary Supervisor allowed to manage points. */
+  closeTemporaryCheckInPoint(pointId: string) {
+    return this.request<TemporaryCheckInPoint>("DELETE", `/shifts/temporary-check-in-points/${pointId}`);
+  }
+
+  // ── Temporary supervisor (the supervisor's own session) ─────────────
+  myTemporarySupervisions() {
+    return this.request<MyTemporarySupervision[]>("GET", "/temporary-supervisors/me");
+  }
+  getSupervisedShift(assignmentId: string) {
+    return this.request<SupervisedShift>("GET", `/temporary-supervisors/${assignmentId}/shift`);
+  }
+  reportSupervisorIssue(assignmentId: string, text: string) {
+    return this.request<{ reportedAt: string; notifiedCount: number }>("POST", `/temporary-supervisors/${assignmentId}/report-issue`, { text });
+  }
+
+  // ── Live operations (no money) ──────────────────────────────────────
+  getOperationsLive() {
+    return this.request<OperationsSnapshot>("GET", "/operations/live");
+  }
+  /**
+   * URL of the notifications SSE stream for `EventSource`, which cannot send
+   * an Authorization header: the access token travels as a query parameter.
+   * Owners and Field Managers also get named `operations` events on it.
+   */
+  notificationsStreamUrl(accessToken: string) {
+    return `${this.options.baseUrl}/notifications/stream?token=${encodeURIComponent(accessToken)}`;
+  }
+
+  // ── Organization settings ───────────────────────────────────────────
+  getOrganizationSettings() {
+    return this.request<OrganizationSettingsView>("GET", "/organizations/me/settings");
+  }
+  updateWorkdaySettings(input: Partial<WorkdaySettings>) {
+    return this.request<OrganizationSettingsView>("PATCH", "/organizations/me/settings/workday", input);
+  }
+  updateOnboardingSettings(input: { invitationTtlHours: number }) {
+    return this.request<OrganizationSettingsView>("PATCH", "/organizations/me/settings/onboarding", input);
+  }
+  updateNotificationSettings(preferences: { type: NotificationType; owners?: boolean; fieldManagers?: boolean }[]) {
+    return this.request<OrganizationSettingsView>("PATCH", "/organizations/me/settings/notifications", { preferences });
+  }
+
+  // ── Users, roles and devices (Owners) ───────────────────────────────
+  listMembers() {
+    return this.request<Member[]>("GET", "/memberships");
+  }
+  changeMemberRole(membershipId: string, role: OrgRole, reason: string) {
+    return this.request<Member>("PATCH", `/memberships/${membershipId}/role`, { role, reason });
+  }
+  suspendMember(membershipId: string, reason: string) {
+    return this.request<Member>("POST", `/memberships/${membershipId}/suspend`, { reason });
+  }
+  reactivateMember(membershipId: string, reason: string) {
+    return this.request<Member>("POST", `/memberships/${membershipId}/reactivate`, { reason });
+  }
+  archiveMember(membershipId: string, reason: string) {
+    return this.request<Member>("POST", `/memberships/${membershipId}/archive`, { reason });
+  }
+  setMemberTimeTracking(membershipId: string, isTimeTrackable: boolean, reason: string) {
+    return this.request<Member>("PATCH", `/memberships/${membershipId}/time-tracking`, { isTimeTrackable, reason });
+  }
+  listMemberDevices(membershipId: string) {
+    return this.request<MemberDevice[]>("GET", `/memberships/${membershipId}/devices`);
+  }
+  /** "إنهاء الجلسة": the session ends at once (its access token is refused too). */
+  revokeMemberSession(membershipId: string, sessionId: string, reason: string) {
+    return this.request<{ id: string; revokedAt: string }>("POST", `/memberships/${membershipId}/sessions/${sessionId}/revoke`, { reason });
+  }
+  /** "إلغاء مفتاح الجهاز": offline events signed by that device are refused from now on. */
+  revokeMemberDeviceKey(membershipId: string, deviceId: string, reason: string) {
+    return this.request<{ id: string; revokedAt: string }>("POST", `/memberships/${membershipId}/devices/${deviceId}/revoke-key`, { reason });
   }
 
   // ── Attendance ──────────────────────────────────────────────────────

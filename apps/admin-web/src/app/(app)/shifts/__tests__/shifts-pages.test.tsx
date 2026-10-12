@@ -69,6 +69,8 @@ function setup() {
     getShift: vi.fn().mockResolvedValue(SHIFT),
     listWorkers: vi.fn().mockResolvedValue(WORKERS),
     assignWorkerToShift: vi.fn().mockResolvedValue({}),
+    // Step 6: the detail page also lists the shift's temporary supervisors.
+    listShiftTemporarySupervisors: vi.fn().mockResolvedValue([]),
     listProjects: vi.fn().mockResolvedValue(PROJECTS),
     listSites: vi.fn().mockResolvedValue([SITE_WITH_GEOFENCE, SITE_WITHOUT_GEOFENCE]),
     createShift: vi.fn().mockResolvedValue({ id: "sh9" }),
@@ -166,7 +168,8 @@ describe("Shift detail", () => {
     expect(screen.getByText("نطاق الموقع")).toBeTruthy();
     expect(screen.getByText("North interchange")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "العمال المكلّفون (1)" })).toBeTruthy();
-    expect(await screen.findByText("Eli Ramzani")).toBeTruthy();
+    // The assigned-workers list item (the name is also an option of the temporary-supervisor form since Step 6).
+    expect(await screen.findByText("Eli Ramzani", { selector: "li" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "كل الورديات" }).getAttribute("href")).toBe("/shifts");
     await waitFor(() => expect((screen.getByLabelText("تكليف عامل") as HTMLSelectElement).disabled).toBe(false));
     // No English UI text leaks: only API data (title, site and worker names) is in Latin letters.

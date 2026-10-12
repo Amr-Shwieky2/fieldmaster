@@ -1020,3 +1020,169 @@ rules as the rest of the app), and says so in its label.
     change);
   - it writes old → new to the audit log;
   - it answers 409 in a finalized period.
+
+## Step 6: temporary supervisors, live operations, settings, users and devices
+
+No business rule changed. The 9-hour day, the two free forgotten stamps, the
+10 ₪ penalty and the -60 / +15 emergency minutes stay fixed in code, and the
+settings page shows them read-only.
+
+### Temporary supervisor: a capability checked live on every call
+
+- **Live check.** The supervisor endpoints, and opening or closing a
+  temporary point, all load the assignment and require it to be ACTIVE right
+  now (`temporarySupervisorState`):
+  - not revoked;
+  - `activatedAt` ≤ now < `expiresAt`;
+  - the shift neither CLOSED nor CANCELLED.
+
+  Nothing is cached in the token, so revoking, the window ending, or closing
+  the shift ends access on the next request. Closing a shift still expires
+  its points eagerly, as before.
+- **404 vs 403.** Another member's assignment (or an unknown id) is a 404,
+  so ids are not confirmed to strangers. The caller's own assignment that is
+  not active is a 403 `TEMPORARY_SUPERVISOR_INACTIVE`, so the app can say why.
+- **`canOpenCheckInPoints`** (new column). Existing assignments are migrated
+  to `true` (today's behavior), and it is also the API default. A supervisor
+  without it gets 403 `TEMPORARY_SUPERVISOR_CANNOT_OPEN_POINTS`. Closing a
+  point follows the same rule as opening one (before, only managers could
+  close).
+- **Assigning** now checks what the spec states:
+  - an active, time-trackable worker assigned to that shift;
+  - an open shift;
+  - no overlapping assignment for the same worker and shift;
+  - an end after the start and in the future.
+- **The supervised-shift view** is operational only: presence, clock times,
+  location outcome, flags, and the shift's active points. Phone numbers are
+  left out (the spec allows at most what a Field Manager sees), and so is
+  every other shift and project. The leak scanner scans it as a third role.
+- **Issue reports** notify the shift's manager and the Owners. They follow
+  the notification settings like the other manager-facing events (new
+  notification type `TEMPORARY_SUPERVISOR_ISSUE_REPORTED`), and are audited
+  with the text as the audit note.
+
+### Live operations: a snapshot plus events on the existing SSE stream
+
+- **Snapshot.** `GET /operations/live` returns everything the page shows. No
+  money for anyone, Owners included.
+- **Position.** It is the last accepted clock event of each open entry
+  (clock-in or clock-out). There is no continuous tracking, as the spec
+  requires.
+- **Real-time events, on the existing channels.**
+  - Clock-in/out, refused attempts, temporary points, supervisors,
+    emergencies, offline syncs that need review, shift close, approvals,
+    corrections and the 9-hour alert all emit an in-process
+    `operations.changed` event (`RealtimeEventsService`).
+  - The existing socket.io gateway forwards it to an `ops:<organization>`
+    room. The existing SSE stream (`GET /notifications/stream`) forwards it
+    as a named `operations` event.
+  - Only Owners and Field Managers get them, decided from the current role
+    in the database. The payload is `{ kind, at }`, with no data.
+- **Client.** The admin web had no real-time client at all. The page uses
+  the browser's built-in `EventSource` on the SSE stream, so there is no new
+  dependency.
+  - Each event refetches the snapshot, debounced 500 ms.
+  - The stream sends a `ping` every 25 s. After 60 s of silence, or an
+    error, the page marks itself "غير متصل" and reconnects with backoff.
+    After reconnecting it refetches once.
+  - "Late" and "open over 9 hours" change with time alone, so the snapshot
+    is also refreshed once a minute. Events stay the main mechanism.
+- **9-hour alert.** A repeatable BullMQ job (every minute) reports each
+  ACTIVE entry open ≥ 540 minutes:
+  - to the shift's manager and the Owners, following the notification
+    settings;
+  - using the existing (previously unused) `OVERTIME_THRESHOLD_CROSSED`
+    type, which the admin web already rendered in Arabic;
+  - once per entry: `time_entries.long_open_notified_at` is claimed with a
+    conditional update, so concurrent or repeated sweeps never send twice.
+
+### Settings read from the database
+
+`OrganizationSettingsService.get()` reads the row on every use and creates
+it, with the column defaults, the first time. The defaults are the values
+that used to be hard-coded, so nothing changes until an Owner edits them.
+
+| Setting | Before | Read by |
+|---|---|---|
+| Device-time deviation (s) | `DEVICE_TIME_DEVIATION_SECONDS` env, 120 | clock-in/out, online and offline |
+| Shift grace minutes | `?? 10` | new shifts (and so the operations page's "late") |
+| Site geofence radius (m) | `?? 100` | new sites |
+| Geofence GPS accuracy (m) | `?? 50` | new geofences |
+| Temporary point radius (m) | `?? 100` | new temporary points |
+| Temporary point GPS accuracy (m) | constant 75 | clock-in at a temporary point |
+| Invitation validity (h) | already a setting (72) | new invitations |
+| Notification audiences | who each call site notified | manager-facing notifications |
+
+- **Not in the spec's list, added anyway.** The two temporary-point values:
+  the spec requires every setting the API reads to come from the database.
+- **`autoDeductUnpaidBreaks`** was already stored but is read by no rule. It
+  stays editable as an existing setting, and the page says it is not applied
+  yet. Applying it would be a new business rule.
+- **The environment variable is gone** (`.env.example`, CI, Turbo, e2e
+  setup).
+- **Sections and audit.** Each section is saved on its own (`PATCH
+  …/workday`, `…/onboarding`, `…/notifications`). Every changed field gets
+  one `ORGANIZATION_SETTING_CHANGED` audit row (field, old → new). The old
+  unaudited `PATCH /organizations/me/settings` was removed; nothing used it.
+- **Field Manager copy.** Field Managers read the settings
+  (`VIEW_ORG_SETTINGS`), but their copy leaves out the penalty amount (money).
+- **Validation.** A field left out keeps its value. A `null` value, or the
+  same notification event twice in one request, is a 400 (never a database
+  error or an ambiguous audit row). One older, app-wide behavior remains: the
+  global `ValidationPipe` converts types implicitly, so a string such as
+  `"no"` sent for a boolean becomes `true`. The admin web always sends real
+  booleans.
+- **Notification audiences** are stored per event as `{ owners,
+  fieldManagers }`. A missing entry means the default, which is exactly who
+  got it before:
+  - clock-in/out, 9 hours, issue reports: shift manager + Owners;
+  - emergencies: all Owners + all Field Managers;
+  - onboarding and offline review: Owners only.
+
+  A shift manager who is an Owner follows the Owners' switch. Field Managers
+  never receive money in any case.
+
+### Sessions belong to a membership; role, status and session are checked live
+
+- **`refresh_token_families.membership_id`** (new). Refresh keeps the
+  session in its own membership. Before, refresh picked "any active
+  membership" of the user, so a multi-organization user could silently
+  switch organizations.
+  - The migration backfills it for users with a single membership.
+  - Older sessions of multi-organization users fall back to the old
+    behavior once, then keep that membership.
+- **"End session" and "last active".** The column scopes the users page's
+  sessions to this organization. `last_used_at` (sign-in or refresh) is the
+  member's "last active".
+- **Access tokens carry `sid`** (the session). The guard, the WebSocket
+  gateway and the SSE stream refuse a revoked session. So "إنهاء الجلسة" and
+  suspension end access at once, not when the 15-minute access token
+  expires.
+- **The guard reads role and time tracking from the membership**, not the
+  token: a role change applies to the next request. With time tracking off
+  the request has no worker profile (no clock-in); the profile itself is
+  kept for history.
+- **Suspend / archive** revokes the membership's sessions in the same
+  transaction and closes its WebSocket and SSE connections
+  (`sessions.ended` event). A role change also closes them, so they
+  reconnect with the new role (e.g. leaving the operations room).
+- **Device key.** `POST /devices/:userId/:deviceId/revoke-key` did not check
+  that the user belongs to the caller's organization; it does now (404). The
+  users page uses a membership-scoped route on top of it. Offline events
+  signed by a revoked key were already refused.
+
+### Two older gaps the Step 6 tests found, fixed
+
+- **Point lists.** `GET /shifts/:id/temporary-check-in-points` had no
+  permission or scope check: any Worker could list any shift's temporary
+  points, and an unknown shift returned `[]`. That contradicts "a supervisor
+  cannot read another shift". It now has the visibility of `GET /shifts/:id`:
+  a Worker only for a shift they are assigned to, everyone else 404. No
+  screen used the route (the apps get the points from the shift itself).
+- **Closing a shift.** `POST /shifts/:id/close` closed a shift that was
+  already closed (overwriting `closedAt`/`closedBy` and auditing twice) or
+  cancelled (turning it into CLOSED). Both are now 409 `SHIFT_NOT_OPEN`, and
+  nothing changes.
+- **Malformed shift ids.** They reached Prisma on `GET /shifts/:id`,
+  assigning a worker and closing, which made a `@db.Uuid` column throw a 500.
+  They are now checked first and answer 404, like the Step 5 routes.

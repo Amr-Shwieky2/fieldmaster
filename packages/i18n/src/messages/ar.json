@@ -165,7 +165,15 @@
     "ERROR": "حدث خطأ غير متوقع. يُرجى المحاولة مرة أخرى.",
     "GEOFENCE_OUTSIDE_ALLOWED_RADIUS_NO_DETAILS": "موقعك الحالي خارج نطاق الموقع المسموح به.",
     "GPS_ACCURACY_TOO_LOW_NO_DETAILS": "دقة تحديد الموقع (GPS) ضعيفة. انتقل إلى مكان مكشوف وحاول مرة أخرى.",
-    "DEVICE_TIME_DEVIATION_EXCEEDED_NO_DETAILS": "ساعة الجهاز لا تطابق الوقت الصحيح. اضبط التاريخ والوقت على الوضع التلقائي في إعدادات الجهاز."
+    "DEVICE_TIME_DEVIATION_EXCEEDED_NO_DETAILS": "ساعة الجهاز لا تطابق الوقت الصحيح. اضبط التاريخ والوقت على الوضع التلقائي في إعدادات الجهاز.",
+    "TEMPORARY_SUPERVISOR_INACTIVE": "صلاحية المشرف المؤقت غير نشطة الآن: لم تبدأ بعد، أو انتهت، أو أُلغيت، أو أُغلقت الوردية.",
+    "TEMPORARY_SUPERVISOR_CANNOT_OPEN_POINTS": "لا يملك هذا المشرف المؤقت صلاحية فتح نقاط التسجيل المؤقتة أو إغلاقها.",
+    "TEMPORARY_SUPERVISOR_NOT_ON_SHIFT": "يجب أن يكون المشرف المؤقت عاملًا مكلّفًا بهذه الوردية ويسجّل حضوره.",
+    "TEMPORARY_SUPERVISOR_ALREADY_ASSIGNED": "هذا العامل مشرف مؤقت لهذه الوردية في الفترة نفسها بالفعل.",
+    "SHIFT_NOT_OPEN": "هذه الوردية مغلقة أو ملغاة، فلا يمكن تنفيذ هذا الإجراء عليها.",
+    "LAST_ACTIVE_OWNER": "لا يمكن تنفيذ ذلك لأنه سيترك المؤسسة دون مالك نشط.",
+    "ROLE_REQUIRES_TIME_TRACKING": "العامل يسجّل حضوره دائمًا: فعّل تسجيل الحضور لهذا العضو أولًا، أو اختر دورًا آخر.",
+    "MEMBERSHIP_ARCHIVED": "هذا العضو مؤرشف ولا يمكن تعديله."
   },
   "enums": {
     "OrgRole": {
@@ -307,7 +315,8 @@
       "PAYROLL_FINALIZED": "تم إقفال فترة الرواتب",
       "OFFLINE_EVENT_SYNCED": "تمت مزامنة حضور دون اتصال",
       "OFFLINE_EVENT_REJECTED": "تم رفض حضور مسجّل دون اتصال",
-      "SUSPICIOUS_LOCATION_DETECTED": "تم رصد موقع مشبوه"
+      "SUSPICIOUS_LOCATION_DETECTED": "تم رصد موقع مشبوه",
+      "TEMPORARY_SUPERVISOR_ISSUE_REPORTED": "بلاغ من مشرف مؤقت"
     },
     "OfflineSyncEventStatus": {
       "PENDING": "قيد الانتظار",
@@ -330,6 +339,17 @@
       "TEMPORARY_POINT": "نقطة تسجيل مؤقتة",
       "EMERGENCY": "استدعاء طوارئ",
       "DEV_REWOUND": "تعديل تجريبي"
+    },
+    "TemporarySupervisorState": {
+      "ACTIVE": "نشط",
+      "UPCOMING": "لم يبدأ بعد",
+      "EXPIRED": "انتهى",
+      "REVOKED": "أُلغي"
+    },
+    "ShiftWorkerPresence": {
+      "NOT_CLOCKED_IN": "لم يبدأ الدوام",
+      "CLOCKED_IN": "في الدوام",
+      "CLOCKED_OUT": "أنهى الدوام"
     }
   },
   "units": {

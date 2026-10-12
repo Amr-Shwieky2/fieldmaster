@@ -29,7 +29,6 @@
         "LOCAL_ENCRYPTION_KEY_BASE64",
         "FIELDMASTER_TEST_OTP",
         "OTP_*",
-        "DEVICE_TIME_DEVIATION_SECONDS",
         "CORS_ORIGINS",
         "NODE_ENV",
         "APP_ENV",

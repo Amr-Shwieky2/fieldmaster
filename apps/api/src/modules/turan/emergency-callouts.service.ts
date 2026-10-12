@@ -17,6 +17,8 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { IdempotencyService } from "../../common/idempotency/idempotency.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { NotificationAudienceService } from "../notifications/notification-audience.service";
+import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { loadWorkerName, withoutFinancialData, type NotificationData } from "../notifications/notification-data";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
@@ -34,6 +36,8 @@ export class EmergencyCalloutsService {
     private readonly idempotencyService: IdempotencyService,
     private readonly turanAssignments: TuranAssignmentsService,
     private readonly notifications: NotificationsService,
+    private readonly notificationAudience: NotificationAudienceService,
+    private readonly realtime: RealtimeEventsService,
   ) {}
 
   async start(organizationId: string, dto: StartEmergencyCalloutDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string) {
@@ -156,6 +160,7 @@ export class EmergencyCalloutsService {
         correlationId,
       });
 
+      this.realtime.operationsChanged(organizationId, OperationsChangeKind.EMERGENCY);
       await this.notifyOwnersAndManagers(organizationId, NotificationType.EMERGENCY_SHIFT_STARTED, "Emergency call-out started", "A worker started a Night Turan emergency call-out.", {
         timeEntryId: timeEntry.id,
         calloutId: callout.id,
@@ -267,6 +272,7 @@ export class EmergencyCalloutsService {
         correlationId,
       });
 
+      this.realtime.operationsChanged(organizationId, OperationsChangeKind.EMERGENCY);
       await this.notifyEmergencyEnd(organizationId, actor.workerProfileId, compensation.compensatedDurationMinutes, {
         timeEntryId: timeEntry.id,
         calloutId: timeEntry.emergencyCallout.id,
@@ -290,13 +296,19 @@ export class EmergencyCalloutsService {
     return result.body;
   }
 
-  /** Same text and data for Owners and Field Managers, so `data` must never carry money. */
-  private async notifyOwnersAndManagers(organizationId: string, type: NotificationType, title: string, body: string, data: NotificationData) {
-    const recipients = await this.prisma.organizationMembership.findMany({
-      where: { organizationId, role: { in: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] }, status: "ACTIVE", archivedAt: null },
-    });
+  /** Same text and data for Owners and Field Managers, so `data` must never carry money. Recipients follow the notification settings. */
+  private async notifyOwnersAndManagers(
+    organizationId: string,
+    type: typeof NotificationType.EMERGENCY_SHIFT_STARTED,
+    title: string,
+    body: string,
+    data: NotificationData,
+  ) {
+    const { ownerUserIds, fieldManagerUserIds } = await this.notificationAudience.managers(organizationId, type);
     const sharedData = withoutFinancialData(data);
-    await this.notifications.notifyMany(recipients.map((r) => ({ organizationId, recipientUserId: r.userId, type, title, body, data: sharedData })));
+    await this.notifications.notifyMany(
+      [...ownerUserIds, ...fieldManagerUserIds].map((recipientUserId) => ({ organizationId, recipientUserId, type, title, body, data: sharedData })),
+    );
   }
 
   private async notifyEmergencyEnd(
@@ -306,8 +318,7 @@ export class EmergencyCalloutsService {
     refs: { timeEntryId: string; calloutId: string; endedAt: string },
   ) {
     const formatHm = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`;
-    const owners = await this.prisma.organizationMembership.findMany({ where: { organizationId, role: OrgRole.OWNER, status: "ACTIVE", archivedAt: null } });
-    const managers = await this.prisma.organizationMembership.findMany({ where: { organizationId, role: OrgRole.FIELD_MANAGER, status: "ACTIVE", archivedAt: null } });
+    const { ownerUserIds, fieldManagerUserIds } = await this.notificationAudience.managers(organizationId, NotificationType.EMERGENCY_SHIFT_ENDED);
 
     const managerBody = `Emergency call-out ended. Compensated duration: ${formatHm(compensatedDurationMinutes)}. Approval is required.`;
     // No money here: this is what Field Managers get.
@@ -339,10 +350,17 @@ export class EmergencyCalloutsService {
     }
 
     await this.notifications.notifyMany([
-      ...owners.map((o) => ({ organizationId, recipientUserId: o.userId, type: NotificationType.EMERGENCY_SHIFT_ENDED, title: "Emergency call-out ended", body: ownerBody, data: ownerData })),
-      ...managers.map((m) => ({
+      ...ownerUserIds.map((recipientUserId) => ({
         organizationId,
-        recipientUserId: m.userId,
+        recipientUserId,
+        type: NotificationType.EMERGENCY_SHIFT_ENDED,
+        title: "Emergency call-out ended",
+        body: ownerBody,
+        data: ownerData,
+      })),
+      ...fieldManagerUserIds.map((recipientUserId) => ({
+        organizationId,
+        recipientUserId,
         type: NotificationType.EMERGENCY_SHIFT_ENDED,
         title: "Emergency call-out ended",
         body: managerBody,

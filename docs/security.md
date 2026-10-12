@@ -76,6 +76,12 @@ notification payloads the same way. The only exceptions are a Worker's own
 compensation history and own payslip, which are checked to contain only that
 Worker's data.
 
+Since Step 6 the scanner also signs in as a **Temporary Supervisor** (a
+worker with an active assignment, who opened a temporary point through the
+API) and scans every GET route as that third role, the supervised-shift view
+included. That makes 45 GET routes after Step 6. The Owner pass also confirms
+the settings' penalty amount is in the Owner's copy only.
+
 Because the routes are discovered, new endpoints are covered without editing
 a list. The Step 5 attendance screens added 6 GET routes (40 in all); the
 scanner reads each as a Field Manager and as a Worker with real rows, and
@@ -90,6 +96,18 @@ needed only a seeded id per new `:id` parameter.
 
 See `authorization-matrix.md` for the full defense-in-depth breakdown and
 `docs/testing.md` for how to run these tests yourself.
+
+## Sessions end immediately (Step 6)
+
+- **Suspend / archive:** the member's sessions (refresh-token families,
+  now tied to the membership) are revoked in the same transaction, and their
+  WebSocket and SSE connections are closed. Every REST call is refused by the
+  guard's live status check (proved by `users-devices.e2e-spec.ts`).
+- **One session (users page):** access tokens carry the session id (`sid`),
+  so the guard refuses that session's access token at once, not when it
+  expires.
+- **Role and time tracking** are read from the database on every request,
+  never trusted from the token.
 
 ## Audit log integrity
 

@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { JwtService } from "@nestjs/jwt";
-import { AccountStatus } from "@fieldmaster/shared-types";
+import { AccountStatus, type OrgRole } from "@fieldmaster/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 import type { AccessTokenPayload, AuthenticatedRequest } from "../auth/auth-context";
@@ -44,11 +44,15 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     // Re-check membership + user status on every request so a suspension or
-    // archival takes effect immediately, not only after the token expires.
-    const membership = await this.prisma.organizationMembership.findUnique({
-      where: { id: payload.membershipId },
-      include: { user: true, workerProfile: true },
-    });
+    // archival takes effect immediately, not only after the token expires;
+    // and the session itself (Step 6), so ending it from the users page does too.
+    const [membership, session] = await Promise.all([
+      this.prisma.organizationMembership.findUnique({
+        where: { id: payload.membershipId },
+        include: { user: true, workerProfile: true },
+      }),
+      payload.sid ? this.prisma.refreshTokenFamily.findUnique({ where: { id: payload.sid }, select: { revokedAt: true } }) : null,
+    ]);
 
     if (
       !membership ||
@@ -59,10 +63,18 @@ export class JwtAuthGuard implements CanActivate {
     ) {
       throw new UnauthorizedException("Account or membership is not active.");
     }
+    if (payload.sid && (!session || session.revokedAt)) {
+      throw new UnauthorizedException("This session has ended. Please sign in again.");
+    }
 
+    // Role and time tracking come from the membership, not the token: a role
+    // change from the users page applies to the very next request.
     request.user = {
       ...payload,
-      workerProfileId: membership.workerProfile?.id ?? null,
+      role: membership.role as OrgRole,
+      isTimeTrackable: membership.isTimeTrackable,
+      // Turning time tracking off (users page) keeps the worker profile for history, but not the ability to clock in.
+      workerProfileId: membership.isTimeTrackable ? (membership.workerProfile?.id ?? null) : null,
     };
     return true;
   }

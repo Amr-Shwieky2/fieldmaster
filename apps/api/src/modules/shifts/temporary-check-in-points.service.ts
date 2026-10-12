@@ -1,9 +1,13 @@
 import { Injectable } from "@nestjs/common";
-import { TemporaryPointStatus } from "@fieldmaster/shared-types";
+import { ShiftStatus, TemporaryPointStatus } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
+import { UUID_PATTERN } from "../../common/validation/patterns";
+import { Permission, roleHasPermission } from "../../common/auth/permissions";
+import { OrganizationSettingsService } from "../../common/settings/organization-settings.service";
+import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { TemporarySupervisorsService } from "./temporary-supervisors.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { CreateTemporaryCheckInPointDto } from "./dto/temporary-check-in-point.dto";
@@ -15,6 +19,10 @@ import type { CreateTemporaryCheckInPointDto } from "./dto/temporary-check-in-po
  * background sweep job is required for correctness -- points past their
  * expiresAt are simply never treated as usable, even if their DB `status`
  * column hasn't been flipped yet.
+ *
+ * Who may open or close one: a manager (Owner / Field Manager), or a
+ * temporary supervisor of that shift whose assignment is ACTIVE right now
+ * and allows it (`canOpenCheckInPoints`, Step 6) -- checked live each time.
  */
 @Injectable()
 export class TemporaryCheckInPointsService {
@@ -22,25 +30,20 @@ export class TemporaryCheckInPointsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly temporarySupervisors: TemporarySupervisorsService,
+    private readonly settings: OrganizationSettingsService,
+    private readonly realtime: RealtimeEventsService,
   ) {}
 
-  async create(
-    organizationId: string,
-    dto: CreateTemporaryCheckInPointDto,
-    actor: AuthenticatedUser,
-    correlationId: string,
-  ) {
-    const shift = await this.prisma.shift.findFirst({ where: { id: dto.shiftId, organizationId } });
+  async create(organizationId: string, dto: CreateTemporaryCheckInPointDto, actor: AuthenticatedUser, correlationId: string) {
+    const shift = UUID_PATTERN.test(dto.shiftId) ? await this.prisma.shift.findFirst({ where: { id: dto.shiftId, organizationId } }) : null;
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
 
-    const isManager = actor.role === "OWNER" || actor.role === "FIELD_MANAGER";
-    const isTempSupervisor =
-      actor.workerProfileId !== null &&
-      (await this.temporarySupervisors.isActiveSupervisorForShift(dto.shiftId, actor.workerProfileId));
-
-    if (!isManager && !isTempSupervisor) {
-      throw new AppException(403, ErrorCodes.FORBIDDEN, "You are not authorized to open a check-in point for this shift.");
+    const isManager = roleHasPermission(actor.role, Permission.MANAGE_TEMP_SUPERVISORS);
+    if (!isManager) await this.assertSupervisorMayManagePoints(dto.shiftId, actor);
+    if (shift.status === ShiftStatus.CLOSED || shift.status === ShiftStatus.CANCELLED) {
+      throw new AppException(409, ErrorCodes.SHIFT_NOT_OPEN, "This shift is closed or cancelled.");
     }
+    const settings = await this.settings.get(organizationId);
 
     const point = await this.prisma.temporaryCheckInPoint.create({
       data: {
@@ -50,7 +53,7 @@ export class TemporaryCheckInPointsService {
         name: dto.name,
         latitude: dto.latitude,
         longitude: dto.longitude,
-        radiusMeters: dto.radiusMeters ?? 100,
+        radiusMeters: dto.radiusMeters ?? settings.temporaryPointRadiusMeters,
         createdBy: actor.sub,
         managerAuthorizedBy: isManager ? actor.sub : shift.managerId,
         expiresAt: shift.scheduledEnd,
@@ -65,13 +68,16 @@ export class TemporaryCheckInPointsService {
       entityId: point.id,
       correlationId,
     });
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_POINT);
 
     return point;
   }
 
   async revoke(organizationId: string, id: string, actor: AuthenticatedUser, correlationId: string) {
-    const point = await this.prisma.temporaryCheckInPoint.findFirst({ where: { id, organizationId } });
+    const point = UUID_PATTERN.test(id) ? await this.prisma.temporaryCheckInPoint.findFirst({ where: { id, organizationId } }) : null;
     if (!point) throw new AppException(404, ErrorCodes.NOT_FOUND, "Check-in point not found.");
+    if (!roleHasPermission(actor.role, Permission.MANAGE_TEMP_SUPERVISORS)) await this.assertSupervisorMayManagePoints(point.shiftId, actor);
+    if (!this.isCurrentlyActive(point)) throw new AppException(409, ErrorCodes.CONFLICT, "This check-in point is already closed or expired.");
 
     const updated = await this.prisma.temporaryCheckInPoint.update({
       where: { id },
@@ -86,6 +92,7 @@ export class TemporaryCheckInPointsService {
       entityId: id,
       correlationId,
     });
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_POINT);
 
     return updated;
   }
@@ -96,5 +103,16 @@ export class TemporaryCheckInPointsService {
 
   isCurrentlyActive(point: { status: string; expiresAt: Date; revokedAt: Date | null }): boolean {
     return point.status === TemporaryPointStatus.ACTIVE && point.revokedAt === null && point.expiresAt > new Date();
+  }
+
+  /** A non-manager needs an ACTIVE supervisor assignment for this shift that allows managing points. */
+  private async assertSupervisorMayManagePoints(shiftId: string, actor: AuthenticatedUser): Promise<void> {
+    const assignment = actor.workerProfileId ? await this.temporarySupervisors.findActiveAssignmentForShift(shiftId, actor.workerProfileId) : null;
+    if (!assignment) {
+      throw new AppException(403, ErrorCodes.FORBIDDEN, "You are not authorized to manage check-in points for this shift.");
+    }
+    if (!assignment.canOpenCheckInPoints) {
+      throw new AppException(403, ErrorCodes.TEMPORARY_SUPERVISOR_CANNOT_OPEN_POINTS, "This temporary supervisor may not open or close check-in points.");
+    }
   }
 }

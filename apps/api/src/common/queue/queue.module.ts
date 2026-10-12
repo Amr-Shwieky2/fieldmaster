@@ -27,6 +27,7 @@ function parseRedisUrl(url: string) {
     BullModule.registerQueue(
       { name: QUEUE_NAMES.EXPIRE_TEMPORARY_CHECK_IN_POINTS },
       { name: QUEUE_NAMES.EXPIRE_ONBOARDING_INVITATIONS },
+      { name: QUEUE_NAMES.LONG_OPEN_ENTRIES },
     ),
   ],
   providers: [ExpireTemporaryCheckInPointsProcessor, ExpireOnboardingInvitationsProcessor],
@@ -36,6 +37,7 @@ export class QueueModule implements OnModuleInit {
   constructor(
     @InjectQueue(QUEUE_NAMES.EXPIRE_TEMPORARY_CHECK_IN_POINTS) private readonly checkInPointsQueue: Queue,
     @InjectQueue(QUEUE_NAMES.EXPIRE_ONBOARDING_INVITATIONS) private readonly invitationsQueue: Queue,
+    @InjectQueue(QUEUE_NAMES.LONG_OPEN_ENTRIES) private readonly longOpenEntriesQueue: Queue,
   ) {}
 
   async onModuleInit() {
@@ -51,5 +53,7 @@ export class QueueModule implements OnModuleInit {
       {},
       { repeat: { every: 5 * 60_000 }, removeOnComplete: 10, removeOnFail: 10 },
     );
+    // "Open for more than 9 hours" alerts (Step 6; processor in OperationsModule).
+    await this.longOpenEntriesQueue.add("sweep", {}, { repeat: { every: 60_000 }, removeOnComplete: 10, removeOnFail: 10 });
   }
 }

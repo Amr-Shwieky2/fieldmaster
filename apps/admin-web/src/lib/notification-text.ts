@@ -292,6 +292,18 @@ const BUILDERS: Record<string, Builder> = {
     if (shiftTitle === undefined) return null;
     return simple("OVERTIME_THRESHOLD_CROSSED", { workerName: workerName(data, ctx), shiftTitle: isolateText(shiftTitle) });
   },
+
+  // Step 6: a temporary supervisor's free-text issue report (shown as written, isolated).
+  TEMPORARY_SUPERVISOR_ISSUE_REPORTED: (data, ctx) => {
+    const shiftTitle = readShiftTitle(data, ctx);
+    const issueText = typeof data.issueText === "string" && data.issueText.trim() !== "" ? data.issueText.trim() : undefined;
+    if (shiftTitle === undefined || issueText === undefined) return null;
+    return simple("TEMPORARY_SUPERVISOR_ISSUE_REPORTED", {
+      workerName: workerName(data, ctx),
+      shiftTitle: isolateText(shiftTitle),
+      issueText: isolateText(issueText),
+    });
+  },
 };
 
 /** Notification types the renderer knows (every shared-types NotificationType). */

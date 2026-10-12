@@ -10,14 +10,16 @@ Everything is under `/api/v1`. Implemented route groups:
 
 ```text
 /auth                  OTP request/verify, refresh, logout
-/organizations         org settings
-/memberships           membership management
+/organizations         org settings: GET /me/settings; PATCH /me/settings/workday|onboarding|notifications (Owner, audited)
+/memberships           members, roles, suspend/reactivate/archive, time tracking, devices and sessions (Owner)
 /workers                roster, onboarding approval/rejection; /:id/estimated-earnings (Owner only)
 /onboarding-invitations single-use invite links
 /compensation-profiles  effective-dated rate profiles
 /projects, /sites, /geofences
 /shifts, /shift-assignments
-/temporary-supervisors, /temporary-check-in-points
+/temporary-supervisors  the supervisor's own API: /me, /:assignmentId/shift, /:assignmentId/report-issue (checked live)
+/shifts/:id/temporary-supervisors  assign / list (managers); /shifts/temporary-check-in-points open / close
+/operations            /live: the live operations snapshot (Owner, Field Manager; no money)
 /clock-events           clock-in / clock-out (online)
 /devices                Ed25519 public-key registration for offline signing
 /offline-sync           batched offline clock-event submission
@@ -45,6 +47,22 @@ evidence or emergency responses of a Field Manager. An Owner gets it from
 `GET /workers/:id/estimated-earnings?month=YYYY-MM` (both
 `VIEW_COMPENSATION`), and from `estimatedCostAgorot`, which only an Owner's
 emergency call-out DTO has. See `authorization-matrix.md`.
+
+## Real-time
+
+- **WebSocket:** socket.io namespace `/notifications`, with the access token
+  as `auth.token` or `?token=`.
+- **SSE fallback:** `GET /notifications/stream?token=`.
+- **Authentication:** both check the token like a REST call: an active
+  membership and a session that hasn't been revoked.
+- **Events:**
+  - `notification` (SSE: the default message event): the caller's new
+    notification;
+  - `operations` (Owners and Field Managers, Step 6): `{ kind, at }`, a
+    signal to refetch `GET /operations/live`;
+  - SSE only: `ping` every 25 s.
+- **When connections close:** both end when the member is suspended or
+  archived, their role changes, or the session is revoked.
 
 ## Authentication
 

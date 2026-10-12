@@ -1,5 +1,174 @@
 # FieldMaster — Implementation Status
 
+## Step 6 of 10 — temporary supervisors, live operations, settings, users and devices (2026-10-12)
+
+Scope: API + admin web. The supervisor's mobile screens come in Step 9; their
+API exists now and the worker simulator uses it. Arabic only, RTL, same i18n
+checks. No business rule changed. Design and reasoning are in
+`docs/technical-decisions.md` ("Step 6: …").
+
+**Temporary supervisor:**
+- **Shift page, card "المشرفون المؤقتون":**
+  - assign a time-trackable worker of the shift: activation time (empty =
+    now), expiry (default = shift end), and "may open temporary check-in
+    points";
+  - every assignment shows its state: نشط / لم يبدأ بعد / انتهى / أُلغي;
+  - revoke has a confirmation step.
+- **Supervisor API, checked live on every call** (own assignment, ACTIVE:
+  not revoked, inside its window, shift not closed or cancelled):
+  - `GET /temporary-supervisors/me`;
+  - `GET /temporary-supervisors/:assignmentId/shift`: the shift's workers
+    with operational attendance only; no money, no phone numbers;
+  - `POST /temporary-supervisors/:assignmentId/report-issue`: notifies the
+    shift's manager and the Owners, audited.
+- **Temporary points:** opening and closing need the active assignment and
+  `canOpenCheckInPoints` (new column).
+- **Lifecycle:** closing the shift expires its points, and the supervisor
+  gets 403 `TEMPORARY_SUPERVISOR_INACTIVE`.
+- **Worker simulator, panel "مشرف مؤقت"** (the supervisor's own endpoints,
+  with the worker's session): the shift's workers, closing points, an issue
+  report.
+
+**Live operations (`/operations`, Owner and Field Manager, no money for anyone):**
+- **Map:** the last accepted clock-event position of each worker on shift
+  (event-based, no tracking), site geofences, active temporary points, and
+  active emergencies highlighted.
+- **Lists:**
+  - active shifts (clocked in / expected / late);
+  - late workers (start + grace passed, no entry);
+  - entries open over 9 h;
+  - rejected attempts and suspicious locations (24 h);
+  - offline events waiting for review;
+  - active emergencies.
+- **Real-time:** `operations` events on the existing WebSocket and SSE
+  channels. The page uses `EventSource` on the SSE stream and shows a
+  "متصل / غير متصل" indicator. It also refreshes once a minute for the
+  time-based lists.
+- **9-hour job:** every minute; reports each entry once, to the shift's
+  manager and the Owners (`OVERTIME_THRESHOLD_CROSSED`, operational text).
+
+**Settings (`/settings`; Owner edits, Field Manager reads without any amount):**
+- **Sections:** يوم العمل, الانضمام, الإشعارات. Each is saved separately,
+  and every changed value is audited old → new.
+- **Read-only:** test mode (`APP_ENV`, dev login) and the fixed rules (9-hour
+  day, two free forgotten stamps, the penalty (Owners only), -60 / +15), each
+  with an explanation.
+- **Settings now read from the database** (defaults = the old values):
+
+| Setting | Before |
+|---|---|
+| Device-time deviation | env `DEVICE_TIME_DEVIATION_SECONDS` (removed) |
+| Default shift grace minutes | hard-coded 10 |
+| Default site geofence radius | hard-coded 100 m |
+| Default geofence GPS accuracy | hard-coded 50 m |
+| Temporary point radius | hard-coded 100 m |
+| Temporary point GPS accuracy | constant 75 m |
+| Notification audiences (9 manager events × Owners / Field Managers) | fixed per call site |
+| Invitation validity | already a setting |
+
+  `autoDeductUnpaidBreaks` is stored (existing) but no rule applies it yet;
+  the page says so.
+
+**Users and devices (`/settings/users`, Owner only):**
+- **Members:** name, phone, role, status, time tracking, last active.
+- **Actions, each with a reason and audited:**
+  - change role (at most 2 active Owners; never the last active Owner);
+  - suspend / reactivate / archive;
+  - time tracking on/off (on creates a worker profile; off refused for a
+    WORKER or with an open entry).
+- **Suspension and archiving end the member's sessions at once:** refresh
+  families revoked, WebSocket/SSE closed, every REST call refused.
+- **Devices and sessions:** device, platform, app version, last active, key
+  state. "إنهاء الجلسة" refuses that session's access token at once too:
+  tokens now carry `sid`. "إلغاء مفتاح الجهاز": that device's offline events
+  are refused.
+- **Sessions are now tied to their membership:** refresh no longer switches
+  organizations. The guard reads role and time tracking live.
+- **Fixed:** the existing device-key revoke route didn't check the user's
+  organization.
+
+**Older gaps found by the new tests, fixed:**
+- `GET /shifts/:id/temporary-check-in-points` was readable by any Worker for
+  any shift. It now has the shift's own visibility (404 otherwise).
+- `POST /shifts/:id/close` re-closed closed shifts (second audit row) and
+  closed cancelled ones. Both are now 409 `SHIFT_NOT_OPEN`.
+- A malformed shift id was a 500 on `GET /shifts/:id`, assigning a worker and
+  closing; it is now a 404.
+
+**Financial isolation:**
+- The leak scanner now scans as **Field Manager, Worker and Temporary
+  Supervisor**: 45 GET routes (40 before), with no money key for any of the
+  three.
+- The Owner pass confirms the settings' penalty amount is in the Owner's
+  copy only.
+- The operations snapshot has no money for Owners either.
+
+**Browser check** (worker simulator + admin web):
+
+| Scenario | Result |
+|---|---|
+| Supervisor lifecycle | ✅ Assigned on the shift page (state "نشط") → the simulator's panel shows the shift's workers → a point opened from the simulator → another worker clocks in at it (panel: "في الدوام" + "نقطة تسجيل مؤقتة") → issue report: Arabic notification "بلاغ من مشرف مؤقت" to the shift manager and Owners → shift closed: point EXPIRED, assignment EXPIRED, panel "ليس مشرفًا مؤقتًا نشطًا الآن", API 403 `TEMPORARY_SUPERVISOR_INACTIVE` |
+| Live map | ✅ "متصل"; the new point and then the worker's clock-in appeared within a second without reloading ("في الدوام 1 من 3", late count down to two) |
+| 9-hour alert | ✅ Rewound 10 h 30 m → within the minute "بدأت الساعات الإضافية" to the Owners and the manager; the page lists it under "دوام مفتوح أكثر من 9 ساعات" |
+| Grace minutes | ✅ 10 → 20 saved and audited (`defaultGraceMinutes` 10 → 20); a shift created afterwards got 20; the late list says "مهلة التأخير 20 دقيقة" |
+| Suspension during a session | ✅ Suspended the worker signed in to the simulator → the simulator's next request ended its session ("انتهت جلسة العامل…"), both sessions shown as منتهية, the admin's own session unaffected |
+| Field Manager | ✅ Settings read-only (26 inputs disabled, no save, no ₪, penalty without amount); `/settings/users` redirected and the API 403; operations without money |
+
+`pnpm db:seed` was run afterwards to reset the data.
+
+**Tests** (runtime counts):
+
+| | Before Step 6 | After |
+|---|---|---|
+| shared-validation | 47 | 47 |
+| @fieldmaster/i18n | 71 | 73 |
+| admin-web | 387 | 387 (+ the component tests of the new screens, in a follow-up commit on this PR) |
+| API unit | 25 | 25 |
+| mobile | 131 | 131 |
+| API e2e | 66 | 107 |
+| **Total** | **727** | **770** |
+
+New API e2e tests (41):
+- `temporary-supervisors.e2e-spec.ts` (9):
+  - assignment rules;
+  - the full lifecycle, every step audited;
+  - no other shift, project or point;
+  - the may-open-points flag;
+  - live checks (revoked / expired / not started / cancelled);
+  - organization scoping;
+  - regressions for the three fixed gaps.
+- `operations.e2e-spec.ts` (6):
+  - snapshot contents;
+  - Worker 403 and scoping;
+  - no money for anyone;
+  - `operations` events on the WebSocket and the SSE stream (Owners and Field Managers only);
+  - the 9-hour sweep (once per entry, following the settings).
+- `settings.e2e-spec.ts` (12):
+  - Owner and Field Manager views;
+  - audited edits, and that each setting takes effect (grace, deviation online and offline, radius, accuracy, temporary point radius and accuracy, notification audiences, invitation validity);
+  - validation;
+  - the old route gone.
+- `users-devices.e2e-spec.ts` (13):
+  - every action and its errors;
+  - suspension ends REST, refresh, WebSocket and SSE;
+  - the live role;
+  - session and key revocation (offline events refused);
+  - multi-organization scoping;
+  - last activity.
+- The leak scanner gained a Temporary Supervisor pass (+1).
+
+No test was removed or weakened. Existing tests that changed:
+- `financial-leak-scanner.e2e-spec.ts`:
+  - seeds a temporary supervisor (assigned and opening a point through the API) and the ids of the new routes;
+  - scans as a third role;
+  - expects a 404 for another member's supervisor view, plus the new Owner and Field Manager checks.
+- `shifts-pages.test.tsx`: mocks the new supervisors list. One worker-name assertion is scoped to the assigned-workers list item, because the name now also appears in the supervisor form.
+- `test/env.setup.js` no longer sets `DEVICE_TIME_DEVIATION_SECONDS` (not read any more).
+
+`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 663 · `pnpm test:e2e` ✅ 107 · `pnpm build` ✅
+
+---
+
 ## Step 5 of 10 — complete attendance screens (2026-10-12)
 
 Scope: admin-web attendance pages plus the API endpoints they need. Arabic
@@ -816,13 +985,13 @@ user's `organizationId`, never a client-supplied one. Verified by an
 automated test (a worker cannot read another worker's records even inside
 the same org; a Field Manager gets `403` on every financial route).
 
-## 6. Roles and authorization — ✅ (Owner/Field Manager/Worker), 🟡 (Temporary Supervisor)
+## 6. Roles and authorization — ✅ (Owner/Field Manager/Worker/Temporary Supervisor, Step 6)
 
 - ✅ `Permission` catalog + `PermissionsGuard`, enforced per-route
 - ✅ Financial fields (`VIEW_COMPENSATION`, `VIEW_PAYROLL`, `VIEW_FINANCIAL_DASHBOARD`, …) are **never** in the Field Manager's permission set — enforced at the guard layer *and* the DTO-serialization layer (`worker-response.mapper.ts` strips `compensation` unless the viewer is an Owner or the worker themself)
 - ✅ Max-2-active-Owners enforced twice: `OwnerLimitService` inside the same transaction, and a Postgres trigger (`trg_enforce_max_two_owners`) as the DB-level backstop — both paths tested
 - ✅ Temporary Supervisor implemented as a time-boxed capability (`TemporarySupervisorAssignment` with `activatedAt`/`expiresAt`/`revokedAt`), checked live rather than granted as a static role
-- 🟡 A Temporary Supervisor's *read* scope (only their shift's workers) is enforced for the one action they're modeled to take (opening a check-in point); a dedicated "temp supervisor view" of attendance was not built as a separate endpoint
+- ✅ (Step 6) A Temporary Supervisor's read scope is their shift's workers only, through `GET /temporary-supervisors/:assignmentId/shift` (operational data, no money or phone numbers), checked live on every call; the leak scanner scans it as a third role
 
 ## 7. Authentication and sessions — ✅
 

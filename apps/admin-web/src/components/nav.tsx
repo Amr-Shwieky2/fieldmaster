@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 
 type NavKey =
   | "dashboard"
+  | "operations"
   | "workers"
   | "sitesProjects"
   | "scheduling"
@@ -23,11 +24,14 @@ type NavKey =
   | "reports"
   | "notifications"
   | "auditLog"
+  | "settings"
+  | "users"
   | "workerSimulator";
 
 /** `devOnly` items exist only while the API is in dev login (test) mode; with it off they are not rendered at all. */
 const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[]; devOnly?: boolean }[] = [
   { href: "/dashboard", key: "dashboard", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
+  { href: "/operations", key: "operations", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/workers", key: "workers", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/sites", key: "sitesProjects", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/shifts", key: "scheduling", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
@@ -40,6 +44,9 @@ const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[]; devOnly?: boolea
   { href: "/reports", key: "reports", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/notifications", key: "notifications", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/audit-log", key: "auditLog", roles: [OrgRole.OWNER] },
+  // Field Managers read the settings; only Owners change them or manage users.
+  { href: "/settings", key: "settings", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
+  { href: "/settings/users", key: "users", roles: [OrgRole.OWNER] },
   { href: "/dev/worker-simulator", key: "workerSimulator", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER], devOnly: true },
 ];
 

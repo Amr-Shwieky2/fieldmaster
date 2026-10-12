@@ -4,6 +4,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
+import { UUID_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { RegisterDevicePublicKeyDto } from "./dto/register-device-public-key.dto";
 
@@ -59,10 +60,20 @@ export class DevicesService {
     return { id: record.id, deviceId: record.deviceId, algorithm: record.algorithm, registeredAt: record.registeredAt };
   }
 
-  /** Owners can revoke a device's signing key the same way they revoke a session (spec section 7.3). */
-  async revokePublicKey(organizationId: string, deviceId: string, userId: string, actor: AuthenticatedUser, correlationId: string) {
+  /**
+   * Owners can revoke a device's signing key the same way they revoke a
+   * session (spec section 7.3); offline events signed with it are refused
+   * from then on. The key's user must be a member of the caller's
+   * organization (Step 6: checked; before, any user id was accepted).
+   */
+  async revokePublicKey(organizationId: string, deviceId: string, userId: string, actor: AuthenticatedUser, correlationId: string, reason?: string) {
+    const member = UUID_PATTERN.test(userId) ? await this.prisma.organizationMembership.findFirst({ where: { organizationId, userId }, select: { id: true } }) : null;
+    const key = member ? await this.prisma.devicePublicKey.findUnique({ where: { userId_deviceId: { userId, deviceId } } }) : null;
+    if (!key) throw new AppException(404, ErrorCodes.NOT_FOUND, "Device key not found.");
+    if (key.revokedAt) throw new AppException(409, ErrorCodes.CONFLICT, "This device key was already revoked.");
+
     const record = await this.prisma.devicePublicKey.update({
-      where: { userId_deviceId: { userId, deviceId } },
+      where: { id: key.id },
       data: { revokedAt: new Date() },
     });
 
@@ -72,6 +83,7 @@ export class DevicesService {
       action: "DEVICE_PUBLIC_KEY_REVOKED",
       entityType: "DevicePublicKey",
       entityId: record.id,
+      reason,
       correlationId,
     });
 

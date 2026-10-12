@@ -5,6 +5,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { EncryptionService } from "../../common/encryption/encryption.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { NotificationAudienceService } from "../notifications/notification-audience.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { RedeemInvitationDto } from "./dto/redeem-invitation.dto";
@@ -19,6 +20,7 @@ export class OnboardingService {
     private readonly encryption: EncryptionService,
     private readonly auditService: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly notificationAudience: NotificationAudienceService,
   ) {}
 
   async createInvitation(organizationId: string, actor: AuthenticatedUser, prefilledPhoneNumber: string | undefined, correlationId: string) {
@@ -167,13 +169,12 @@ export class OnboardingService {
       return { user, membership, workerProfile };
     });
 
-    const owners = await this.prisma.organizationMembership.findMany({
-      where: { organizationId: invitation.organizationId, role: OrgRole.OWNER, status: AccountStatus.ACTIVE, archivedAt: null },
-    });
+    // Owners by default; Field Managers too when the organization's notification settings say so.
+    const { ownerUserIds, fieldManagerUserIds } = await this.notificationAudience.managers(invitation.organizationId, NotificationType.ONBOARDING_SUBMITTED);
     await this.notifications.notifyMany(
-      owners.map((owner) => ({
+      [...ownerUserIds, ...fieldManagerUserIds].map((recipientUserId) => ({
         organizationId: invitation.organizationId,
-        recipientUserId: owner.userId,
+        recipientUserId,
         type: NotificationType.ONBOARDING_SUBMITTED,
         title: "New worker application",
         body: `${dto.fullLegalName} submitted an onboarding application awaiting your review.`,
