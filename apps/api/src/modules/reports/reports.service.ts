@@ -202,7 +202,10 @@ export class ReportsService {
     return this.prisma.generatedReport.findMany({
       where: {
         organizationId,
-        ...(isOwner ? {} : { OR: [{ requestedByUserId: actor.sub }, { subjectWorkerProfileId: actor.workerProfileId ?? "__none__" }] }),
+        // Reports they requested, plus reports about themselves if they have a worker profile.
+        ...(isOwner
+          ? {}
+          : { OR: [{ requestedByUserId: actor.sub }, ...(actor.workerProfileId ? [{ subjectWorkerProfileId: actor.workerProfileId }] : [])] }),
       },
       orderBy: { generatedAt: "desc" },
       take: 100,

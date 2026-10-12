@@ -41,13 +41,13 @@ export class ShiftsController {
     // Workers have no MANAGE_SHIFTS permission and only ever see shifts
     // they're personally assigned to; managers/owners see the full org list.
     const scope = this.scopeFor(user);
-    return this.shiftsService.list(user.organizationId, { status, businessDate, shiftType }, scope);
+    return this.shiftsService.list(user.organizationId, { status, businessDate, shiftType }, user, scope);
   }
 
   @Get(":id")
   getById(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     const scope = this.scopeFor(user);
-    return this.shiftsService.getById(user.organizationId, id, scope);
+    return this.shiftsService.getById(user.organizationId, id, user, scope);
   }
 
   private scopeFor(user: AuthenticatedUser): { workerProfileId: string } | undefined {

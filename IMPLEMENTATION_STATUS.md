@@ -1,5 +1,37 @@
 # FieldMaster — Implementation Status
 
+## Fix: money in non-financial endpoints + CI (2026-10-11)
+
+Scope: this fix only (Step 5 not started).
+
+- **Leaks fixed at the query layer** (non-Owners' queries never read the column):
+  - `GET /shifts` and `GET /shifts/:id` returned `project.budgetAgorot` to Field
+    Managers and Workers. The project endpoints now use the same select
+    (`sites/project-fields.ts`) instead of fetching the budget and stripping it.
+  - `GET /forgotten-stamp-infractions` returned `deductionAgorot` to Field Managers.
+- **Also fixed:** `GET /reports` answered 500 to a member without a worker profile
+  (a Field Manager who is not time-trackable): the filter compared a UUID column
+  with the string `"__none__"`.
+- **Financial leak scanner** (`test/financial-leak-scanner.e2e-spec.ts`): every GET
+  route (34), as a Field Manager and as a Worker, plus a Field Manager's WebSocket
+  and SSE notifications; see `docs/security.md`. On main before the fix it failed
+  with the five leaks above and the `/reports` 500; it passes after.
+- **CI:**
+  - lint/typecheck/unit-test jobs now build the shared packages and generate the
+    Prisma client first;
+  - `turbo.json` passes the test env (`DATABASE_URL`, `REDIS_URL`, ...) through to
+    `test:e2e`: Turborepo's strict env mode dropped it, so CI's e2e ran against
+    `localhost:5433` and hung until GitHub's 6-hour limit;
+  - a failed app boot in the e2e harness now closes the app so Jest exits;
+  - every job has a timeout.
+- Not fixed: the advisory `pnpm audit` job (continue-on-error) still reports
+  high/critical advisories in dependencies (Next, Vitest, Express, Expo, ...).
+
+`pnpm lint` ✅ · `pnpm typecheck` ✅ · `pnpm test` ✅ 468 · `pnpm test:e2e` ✅ 55 ·
+`pnpm build` ✅
+
+---
+
 ## Step 4 of 10 — worker simulator, a test tool in the admin web (2026-10-11)
 
 Scope: one test-only page in `apps/admin-web` plus the minimum dev-only API

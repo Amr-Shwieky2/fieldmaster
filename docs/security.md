@@ -66,6 +66,16 @@ real running API and database, that:
   operationally) contains no string matching `/Agorot/` anywhere in its
   JSON body.
 
+`financial-leak-scanner.e2e-spec.ts` covers the whole surface rather than
+chosen routes: it signs in (dev login) as a Field Manager and as a Worker,
+calls every GET route discovered from Nest's route metadata with real seeded
+ids, and fails with the route and JSON path of every money or bank key
+(`*Agorot`, `*rate`, budget, bank, account number, branch, net/gross pay,
+estimated cost, amount). It scans a Field Manager's WebSocket and SSE
+notification payloads the same way. The only exceptions are a Worker's own
+compensation history and own payslip, which are checked to contain only that
+Worker's data.
+
 See `authorization-matrix.md` for the full defense-in-depth breakdown and
 `docs/testing.md` for how to run these tests yourself.
 
