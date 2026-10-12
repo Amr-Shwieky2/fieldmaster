@@ -1492,7 +1492,7 @@
     "lateWorkers": {
       "title": "عمال متأخرون",
       "empty": "لا يوجد عمال متأخرون.",
-      "detail": "بدأت الوردية الساعة <start></start>، ومهلة التأخير {grace} دقيقة؛ التأخير حتى الآن <late></late>."
+      "detail": "بدأت الوردية الساعة <start></start>، ومهلة التأخير {grace, plural, zero {0 دقيقة} one {دقيقة واحدة} two {دقيقتان} few {{grace} دقائق} many {{grace} دقيقة} other {{grace} دقيقة}}؛ التأخير حتى الآن <late></late>."
     },
     "longOpen": {
       "title": "دوام مفتوح أكثر من 9 ساعات",
