@@ -178,7 +178,13 @@
     "SHIFT_NOT_OPEN": "هذه الوردية مغلقة أو ملغاة، فلا يمكن تنفيذ هذا الإجراء عليها.",
     "LAST_ACTIVE_OWNER": "لا يمكن تنفيذ ذلك لأنه سيترك المؤسسة دون مالك نشط.",
     "ROLE_REQUIRES_TIME_TRACKING": "العامل يسجّل حضوره دائمًا: فعّل تسجيل الحضور لهذا العضو أولًا، أو اختر دورًا آخر.",
-    "MEMBERSHIP_ARCHIVED": "هذا العضو مؤرشف ولا يمكن تعديله."
+    "MEMBERSHIP_ARCHIVED": "هذا العضو مؤرشف ولا يمكن تعديله.",
+    "FILE_TOO_LARGE": "الملف أكبر من الحد المسموح (10 ميغابايت).",
+    "FILE_TYPE_NOT_ALLOWED": "نوع الملف غير مقبول. ارفع صورة (JPEG أو PNG) أو ملف PDF.",
+    "FILE_REJECTED": "رُفض الملف بعد فحصه. ارفع ملفاً آخر.",
+    "UPLOAD_NOT_FOUND": "لم نجد الملف المرفوع. ارفعه مرة أخرى.",
+    "INVITATION_ALREADY_USED": "استُخدمت هذه الدعوة، فلا يمكن إلغاؤها.",
+    "REPORT_NOT_READY": "التقرير لم يجهز بعد. انتظر حتى ينتهي إنشاؤه."
   },
   "enums": {
     "OrgRole": {
@@ -300,6 +306,35 @@
     "PayrollFigureSource": {
       "FINALIZED": "من الرواتب المعتمدة نهائياً",
       "LIVE": "تقدير مباشر من الحضور المعتمد حتى الآن"
+    },
+    "ReportType": {
+      "WORKER_ATTENDANCE_LEDGER": "سجل حضور العامل",
+      "OPERATIONAL_ATTENDANCE": "تقرير الحضور التشغيلي",
+      "OVERTIME": "تقرير الساعات الإضافية",
+      "EMERGENCY_CALLOUTS": "تقرير استدعاءات الطوارئ",
+      "SITE_VIOLATIONS": "تقرير مخالفات الموقع",
+      "FORGOTTEN_STAMPS": "تقرير نسيان التسجيل",
+      "PAYROLL": "تقرير الرواتب"
+    },
+    "ReportStatus": {
+      "QUEUED": "في الانتظار",
+      "RUNNING": "قيد الإنشاء",
+      "READY": "جاهز",
+      "FAILED": "فشل"
+    },
+    "GovernmentIdType": {
+      "ISRAELI_ID": "هوية",
+      "PASSPORT": "جواز سفر"
+    },
+    "InvitationStatus": {
+      "ACTIVE": "نشطة",
+      "USED": "مستخدمة",
+      "EXPIRED": "منتهية الصلاحية",
+      "REVOKED": "ملغاة"
+    },
+    "FileAssetPurpose": {
+      "IDENTITY_DOCUMENT": "صورة الهوية",
+      "PROFILE_PHOTO": "الصورة الشخصية"
     },
     "ApprovalAction": {
       "APPROVE": "موافقة",

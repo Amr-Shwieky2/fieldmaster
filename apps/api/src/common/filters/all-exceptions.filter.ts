@@ -40,7 +40,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
       response.status(status).json({
         statusCode: status,
-        code: status === HttpStatus.UNAUTHORIZED ? "UNAUTHENTICATED" : status === HttpStatus.FORBIDDEN ? "FORBIDDEN" : status === HttpStatus.NOT_FOUND ? "NOT_FOUND" : status === HttpStatus.BAD_REQUEST ? "VALIDATION_FAILED" : "ERROR",
+        code:
+          status === HttpStatus.UNAUTHORIZED
+            ? "UNAUTHENTICATED"
+            : status === HttpStatus.FORBIDDEN
+              ? "FORBIDDEN"
+              : status === HttpStatus.NOT_FOUND
+                ? "NOT_FOUND"
+                : status === HttpStatus.BAD_REQUEST
+                  ? "VALIDATION_FAILED"
+                  : status === HttpStatus.TOO_MANY_REQUESTS
+                    ? "RATE_LIMITED"
+                    : "ERROR",
         message,
         details: {},
         correlationId,
