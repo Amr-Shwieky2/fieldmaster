@@ -16,7 +16,18 @@ import type {
   ManualCorrectionInput,
   Paginated,
   Geofence,
+  CreatedInvitation,
+  CreateReportInput,
+  FileViewUrl,
   GeneratedReport,
+  JoinApplicationInput,
+  OnboardingInvitation,
+  OnboardingReview,
+  PublicInvitation,
+  ReportDownload,
+  ReportFileFormat,
+  ReportVerification,
+  UploadedFile,
   NotificationItem,
   OfflineSyncBatchRecord,
   OfflineSyncBatchResponse,
@@ -48,7 +59,7 @@ import type {
   TemporarySupervisorListItem,
   WorkdaySettings,
 } from "./types";
-import type { NotificationType, OrgRole } from "@fieldmaster/shared-types";
+import type { FileAssetPurpose, NotificationType, OrgRole } from "@fieldmaster/shared-types";
 
 /** `?a=1&b=x,y` from the defined values (arrays joined with commas); "" when there are none. */
 function queryString(params: Record<string, string | number | string[] | undefined>): string {
@@ -130,6 +141,24 @@ export class FieldMasterClient {
     return json as T;
   }
 
+  /** Like `request`, for a multipart body (the browser sets the boundary). */
+  private async requestForm<T>(path: string, form: FormData): Promise<T> {
+    const token = this.options.getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.options.baseUrl}${path}`, { method: "POST", headers, body: form });
+    } catch (err) {
+      throw new NetworkError(err);
+    }
+    if (response.status === 401) this.options.onUnauthorized?.();
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new ApiRequestError(response.status, json as ApiError);
+    return json as T;
+  }
+
   // ── Auth ────────────────────────────────────────────────────────────
   requestOtp(phoneNumber: string) {
     return this.request<void>("POST", "/auth/otp/request", { phoneNumber });
@@ -179,6 +208,39 @@ export class FieldMasterClient {
   }
   rejectWorker(id: string, reason: string) {
     return this.request("POST", `/workers/${id}/reject`, { reason });
+  }
+  /** Owner only (audited): the application with its ID and bank details decrypted. */
+  getOnboardingReview(workerProfileId: string) {
+    return this.request<OnboardingReview>("GET", `/workers/${workerProfileId}/onboarding-review`);
+  }
+  /** Owner only (audited): a short-lived signed URL to an uploaded identity document or photo. */
+  getFileAssetViewUrl(fileAssetId: string) {
+    return this.request<FileViewUrl>("GET", `/file-assets/${fileAssetId}/view-url`);
+  }
+
+  // ── Onboarding invitations (Step 8) ─────────────────────────────────
+  createInvitation(prefilledPhoneNumber?: string) {
+    return this.request<CreatedInvitation>("POST", "/onboarding-invitations", prefilledPhoneNumber ? { prefilledPhoneNumber } : {});
+  }
+  listInvitations() {
+    return this.request<OnboardingInvitation[]>("GET", "/onboarding-invitations");
+  }
+  revokeInvitation(id: string) {
+    return this.request<{ success: true }>("DELETE", `/onboarding-invitations/${id}`);
+  }
+
+  // ── Public onboarding page (no session; Step 8) ─────────────────────
+  getPublicInvitation(token: string) {
+    return this.request<PublicInvitation>("GET", `/onboarding/invitations/${encodeURIComponent(token)}`);
+  }
+  uploadOnboardingFile(token: string, purpose: FileAssetPurpose, file: Blob, fileName: string) {
+    const form = new FormData();
+    form.append("purpose", purpose);
+    form.append("file", file, fileName);
+    return this.requestForm<UploadedFile>(`/onboarding/invitations/${encodeURIComponent(token)}/uploads`, form);
+  }
+  submitJoinApplication(token: string, input: JoinApplicationInput) {
+    return this.request<{ submitted: true }>("POST", `/onboarding/invitations/${encodeURIComponent(token)}/redeem`, input);
   }
 
   // ── Sites / Projects ────────────────────────────────────────────────
@@ -477,16 +539,21 @@ export class FieldMasterClient {
     return this.request<{ valid: boolean; brokenAtId?: string }>("GET", "/audit-logs/verify");
   }
 
-  // ── Reports ─────────────────────────────────────────────────────────
-  generateWorkerLedger(input: { workerProfileId: string; fromDate: string; toDate: string }, idempotencyKey: string) {
-    return this.request<GeneratedReport & { downloadUrl: string }>("POST", "/reports/worker-attendance-ledger", input, {
-      "Idempotency-Key": idempotencyKey,
-    });
+  // ── Reports (Step 8: background jobs, PDF + CSV) ────────────────────
+  /** Starts a report (202, a background job). The same key always answers the same report. */
+  createReport(input: CreateReportInput, idempotencyKey: string) {
+    return this.request<GeneratedReport>("POST", "/reports", input, { "Idempotency-Key": idempotencyKey });
   }
   listReports() {
     return this.request<GeneratedReport[]>("GET", "/reports");
   }
-  getReportDownloadUrl(id: string) {
-    return this.request<{ downloadUrl: string; sha256Hash: string; generatedAt: string }>("GET", `/reports/${id}/download`);
+  getReport(id: string) {
+    return this.request<GeneratedReport>("GET", `/reports/${id}`);
+  }
+  getReportDownloadUrl(id: string, format: ReportFileFormat = "pdf") {
+    return this.request<ReportDownload>("GET", `/reports/${id}/download?format=${format}`);
+  }
+  verifyReport(id: string) {
+    return this.request<ReportVerification>("GET", `/reports/${id}/verify`);
   }
 }

@@ -1,0 +1,10 @@
+{
+  "extends": "@fieldmaster/typescript-config/base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "resolveJsonModule": true,
+    "sourceMap": false
+  },
+  "files": ["src/node.ts"]
+}

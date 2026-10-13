@@ -1,6 +1,7 @@
 export * from "./geo";
 export * from "./payroll";
 export * from "./payroll-month";
+export * from "./identity";
 export * from "./attendance";
 export * from "./emergency";
 export * from "./forgotten-stamp";

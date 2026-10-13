@@ -23,13 +23,20 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/shared-validation/package.json packages/shared-validation/package.json
+COPY packages/i18n/package.json packages/i18n/package.json
+COPY packages/api-client/package.json packages/api-client/package.json
 COPY packages/typescript-config/package.json packages/typescript-config/package.json
 COPY packages/eslint-config/package.json packages/eslint-config/package.json
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+# @fieldmaster/i18n is built for its Node entry ("@fieldmaster/i18n/node"):
+# the Arabic labels and formatting of the PDF and CSV reports (Step 8). The
+# reports' Arabic font (IBM Plex Sans Arabic, @fontsource) is an ordinary
+# dependency, so it is in node_modules, copied to the runtime image below.
 RUN pnpm --filter @fieldmaster/shared-types build \
  && pnpm --filter @fieldmaster/shared-validation build \
+ && pnpm --filter @fieldmaster/i18n build \
  && pnpm --filter @fieldmaster/api exec prisma generate \
  && pnpm --filter @fieldmaster/api build
 

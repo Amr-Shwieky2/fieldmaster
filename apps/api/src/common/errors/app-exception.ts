@@ -61,4 +61,15 @@ export const ErrorCodes = {
   LAST_ACTIVE_OWNER: "LAST_ACTIVE_OWNER",
   ROLE_REQUIRES_TIME_TRACKING: "ROLE_REQUIRES_TIME_TRACKING",
   MEMBERSHIP_ARCHIVED: "MEMBERSHIP_ARCHIVED",
+  // Step 8: reports, uploads and onboarding.
+  /** 429 from the rate limiter (mapped in AllExceptionsFilter). */
+  RATE_LIMITED: "RATE_LIMITED",
+  FILE_TOO_LARGE: "FILE_TOO_LARGE",
+  FILE_TYPE_NOT_ALLOWED: "FILE_TYPE_NOT_ALLOWED",
+  /** The malware-scan hook refused the file. */
+  FILE_REJECTED: "FILE_REJECTED",
+  /** A redeem referenced an upload that is not this invitation's (or has the wrong purpose). */
+  UPLOAD_NOT_FOUND: "UPLOAD_NOT_FOUND",
+  INVITATION_ALREADY_USED: "INVITATION_ALREADY_USED",
+  REPORT_NOT_READY: "REPORT_NOT_READY",
 } as const;

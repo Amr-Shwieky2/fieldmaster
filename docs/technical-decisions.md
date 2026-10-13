@@ -229,6 +229,10 @@ this was okay" a second time.
 
 ## Onboarding invitation does not collect a government ID number or document image
 
+**Superseded in Step 8** (see "Step 8: …" below): the onboarding page now
+collects the ID number (encrypted) and an image or PDF of the document
+(private storage, Owner-only signed URLs). Original note:
+
 The onboarding redemption endpoint collects `governmentIdType` (a category)
 but not the ID number or a scanned image. Full support requires a file
 upload pipeline (private S3/MinIO storage, signed URLs, encrypted-at-rest
@@ -1323,3 +1327,50 @@ FINALIZED versions (each month's latest finalized one). The open month(s)
 get a DRAFT estimate: the current month always, and the previous month until
 it is finalized (in the first days of a month the previous month is usually
 still in review, and a worker would otherwise see nothing for it).
+
+## Step 8: Arabic PDF reports, operational reports, complete onboarding
+
+Arabic PDF and CSV reports generated as background jobs, seven report
+types, and the complete onboarding flow (invitations, the public join page,
+private uploads, the Owner's review). In progress: the sections below cover
+the foundations; the report types, uploads and review are documented as they
+land.
+
+### The API uses the shared Arabic labels through a Node build of `@fieldmaster/i18n`
+
+The PDFs and CSVs must use the same Arabic labels and formatting as the apps
+(₪, Asia/Jerusalem times, Western digits, enum labels, error texts). The
+package was TypeScript source only (the admin web and Metro compile it); the
+API runs compiled CommonJS and cannot load `.ts`.
+- **Chosen:** a second entry, `src/node.ts`, built to `dist/` with `tsc`
+  (`pnpm --filter @fieldmaster/i18n build`, also in the API Dockerfile) and
+  exported as `@fieldmaster/i18n/node` (`exports` for Node, `typesVersions`
+  for the API's `moduleResolution: node`). It leaves out the error helpers,
+  which import the browser API client.
+- **Not chosen:** pointing the whole package at a build (the admin web and
+  the mobile app would then depend on a build step during development), or
+  copying the labels into the API (two sources of truth).
+
+### Arabic PDFs: an embedded font and paged-media footers
+
+- **Font:** IBM Plex Sans Arabic (SIL Open Font License) from
+  `@fontsource/ibm-plex-sans-arabic`, an ordinary API dependency (so it is in
+  node_modules locally and in the Docker image). Its Arabic, Latin and
+  Latin-extended subsets are embedded in each report as base64 `@font-face`
+  rules with their `unicode-range`, under one family used everywhere. Between
+  them they cover Arabic, Latin names, digits and ₪, so Chromium never falls
+  back to a system font (checked with the font files' character maps).
+  Joined letters and the order of mixed Arabic, numbers and Latin names were
+  checked on rendered pages; LTR runs (amounts, times, coordinates, hashes)
+  are isolated with `<bdi dir="ltr">`.
+- **Footer on every page** («صفحة N من M», report ID, SHA-256): CSS
+  paged-media margin boxes (`@page { @bottom-left { content: … counter(page)
+  … counter(pages) } }`) in the document itself. Playwright's
+  header/footer templates were not used: they are separate documents that
+  cannot use the embedded font.
+- **Two hashes:** the footer carries the SHA-256 of the report's *source
+  data* (a PDF cannot contain its own hash — see "PDF reports: hash the
+  source data"). The SHA-256 of each stored file (PDF and CSV) is recorded
+  too, and `GET /reports/:id/verify` downloads the stored files and hashes
+  them again, so a changed file is detected.
+

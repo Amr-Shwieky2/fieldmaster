@@ -9,7 +9,7 @@
  * Run with: pnpm --filter @fieldmaster/api db:seed
  */
 import { Prisma, PrismaClient } from "@prisma/client";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import {
   AccountStatus,
@@ -105,14 +105,14 @@ async function main() {
   console.log("Wiping existing data...");
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      idempotency_records, otp_challenges,
+      idempotency_records, otp_challenges, generated_reports,
       payroll_calculation_snapshots, payroll_calculation_runs, payroll_adjustments, payroll_items, payroll_periods,
       forgotten_stamp_infractions, manual_time_corrections, attendance_approvals, daily_summaries,
       unpaid_breaks, rejected_clock_attempts, clock_events, emergency_callouts, time_entries,
       temporary_check_in_points, temporary_supervisor_assignments, shift_assignments, shifts,
       turan_assignments, geofences, sites, projects,
       notification_deliveries, notifications,
-      onboarding_invitations, identity_documents, encrypted_bank_accounts, compensation_profiles, worker_profiles,
+      onboarding_invitations, identity_documents, encrypted_bank_accounts, compensation_profiles, worker_profiles, file_assets,
       refresh_token_families, user_devices, organization_memberships, users,
       audit_logs, organization_settings, organizations
     RESTART IDENTITY CASCADE;
@@ -557,6 +557,27 @@ async function main() {
   await recordAudit(org.id, owner1User.id, "PAYROLL_CALCULATED", "PayrollPeriod", payrollPeriod.id);
   await prisma.payrollPeriod.update({ where: { id: payrollPeriod.id }, data: { status: PayrollPeriodStatus.FINALIZED, finalizedAt: new Date(), finalizedBy: owner1User.id } });
   await recordAudit(org.id, owner1User.id, "PAYROLL_FINALIZED", "PayrollPeriod", payrollPeriod.id);
+
+  // ── Onboarding invitations (Step 8): one in every state ────────────────
+  // Only the SHA-256 of a token is stored, so these links cannot be opened:
+  // an Owner creates a fresh invitation in the admin web to get a working one.
+  console.log("Creating onboarding invitations...");
+  const seedTokenHash = () => createHash("sha256").update(randomBytes(32).toString("hex")).digest("hex");
+  const hourMs = 3_600_000;
+  await prisma.onboardingInvitation.createMany({
+    data: [
+      { id: id(), organizationId: org.id, tokenHash: seedTokenHash(), prefilledPhoneNumber: "+972500010020", expiresAt: new Date(Date.now() + 70 * hourMs), createdBy: owner1User.id },
+      {
+        id: id(), organizationId: org.id, tokenHash: seedTokenHash(), expiresAt: new Date(Date.now() + 40 * hourMs), createdBy: owner1User.id,
+        usedAt: new Date(Date.now() - 20 * hourMs), redeemedWorkerProfileId: workers[11].profile.id,
+      },
+      { id: id(), organizationId: org.id, tokenHash: seedTokenHash(), expiresAt: new Date(Date.now() - 5 * hourMs), createdBy: fm1User.id },
+      {
+        id: id(), organizationId: org.id, tokenHash: seedTokenHash(), prefilledPhoneNumber: "+972500010021", expiresAt: new Date(Date.now() + 60 * hourMs), createdBy: owner1User.id,
+        revokedAt: new Date(Date.now() - 2 * hourMs), revokedBy: owner1User.id,
+      },
+    ],
+  });
 
   // ── Notifications ─────────────────────────────────────────────────────
   // Same shape as the API writes them: English title/body (still read as-is

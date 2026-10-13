@@ -27,7 +27,7 @@ export async function resetDatabase(app: INestApplication) {
   const prisma = app.get(PrismaService);
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      idempotency_records, otp_challenges,
+      idempotency_records, otp_challenges, generated_reports,
       payroll_calculation_snapshots, payroll_calculation_runs, payroll_adjustments, payroll_items, payroll_periods,
       forgotten_stamp_infractions, manual_time_corrections, attendance_approvals, daily_summaries,
       unpaid_breaks, rejected_clock_attempts, clock_events, emergency_callouts, time_entries,
@@ -35,7 +35,7 @@ export async function resetDatabase(app: INestApplication) {
       turan_assignments, geofences, sites, projects,
       notification_deliveries, notifications,
       offline_sync_events, offline_sync_batches, device_public_keys,
-      onboarding_invitations, identity_documents, encrypted_bank_accounts, compensation_profiles, worker_profiles,
+      onboarding_invitations, identity_documents, encrypted_bank_accounts, compensation_profiles, worker_profiles, file_assets,
       refresh_token_families, user_devices, organization_memberships, users,
       audit_logs, organization_settings, organizations
     RESTART IDENTITY CASCADE;
