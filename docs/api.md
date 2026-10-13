@@ -28,7 +28,11 @@ Everything is under `/api/v1`. Implemented route groups:
 /attendance/entries     admin attendance list: tabs, filters, page-based pagination
 /forgotten-stamp-infractions  month list; Owner-only reversal
 /turan-assignments, /emergency-callouts (start/end, plus the admin list and detail)
-/payroll-periods, /payroll-items, /payroll-adjustments
+/payroll-periods         Owner only (Step 7): months and their versions (/:yearMonth = latest,
+                        /:yearMonth/versions[/:version[/workers/:workerProfileId]]), calculate (202, a
+                        background job; /:yearMonth/calculation = its state), finalize, reopen (reason),
+                        adjustments (manual +/-), dashboard; /:yearMonth/my-payslip (own, finalized only)
+/payroll-statements/me  the caller's own monthly statements (finalized) + a labeled estimate
 /reports                worker attendance ledger PDF generation
 /notifications          in-app list, mark-read, WebSocket/SSE streams
 /audit-logs              paginated list + chain verification
@@ -47,6 +51,29 @@ evidence or emergency responses of a Field Manager. An Owner gets it from
 `GET /workers/:id/estimated-earnings?month=YYYY-MM` (both
 `VIEW_COMPENSATION`), and from `estimatedCostAgorot`, which only an Owner's
 emergency call-out DTO has. See `authorization-matrix.md`.
+
+## Payroll (Step 7)
+
+- **Versions.** A month's payroll is a chain of versions. `GET
+  /payroll-periods/:yearMonth` is the latest (working, or the last
+  finalized); `GET .../versions/:version` any of them. A version is always
+  read from its stored calculation (inputs, per-worker and per-entry
+  results, totals): finalized versions never change (the database refuses
+  it), and reopening (`POST .../reopen { reason }`, Owner) creates the next
+  version.
+- **Calculation is a background job.** `POST .../calculate` with an
+  `Idempotency-Key` answers `202` with the run (`QUEUED`); poll `GET
+  .../calculation` for `state` (`QUEUED` / `RUNNING` / `SUCCEEDED` /
+  `FAILED`), `progress` (0-100), `processedWorkers` / `totalWorkers` and,
+  when it failed, `errorCode`. The same key always answers the same run
+  (even after it finished); a second calculation while one is queued or
+  running is `409 PAYROLL_CALCULATION_IN_PROGRESS`; a finalized version is
+  `409 PAYROLL_PERIOD_FINALIZED`.
+- **Errors:** `PAYROLL_PERIOD_NOT_READY` (finalize before a calculation),
+  `PAYROLL_PERIOD_NOT_FINALIZED` (reopen a version that is not finalized).
+  A malformed `:yearMonth` is a 400; an unknown `:version` a 404.
+- **Money keys** end in `Agorot` (integer agorot), so the financial leak
+  scanner flags them on any route that is not Owner-only.
 
 ## Real-time
 
@@ -104,7 +131,8 @@ for `code` (or for the HTTP status when it doesn't know the code), and its
 ## Idempotency
 
 Required (`Idempotency-Key` header) on: clock-in, clock-out, offline-sync
-batch submission, payroll calculation, and PDF generation. Implementation:
+batch submission, payroll calculation (the key identifies the background
+run), and PDF generation. Implementation:
 `IdempotencyService.withIdempotency(key, route, body, handler)` hashes the
 request body, stores it keyed by `(key, route)`, and replays the stored
 response on an exact retry; a retry with the same key but a *different*

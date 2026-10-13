@@ -20,7 +20,14 @@ import type {
   NotificationItem,
   OfflineSyncBatchRecord,
   OfflineSyncBatchResponse,
-  PayrollPeriod,
+  CreatePayrollAdjustmentInput,
+  MySalaryStatements,
+  PayrollAdjustmentLine,
+  PayrollCalculationRun,
+  PayrollPeriodSummary,
+  PayrollVersionDetail,
+  PayrollVersionSummary,
+  PayrollWorkerDetail,
   Project,
   Shift,
   Site,
@@ -375,24 +382,48 @@ export class FieldMasterClient {
     return this.request<OfflineSyncBatchRecord[]>("GET", "/offline-sync/batches");
   }
 
-  // ── Payroll ─────────────────────────────────────────────────────────
+  // ── Payroll (Owner only, except the caller's own statements) ────────
   listPayrollPeriods() {
-    return this.request<PayrollPeriod[]>("GET", "/payroll-periods");
+    return this.request<PayrollPeriodSummary[]>("GET", "/payroll-periods");
   }
+  /** The month's latest version (404 when the month was never calculated). */
   getPayrollPeriod(yearMonth: string) {
-    return this.request<PayrollPeriod>("GET", `/payroll-periods/${yearMonth}`);
+    return this.request<PayrollVersionDetail>("GET", `/payroll-periods/${yearMonth}`);
   }
+  /** Any version of the month, read-only unless it is the latest. */
+  getPayrollVersion(yearMonth: string, version: number) {
+    return this.request<PayrollVersionDetail>("GET", `/payroll-periods/${yearMonth}/versions/${version}`);
+  }
+  listPayrollVersions(yearMonth: string) {
+    return this.request<PayrollVersionSummary[]>("GET", `/payroll-periods/${yearMonth}/versions`);
+  }
+  getPayrollWorker(yearMonth: string, version: number, workerProfileId: string) {
+    return this.request<PayrollWorkerDetail>("GET", `/payroll-periods/${yearMonth}/versions/${version}/workers/${workerProfileId}`);
+  }
+  /** The latest calculation run of the month's latest version (404 when there is none). */
+  getPayrollCalculation(yearMonth: string) {
+    return this.request<PayrollCalculationRun>("GET", `/payroll-periods/${yearMonth}/calculation`);
+  }
+  /** Starts a background calculation (202). The same key always returns the same run; a second calculation while one runs is 409. */
   calculatePayroll(yearMonth: string, idempotencyKey: string) {
-    return this.request<PayrollPeriod>("POST", `/payroll-periods/${yearMonth}/calculate`, undefined, { "Idempotency-Key": idempotencyKey });
+    return this.request<PayrollCalculationRun>("POST", `/payroll-periods/${yearMonth}/calculate`, undefined, { "Idempotency-Key": idempotencyKey });
   }
   finalizePayroll(yearMonth: string) {
-    return this.request<PayrollPeriod>("POST", `/payroll-periods/${yearMonth}/finalize`);
+    return this.request<PayrollVersionDetail>("POST", `/payroll-periods/${yearMonth}/finalize`);
   }
+  /** Creates the next version from the finalized one (which stays readable); answers the new version. */
   reopenPayroll(yearMonth: string, reason: string) {
-    return this.request<PayrollPeriod>("POST", `/payroll-periods/${yearMonth}/reopen`, { reason });
+    return this.request<PayrollVersionDetail>("POST", `/payroll-periods/${yearMonth}/reopen`, { reason });
+  }
+  createPayrollAdjustment(yearMonth: string, input: CreatePayrollAdjustmentInput) {
+    return this.request<PayrollAdjustmentLine>("POST", `/payroll-periods/${yearMonth}/adjustments`, input);
   }
   getFinancialDashboard(yearMonth: string) {
     return this.request<FinancialDashboard>("GET", `/payroll-periods/${yearMonth}/dashboard`);
+  }
+  /** The caller's own salary: finalized months plus labeled estimates (time-trackable members only; 404 otherwise). */
+  getMySalaryStatements() {
+    return this.request<MySalaryStatements>("GET", "/payroll-statements/me");
   }
 
   // ── Notifications ───────────────────────────────────────────────────

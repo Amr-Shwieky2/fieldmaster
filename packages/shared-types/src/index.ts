@@ -146,6 +146,37 @@ export const PayrollAdjustmentSource = {
 } as const;
 export type PayrollAdjustmentSource = (typeof PayrollAdjustmentSource)[keyof typeof PayrollAdjustmentSource];
 
+/** Step 7: a payroll calculation runs as a background job; this is where it stands. */
+export const PayrollCalculationState = {
+  QUEUED: "QUEUED",
+  RUNNING: "RUNNING",
+  SUCCEEDED: "SUCCEEDED",
+  FAILED: "FAILED",
+} as const;
+export type PayrollCalculationState = (typeof PayrollCalculationState)[keyof typeof PayrollCalculationState];
+
+/**
+ * Step 7: a worker's monthly salary statement. FINALIZED comes from a
+ * finalized payroll version; DRAFT is the estimate for a month that has no
+ * finalized version yet (approved attendance so far, may still change).
+ */
+export const SalaryStatementStatus = {
+  FINALIZED: "FINALIZED",
+  DRAFT: "DRAFT",
+} as const;
+export type SalaryStatementStatus = (typeof SalaryStatementStatus)[keyof typeof SalaryStatementStatus];
+
+/**
+ * Step 7: where the Owner dashboard's figures for a month come from: the
+ * month's finalized payroll version, or a live calculation over the approved
+ * attendance and adjustments so far.
+ */
+export const PayrollFigureSource = {
+  FINALIZED: "FINALIZED",
+  LIVE: "LIVE",
+} as const;
+export type PayrollFigureSource = (typeof PayrollFigureSource)[keyof typeof PayrollFigureSource];
+
 export const ApprovalAction = {
   APPROVE: "APPROVE",
   REJECT: "REJECT",
@@ -260,5 +291,15 @@ export const FORGOTTEN_STAMP_PENALTY_AGOROT = 1000;
 
 export const EMERGENCY_RETROACTIVE_MINUTES = 60;
 export const EMERGENCY_RETURN_BUFFER_MINUTES = 15;
+
+/**
+ * Owner dashboard (Step 7): a business day is an overtime spike when its
+ * approved overtime minutes (all workers together) are at least
+ * OVERTIME_SPIKE_FACTOR times the month's average overtime per working day,
+ * and at least OVERTIME_SPIKE_MIN_MINUTES. A working day is a day with at
+ * least one approved shift. A reporting rule only: no pay depends on it.
+ */
+export const OVERTIME_SPIKE_FACTOR = 2;
+export const OVERTIME_SPIKE_MIN_MINUTES = 60;
 
 export const DEVICE_TIME_DEVIATION_LIMIT_SECONDS = 120;

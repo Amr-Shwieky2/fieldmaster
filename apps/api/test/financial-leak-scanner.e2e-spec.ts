@@ -19,6 +19,7 @@ import {
 } from "./fixtures";
 import { PrismaService } from "../src/common/prisma/prisma.service";
 import { NotificationsService } from "../src/modules/notifications/notifications.service";
+import { calculatePayroll } from "./payroll-helpers";
 
 /**
  * Financial leak scanner (spec sections 6.2 / 23.5).
@@ -75,6 +76,8 @@ const WORKER_OWN_MONEY_ROUTES = new Set([
   "GET /api/v1/workers/:id/compensation-profiles",
   // The Worker's own payslip; the route takes no worker id at all.
   "GET /api/v1/payroll-periods/:yearMonth/my-payslip",
+  // Step 7: the Worker's own salary statements (finalized versions + a labeled estimate); no worker id either.
+  "GET /api/v1/payroll-statements/me",
 ]);
 
 /**
@@ -85,7 +88,8 @@ const WORKER_OWN_MONEY_ROUTES = new Set([
 const EXPECTED_NOT_FOUND = {
   // A Field Manager who is not time-trackable has no worker profile, so no payslip.
   // A temporary supervisor assignment exists only for its own supervisor: everyone else gets 404.
-  manager: new Set(["GET /api/v1/payroll-periods/:yearMonth/my-payslip", "GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
+  // The same for their own salary statements (Step 7).
+  manager: new Set(["GET /api/v1/payroll-periods/:yearMonth/my-payslip", "GET /api/v1/payroll-statements/me", "GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
   worker: new Set(["GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
   supervisor: new Set<string>(),
 };
@@ -234,11 +238,10 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     await request(http).post(`/api/v1/time-entries/${timeEntryId}/approve`).set("Authorization", `Bearer ${managerToken}`).send({}).expect(201);
 
     const yearMonth: string = clockOut.body.businessDate.slice(0, 7);
-    await request(http)
-      .post(`/api/v1/payroll-periods/${yearMonth}/calculate`)
-      .set("Authorization", `Bearer ${ownerToken}`)
-      .set("Idempotency-Key", uuidv7())
-      .expect(201);
+    // Step 7: the calculation is a background job; the month is then finalized, so the Worker's own pay
+    // (payslip, salary statements) exists -- they only ever come from finalized versions.
+    await calculatePayroll(app, ownerToken, yearMonth);
+    await request(http).post(`/api/v1/payroll-periods/${yearMonth}/finalize`).set("Authorization", `Bearer ${ownerToken}`).expect(201);
 
     await request(http)
       .post("/api/v1/turan-assignments")
@@ -323,6 +326,8 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
         "emergency-callouts": calloutId,
         memberships: worker.membership.id,
         "temporary-supervisors": supervision.body.id as string,
+        // Step 7: `/payroll-periods/:yearMonth/versions/:version` (and its `workers/:workerProfileId`, filled with the Worker above).
+        versions: "1",
         ":yearMonth": yearMonth,
       },
     };
@@ -364,7 +369,13 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/shifts -> \$\[\d+\]\.project\.budgetAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/workers -> \$\[\d+\]\.compensation\.dailyBaseRateAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/forgotten-stamp-infractions -> \$\[\d+\]\.deductionAgorot$/m);
-    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/payroll-periods\/:yearMonth -> \$\.items\[\d+\]\.netPayableAgorot$/m);
+    // Step 7: payroll versions, the worker drill-down and the dashboard (the version's workers replaced `items`).
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/payroll-periods -> \$\[0\]\.netPayableAgorot$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/payroll-periods\/:yearMonth -> \$\.workers\[\d+\]\.netPayableAgorot$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/payroll-periods\/:yearMonth\/versions -> \$\[0\]\.netPayableAgorot$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/payroll-periods\/:yearMonth\/versions\/:version -> \$\.totals\.netPayableAgorot$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/payroll-periods\/:yearMonth\/versions\/:version\/workers\/:workerProfileId -> \$\.entries\[0\]\.totalAgorot$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/payroll-periods\/:yearMonth\/dashboard -> \$\.costByWorker\[0\]\.netPayableAgorot$/m);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/notifications -> \$\[\d+\]\.dataJson\.estimatedCostAgorot$/m);
     // Step 5: the Owner-only cost responses and the Owner's emergency call-out DTO.
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/time-entries\/:id\/estimated-cost -> \$\.estimatedCostAgorot$/m);
@@ -431,11 +442,25 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
 
     const payslip = await request(http).get(`/api/v1/payroll-periods/${seed.yearMonth}/my-payslip`).set("Authorization", auth).expect(200);
     expect(payslip.body.workerProfileId).toBe(workerProfileId);
+    expect(payslip.body.periodStatus).toBe("FINALIZED");
     expect(payslip.body.adjustments.length).toBeGreaterThan(0);
     for (const adjustment of payslip.body.adjustments) expect(adjustment.workerProfileId).toBe(workerProfileId);
     // Every row the payslip came from belongs to the Worker.
     const itemIds = new Set((await prisma.payrollItem.findMany({ where: { workerProfileId } })).map((item) => item.id));
     expect(itemIds.has(payslip.body.id)).toBe(true);
+
+    // Step 7: salary statements -- the Worker's item of the finalized month, and nothing of anyone else.
+    const own = await request(http).get("/api/v1/payroll-statements/me").set("Authorization", auth).expect(200);
+    const ownItem = await prisma.payrollItem.findUniqueOrThrow({ where: { id: payslip.body.id } });
+    expect(own.body.statements).toEqual([expect.objectContaining({ yearMonth: seed.yearMonth, status: "FINALIZED", isEstimate: false, netPayableAgorot: ownItem.netPayableAgorot })]);
+    for (const estimate of own.body.estimates) expect(estimate).toMatchObject({ status: "DRAFT", isEstimate: true, version: null });
+    const others = await prisma.workerProfile.findMany({ where: { organizationId: seed.owner.org.id, id: { not: workerProfileId } }, select: { id: true } });
+    const ownJson = JSON.stringify(own.body);
+    for (const other of others) expect(ownJson).not.toContain(other.id);
+    // The same month as the other Worker (no pay in it): no statement at all, so the route never falls back to someone else's item.
+    const otherStatements = await request(http).get("/api/v1/payroll-statements/me").set("Authorization", `Bearer ${seed.tokens.otherWorker}`).expect(200);
+    expect(otherStatements.body.statements).toEqual([]);
+    expect(JSON.stringify(otherStatements.body)).not.toContain(workerProfileId);
   });
 
   it("a Field Manager's WebSocket and SSE notification payloads carry no money", async () => {

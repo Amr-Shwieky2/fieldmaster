@@ -1,17 +1,24 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Param, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiHeader, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { RequirePermissions } from "../../common/decorators/require-permissions.decorator";
 import { Permission } from "../../common/auth/permissions";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
-import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { PayrollCalculationService } from "./payroll-calculation.service";
 import { PayrollAdjustmentsService } from "./payroll-adjustments.service";
+import { PayrollVersionsService } from "./payroll-versions.service";
 import { FinancialDashboardService } from "./financial-dashboard.service";
+import { SalaryStatementsService } from "./salary-statements.service";
 import { CreateManualAdjustmentDto, ReopenPeriodDto } from "./dto/manual-adjustment.dto";
-import { PrismaService } from "../../common/prisma/prisma.service";
+import { VersionPipe, YearMonthPipe } from "./payroll-params";
 
+/**
+ * Payroll (Step 7). Every route except `my-payslip` needs a financial
+ * permission only Owners hold. A month has versions: GET `/:yearMonth` is
+ * the latest one; `/versions/:version` any of them, read-only unless it is
+ * the latest.
+ */
 @ApiBearerAuth()
 @ApiTags("payroll")
 @Controller("payroll-periods")
@@ -19,61 +26,97 @@ export class PayrollController {
   constructor(
     private readonly payrollCalculation: PayrollCalculationService,
     private readonly payrollAdjustments: PayrollAdjustmentsService,
+    private readonly versions: PayrollVersionsService,
     private readonly financialDashboard: FinancialDashboardService,
-    private readonly prisma: PrismaService,
+    private readonly statements: SalaryStatementsService,
   ) {}
 
   @Get()
   @RequirePermissions(Permission.VIEW_PAYROLL)
   list(@CurrentUser() user: AuthenticatedUser) {
-    return this.payrollCalculation.listPeriods(user.organizationId);
+    return this.versions.listMonths(user.organizationId);
   }
 
   @Get(":yearMonth")
   @RequirePermissions(Permission.VIEW_PAYROLL)
-  getDetail(@Param("yearMonth") yearMonth: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.payrollCalculation.getPeriodDetail(user.organizationId, yearMonth);
+  getDetail(@Param("yearMonth", YearMonthPipe) yearMonth: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.versions.detail(user.organizationId, yearMonth);
+  }
+
+  @Get(":yearMonth/versions")
+  @RequirePermissions(Permission.VIEW_PAYROLL)
+  listVersions(@Param("yearMonth", YearMonthPipe) yearMonth: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.versions.listVersions(user.organizationId, yearMonth);
+  }
+
+  @Get(":yearMonth/versions/:version")
+  @RequirePermissions(Permission.VIEW_PAYROLL)
+  getVersion(@Param("yearMonth", YearMonthPipe) yearMonth: string, @Param("version", VersionPipe) version: number, @CurrentUser() user: AuthenticatedUser) {
+    return this.versions.detail(user.organizationId, yearMonth, version);
+  }
+
+  @Get(":yearMonth/versions/:version/workers/:workerProfileId")
+  @RequirePermissions(Permission.VIEW_PAYROLL)
+  getWorker(
+    @Param("yearMonth", YearMonthPipe) yearMonth: string,
+    @Param("version", VersionPipe) version: number,
+    @Param("workerProfileId") workerProfileId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.versions.workerDetail(user.organizationId, yearMonth, version, workerProfileId);
+  }
+
+  @Get(":yearMonth/calculation")
+  @RequirePermissions(Permission.VIEW_PAYROLL)
+  getCalculation(@Param("yearMonth", YearMonthPipe) yearMonth: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.versions.latestRun(user.organizationId, yearMonth);
   }
 
   @Get(":yearMonth/dashboard")
   @RequirePermissions(Permission.VIEW_FINANCIAL_DASHBOARD)
-  getDashboard(@Param("yearMonth") yearMonth: string, @CurrentUser() user: AuthenticatedUser) {
+  getDashboard(@Param("yearMonth", YearMonthPipe) yearMonth: string, @CurrentUser() user: AuthenticatedUser) {
     return this.financialDashboard.getDashboard(user.organizationId, yearMonth);
   }
 
+  /** 202 + the calculation run (a background job). Poll `GET /:yearMonth/calculation` for its progress. */
   @Post(":yearMonth/calculate")
+  @HttpCode(202)
   @ApiHeader({ name: "Idempotency-Key", required: true })
   @RequirePermissions(Permission.MANAGE_PAYROLL)
-  calculate(
-    @Param("yearMonth") yearMonth: string,
+  async calculate(
+    @Param("yearMonth", YearMonthPipe) yearMonth: string,
     @CurrentUser() user: AuthenticatedUser,
     @Headers("idempotency-key") idempotencyKey: string | undefined,
     @CorrelationId() correlationId: string,
   ) {
-    return this.payrollCalculation.calculate(user.organizationId, yearMonth, user, idempotencyKey, correlationId);
+    const runId = await this.payrollCalculation.requestCalculation(user.organizationId, yearMonth, user, idempotencyKey, correlationId);
+    return this.versions.run(user.organizationId, runId);
   }
 
   @Post(":yearMonth/finalize")
   @RequirePermissions(Permission.FINALIZE_PAYROLL)
-  finalize(@Param("yearMonth") yearMonth: string, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
-    return this.payrollCalculation.finalize(user.organizationId, yearMonth, user, correlationId);
+  async finalize(@Param("yearMonth", YearMonthPipe) yearMonth: string, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    const finalized = await this.payrollCalculation.finalize(user.organizationId, yearMonth, user, correlationId);
+    return this.versions.detailById(finalized.id);
   }
 
+  /** Creates the next version; answers it (the finalized one stays readable under `/versions/:version`). */
   @Post(":yearMonth/reopen")
   @RequirePermissions(Permission.FINALIZE_PAYROLL)
-  reopen(
-    @Param("yearMonth") yearMonth: string,
+  async reopen(
+    @Param("yearMonth", YearMonthPipe) yearMonth: string,
     @Body() dto: ReopenPeriodDto,
     @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId: string,
   ) {
-    return this.payrollCalculation.reopen(user.organizationId, yearMonth, dto.reason, user, correlationId);
+    const next = await this.payrollCalculation.reopen(user.organizationId, yearMonth, dto.reason.trim(), user, correlationId);
+    return this.versions.detailById(next.id);
   }
 
   @Post(":yearMonth/adjustments")
   @RequirePermissions(Permission.MANAGE_PAYROLL)
   createAdjustment(
-    @Param("yearMonth") yearMonth: string,
+    @Param("yearMonth", YearMonthPipe) yearMonth: string,
     @Body() dto: CreateManualAdjustmentDto,
     @CurrentUser() user: AuthenticatedUser,
     @CorrelationId() correlationId: string,
@@ -81,20 +124,9 @@ export class PayrollController {
     return this.payrollAdjustments.create(user.organizationId, yearMonth, dto, user, correlationId);
   }
 
+  /** The caller's own item in the month's latest FINALIZED version; the route takes no worker id. */
   @Get(":yearMonth/my-payslip")
-  async myPayslip(@Param("yearMonth") yearMonth: string, @CurrentUser() user: AuthenticatedUser) {
-    if (!user.workerProfileId) {
-      throw new AppException(404, ErrorCodes.NOT_FOUND, "No payslip available for this account.");
-    }
-    const period = await this.prisma.payrollPeriod.findFirst({ where: { organizationId: user.organizationId, yearMonth }, orderBy: { version: "desc" } });
-    if (!period) throw new AppException(404, ErrorCodes.NOT_FOUND, "Payroll for this month has not been calculated yet.");
-
-    const item = await this.prisma.payrollItem.findUnique({
-      where: { payrollPeriodId_workerProfileId: { payrollPeriodId: period.id, workerProfileId: user.workerProfileId } },
-      include: { adjustments: true },
-    });
-    if (!item) throw new AppException(404, ErrorCodes.NOT_FOUND, "No payroll record found for this month.");
-
-    return { periodStatus: period.status, ...item };
+  myPayslip(@Param("yearMonth", YearMonthPipe) yearMonth: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.statements.myPayslip(user.organizationId, yearMonth, user);
   }
 }

@@ -66,6 +66,17 @@ Against a real running NestJS app + Postgres, covering (see
 - `DEVICE_FAILURE` corrections never counting as a forgotten stamp
 - Flexi-Check clock-in from any location
 - Payroll calculate → finalize → block-further-edits → reopen
+- **Payroll versions (Step 7, `payroll-versions.e2e-spec.ts`, 13 tests):**
+  the spec's numbers (daily 45,000 / hourly 5,000 / overtime 7,000 agorot:
+  9 h, 6 h with and without full-day credit, 10 h 30 m, hourly 6 h, a Night
+  Turan emergency 02:00-03:00 = 135 min = 11,250, four forgotten stamps and
+  a reversal), dates (a mid-month rate change, 00:30 on the 1st), the version
+  lifecycle (finalize, every edit refused, reopen with a reason, version 1
+  unchanged, version 2), the background job (same Idempotency-Key = same
+  job, concurrent requests, a lost job, a failed job), warnings and pending
+  counts, manual adjustments, the worker's own statements and the Owner
+  dashboard. `test/payroll-helpers.ts` starts a calculation and waits for
+  its job.
 - **Offline sync** (5 tests, added this pass): full offline clock-in/out
   round trip using genuine Ed25519 signatures and the device timestamp as
   the authoritative business time; invalid-signature rejection creating no

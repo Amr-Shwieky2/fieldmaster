@@ -199,6 +199,10 @@ calculated.
 
 ## Payroll "reopen" versions in place rather than a full row-per-version model
 
+**Superseded in Step 7** (see "Step 7: …" below): reopening now creates a
+new version row, finalized versions are immutable, and the migration
+restored the versions this design had overwritten. Original note:
+
 Section 23.4 asks for "a new version" on reopen. A fully faithful
 implementation would create an entirely new `PayrollPeriod` row per version
 with its own duplicated `PayrollItem` set, preserving old versions
@@ -1186,3 +1190,136 @@ that used to be hard-coded, so nothing changes until an Owner edits them.
 - **Malformed shift ids.** They reached Prisma on `GET /shifts/:id`,
   assigning a worker and closing, which made a `@db.Uuid` column throw a 500.
   They are now checked first and answer 404, like the Step 5 routes.
+
+## Step 7: payroll versions, background calculation, Owner dashboard
+
+API and admin web. PDFs are Step 8; the worker's mobile salary screen is
+Step 9 (its API exists). No business rule changed: the calculators, the
+9-hour day, -60 / +15, the forgotten-stamp rule and the lifecycle's
+permissions are as they were.
+
+### One row per version, immutable once finalized
+
+The spec asks for immutable versions: a finalized version must never change
+or be recalculated, and reopening keeps the old one readable.
+- **Options.** (a) A separate `payroll_versions` table under a month row:
+  every place that checks "is this month finalized?" (corrections, approval,
+  full-day credit, the rewind, the evidence page) would have moved to a new
+  table. (b) **Chosen:** `payroll_periods` becomes one row per version. Its
+  unique `(organization, month, version)` key already allowed it, and every
+  existing check already reads "the month's latest version", so they keep
+  working: after a reopen the latest version is the new working one, and
+  edits are allowed again.
+- **What a version shows** comes from its own snapshot (schema 2): the
+  inputs (approved entries with their shift, project and site, the profiles,
+  the adjustments, names, pending counts), the per-worker and per-entry
+  results, per project / per site, warnings and totals. Reading a version
+  never recomputes from live records, so a later correction, rate change or
+  reversal cannot change what a finalized month says.
+- **Database triggers** make that a guarantee, not a convention: no UPDATE
+  or DELETE of a FINALIZED version, no change to its items, no change to any
+  snapshot. Finalizing is the version's last write; reopening INSERTS the
+  next version and never touches the finalized one.
+- **Adjustments.** An adjustment still links to the first item that
+  included it (`payroll_item_id`), but what a version included is the list in
+  its snapshot: a reversal created after version 1 counts in version 2 only.
+- **Existing data.** Before this step, reopen bumped the version on the same
+  row and the next calculation overwrote its items. The migration keeps each
+  such row (same id: audit rows and adjustments still point at it) as the
+  month's latest version and restores every earlier version as its own
+  FINALIZED row marked `legacy`, with that version's snapshots, and, when the
+  row had not been recalculated since its reopen, its items (they were the
+  previous version's finalized results). Finalization and reopen details
+  come from the audit log (version k's finalization is the k-th
+  PAYROLL_FINALIZED row of the period). Item breakdowns are backfilled from
+  the adjustments linked to them only where they reconcile with the stored
+  totals, so no net changes. Old-format versions show what they stored: their
+  items (no projects / sites / entries), or only the net per worker.
+  Checked on a scratch database seeded with every pre-Step-7 shape
+  (reopened twice and recalculated; reopened once and not recalculated; a
+  crashed CALCULATING row; a finalized month without a snapshot); the
+  triggers were then exercised on it.
+
+### Calculation as a BullMQ job
+
+- **Run rows.** `POST .../calculate` creates a `payroll_calculation_runs`
+  row and a job with the same id, inside `withIdempotency`, so the same key
+  replays the same run id; the response always shows the run's current
+  state.
+- **Concurrency.** A partial unique index allows one QUEUED/RUNNING run per
+  version: two simultaneous requests cannot both start one (the second is
+  409 `PAYROLL_CALCULATION_IN_PROGRESS`, also when the race is decided by the
+  index). Finalizing while a run is active is refused too.
+- **Lost jobs.** A run with no news for 15 minutes is taken over by the next
+  request (marked FAILED with `PAYROLL_CALCULATION_STALE`); a stale job that
+  wakes up later finds its run FAILED and does nothing.
+- **Results.** The job computes everything first and writes in one
+  transaction (snapshot, items, version → REVIEW), claiming its run there; a
+  failure marks the run FAILED with `PAYROLL_CALCULATION_FAILED` (translated
+  in the UI) and restores the version's previous status and results.
+- **Queue prefix per database.** Jobs carry a run id, so an API must never
+  take another database's jobs: the dev server and the e2e tests share one
+  Redis. Every queue now uses the prefix `fm:<database name>` (or
+  `QUEUE_PREFIX`), and the BullMQ connection is configured asynchronously so
+  `apps/api/.env` is loaded first (before, `REDIS_URL` was read before
+  ConfigModule loaded the file and silently fell back to the default).
+
+### Inputs and outputs of a calculation
+
+- Only approved entries, the profile in effect on each entry's business
+  date, and the month's adjustments. One engine
+  (`packages/shared-validation/src/payroll-month.ts`) over the existing
+  calculators, used by the job, the dashboard, the worker's estimate and the
+  seed.
+- **Who is in a month:** everyone with an approved entry *or* an adjustment.
+  Before, a worker with only adjustments (a bonus, or penalties on entries
+  still waiting for approval) was left out of the calculation and their
+  adjustments silently ignored.
+- **Breakdown:** reversals are now their own column; `positive adjustments`
+  are manual bonuses only (the migration moved existing reversals out of it;
+  nets unchanged).
+- **Warnings, not errors:** approved entries without a profile, with the
+  worker and dates. **Counts, not money:** entries waiting for approval.
+- **"Changed since calculation"** compares a fingerprint of the inputs
+  (approved entry ids + last update, adjustment ids, profile ids + last
+  update) stored with the snapshot against the live one. It never blocks
+  finalizing; the Owner sees it.
+
+### Small rule gaps closed on the way (no rule changed)
+
+The existing rule is "a finalized month refuses every edit". These paths
+did not check it:
+- sending an entry back for correction (it could take an approved entry
+  out of a finalized month's records);
+- a manual adjustment (it was silently added to a finalized month);
+- reversing a forgotten-stamp deduction (the infraction showed "reversed"
+  while the finalized pay still deducted it).
+All three are now 409 `PAYROLL_PERIOD_FINALIZED`; the Owner reopens first.
+Also: the reopen reason must not be blank (the old admin page sent a fixed
+text), a malformed month is a 400 instead of a payroll period named
+"2026-13", and `my-payslip` serves only finalized versions.
+
+### Owner dashboard
+
+- **Where the figures come from.** A month whose latest version is
+  finalized comes from that version; any other month is calculated live with
+  the same engine (`source` says which). The pending-approval exposure is
+  always live.
+- **Overtime spike**, defined for this step: a day whose overtime (all
+  workers) is at least twice the month's average per working day and at
+  least 60 minutes. It is relative to the month, so a crew that always works
+  long days is not flagged every day, while a day that jumps is; the floor
+  keeps a quiet month's 20-minute days from counting. Integer comparison, no
+  rounding.
+- **Chart:** Recharts (added to the admin web), RTL: the time axis runs
+  right to left and the value axis is on the right.
+- **Field Managers** keep their money-free dashboard: the financial section
+  is never requested for them, and the API answers 403.
+
+### Worker statements
+
+`GET /payroll-statements/me` takes no worker id. Statements come only from
+FINALIZED versions (each month's latest finalized one). The open month(s)
+get a DRAFT estimate: the current month always, and the previous month until
+it is finalized (in the first days of a month the previous month is usually
+still in review, and a worker would otherwise see nothing for it).

@@ -3,7 +3,7 @@ import { BullModule, InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { ExpireTemporaryCheckInPointsProcessor } from "./processors/expire-temporary-check-in-points.processor";
 import { ExpireOnboardingInvitationsProcessor } from "./processors/expire-onboarding-invitations.processor";
-import { QUEUE_NAMES } from "./queue.constants";
+import { QUEUE_NAMES, queuePrefix } from "./queue.constants";
 
 export { QUEUE_NAMES };
 
@@ -21,13 +21,18 @@ function parseRedisUrl(url: string) {
 @Global()
 @Module({
   imports: [
-    BullModule.forRoot({
-      connection: parseRedisUrl(process.env.REDIS_URL ?? "redis://localhost:6379"),
+    // Async so the environment is read after ConfigModule has loaded apps/api/.env.
+    BullModule.forRootAsync({
+      useFactory: () => ({
+        connection: parseRedisUrl(process.env.REDIS_URL ?? "redis://localhost:6379"),
+        prefix: queuePrefix(),
+      }),
     }),
     BullModule.registerQueue(
       { name: QUEUE_NAMES.EXPIRE_TEMPORARY_CHECK_IN_POINTS },
       { name: QUEUE_NAMES.EXPIRE_ONBOARDING_INVITATIONS },
       { name: QUEUE_NAMES.LONG_OPEN_ENTRIES },
+      { name: QUEUE_NAMES.PAYROLL_CALCULATION },
     ),
   ],
   providers: [ExpireTemporaryCheckInPointsProcessor, ExpireOnboardingInvitationsProcessor],

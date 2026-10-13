@@ -137,6 +137,14 @@ enum PayrollAdjustmentSource {
   MANUAL
 }
 
+/// Step 7: where a background payroll calculation stands.
+enum PayrollCalculationState {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 enum ApprovalAction {
   APPROVE
   REJECT
@@ -1062,6 +1070,10 @@ model ForgottenStampInfraction {
 // Payroll
 // ─────────────────────────────────────────────────────────────────────────
 
+/// One row per VERSION of a month's payroll (Step 7). The latest version of a
+/// month is the working one; a FINALIZED version never changes again (a
+/// database trigger refuses any update or delete, and any change to its
+/// items) -- reopening creates the next version and keeps this one readable.
 model PayrollPeriod {
   id             String       @id @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
@@ -1071,17 +1083,35 @@ model PayrollPeriod {
   status    PayrollPeriodStatus @default(OPEN)
   version   Int                 @default(1)
 
+  /// The finalized version this one was reopened from (null for version 1).
+  previousVersionId String?        @unique @map("previous_version_id") @db.Uuid
+  previousVersion   PayrollPeriod? @relation("PayrollVersionChain", fields: [previousVersionId], references: [id])
+  nextVersion       PayrollPeriod? @relation("PayrollVersionChain")
+
+  /// Who started this version: the first calculation (version 1) or the reopen. Null for rows created before Step 7.
+  createdBy String? @map("created_by") @db.Uuid
+
   finalizedAt  DateTime? @map("finalized_at")
   finalizedBy  String?   @map("finalized_by") @db.Uuid
+  /// Version 2 and later: the reopen that created this version (by whom, when, why).
   reopenedAt   DateTime? @map("reopened_at")
   reopenedBy   String?   @map("reopened_by") @db.Uuid
   reopenReason String?   @map("reopen_reason")
 
+  /// The calculation whose results are this version's items (the finalized one, once FINALIZED).
+  currentSnapshotId String?                     @unique @map("current_snapshot_id") @db.Uuid
+  currentSnapshot   PayrollCalculationSnapshot? @relation("PayrollCurrentSnapshot", fields: [currentSnapshotId], references: [id])
+
+  /// An earlier version of a month reopened in place before Step 7, restored by
+  /// the Step 7 migration as its own row: only what was stored then is shown.
+  legacy Boolean @default(false)
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  items     PayrollItem[]
-  snapshots PayrollCalculationSnapshot[]
+  items           PayrollItem[]
+  snapshots       PayrollCalculationSnapshot[]
+  calculationRuns PayrollCalculationRun[]
 
   @@unique([organizationId, yearMonth, version])
   @@index([organizationId, yearMonth])
@@ -1101,11 +1131,19 @@ model PayrollItem {
   emergencyRetroactiveMinutes Int @default(0) @map("emergency_retroactive_minutes")
   emergencyReturnMinutes      Int @default(0) @map("emergency_return_minutes")
 
-  grossBaseAgorot           Int @default(0) @map("gross_base_agorot")
-  overtimeAgorot            Int @default(0) @map("overtime_agorot")
-  positiveAdjustmentsAgorot Int @default(0) @map("positive_adjustments_agorot")
-  deductionsAgorot          Int @default(0) @map("deductions_agorot")
-  netPayableAgorot          Int @default(0) @map("net_payable_agorot")
+  /// Approved shifts paid in this item. Null for items calculated before Step 7 without a stored entry list.
+  approvedShifts Int? @map("approved_shifts")
+
+  grossBaseAgorot               Int @default(0) @map("gross_base_agorot")
+  overtimeAgorot                Int @default(0) @map("overtime_agorot")
+  /// Manual bonuses (Step 7: forgotten-stamp reversals are counted separately in reversalsAgorot).
+  positiveAdjustmentsAgorot     Int @default(0) @map("positive_adjustments_agorot")
+  forgottenStampPenaltiesAgorot Int @default(0) @map("forgotten_stamp_penalties_agorot")
+  reversalsAgorot               Int @default(0) @map("reversals_agorot")
+  otherDeductionsAgorot         Int @default(0) @map("other_deductions_agorot")
+  /// All deductions: forgotten-stamp penalties + other (manual) deductions.
+  deductionsAgorot              Int @default(0) @map("deductions_agorot")
+  netPayableAgorot              Int @default(0) @map("net_payable_agorot")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1148,19 +1186,65 @@ model PayrollAdjustment {
   @@map("payroll_adjustments")
 }
 
+/// One immutable record per calculation (a database trigger refuses any
+/// update or delete). Step 7 snapshots (schemaVersion 2) hold everything a
+/// version is shown from: the inputs (approved entries with their shift,
+/// project and site, the compensation profiles used, the adjustments), the
+/// per-worker and per-entry results, and the totals -- nothing is recomputed
+/// from live records when a version is read.
 model PayrollCalculationSnapshot {
   id              String        @id @db.Uuid
   payrollPeriodId String        @map("payroll_period_id") @db.Uuid
   payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id])
 
-  version      Int
-  inputsJson   Json     @map("inputs_json")
-  resultJson   Json     @map("result_json")
-  calculatedBy String   @map("calculated_by") @db.Uuid
-  calculatedAt DateTime @default(now()) @map("calculated_at")
+  version       Int
+  /// 1: before Step 7 (entry ids and net per worker only); 2: Step 7 format.
+  schemaVersion Int      @default(1) @map("schema_version")
+  inputsJson    Json     @map("inputs_json")
+  resultJson    Json     @map("result_json")
+  totalsJson    Json?    @map("totals_json")
+  /// SHA-256 of the calculation's inputs, to tell whether the month changed since.
+  inputsHash    String?  @map("inputs_hash")
+  calculatedBy  String   @map("calculated_by") @db.Uuid
+  calculatedAt  DateTime @default(now()) @map("calculated_at")
+
+  calculationRunId String?                @unique @map("calculation_run_id") @db.Uuid
+  calculationRun   PayrollCalculationRun? @relation(fields: [calculationRunId], references: [id])
+
+  currentFor PayrollPeriod? @relation("PayrollCurrentSnapshot")
 
   @@index([payrollPeriodId])
   @@map("payroll_calculation_snapshots")
+}
+
+/// Step 7: one background calculation of a payroll version (its id is also
+/// the BullMQ job id). At most one QUEUED or RUNNING run per version (a
+/// partial unique index), so a concurrent "calculate" is refused.
+model PayrollCalculationRun {
+  id              String        @id @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  payrollPeriodId String        @map("payroll_period_id") @db.Uuid
+  payrollPeriod   PayrollPeriod @relation(fields: [payrollPeriodId], references: [id])
+
+  state            PayrollCalculationState @default(QUEUED)
+  /// 0-100.
+  progress         Int                     @default(0)
+  processedWorkers Int                     @default(0) @map("processed_workers")
+  totalWorkers     Int                     @default(0) @map("total_workers")
+
+  idempotencyKey String    @map("idempotency_key")
+  requestedBy    String    @map("requested_by") @db.Uuid
+  requestedAt    DateTime  @default(now()) @map("requested_at")
+  startedAt      DateTime? @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  /// An API error code (translated by the clients) and an English message for logs.
+  errorCode      String?   @map("error_code")
+  errorMessage   String?   @map("error_message")
+
+  snapshot PayrollCalculationSnapshot?
+
+  @@index([payrollPeriodId, requestedAt])
+  @@map("payroll_calculation_runs")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

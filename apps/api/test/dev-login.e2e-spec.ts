@@ -53,6 +53,11 @@ const EXPECTED_DECORATED_FINANCIAL_ROUTES = [
   "POST /api/v1/payroll-periods/:yearMonth/finalize",
   "POST /api/v1/payroll-periods/:yearMonth/reopen",
   "POST /api/v1/payroll-periods/:yearMonth/adjustments",
+  // Step 7: payroll versions, the worker drill-down and the calculation run.
+  "GET /api/v1/payroll-periods/:yearMonth/versions",
+  "GET /api/v1/payroll-periods/:yearMonth/versions/:version",
+  "GET /api/v1/payroll-periods/:yearMonth/versions/:version/workers/:workerProfileId",
+  "GET /api/v1/payroll-periods/:yearMonth/calculation",
   "POST /api/v1/workers/:id/approve",
   "POST /api/v1/workers/:id/compensation-profiles",
   "POST /api/v1/forgotten-stamp-infractions/:id/reverse",

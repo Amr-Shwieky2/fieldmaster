@@ -8,7 +8,7 @@
  *
  * Run with: pnpm --filter @fieldmaster/api db:seed
  */
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import {
@@ -25,6 +25,7 @@ import {
   OrgRole,
   PayrollAdjustmentSource,
   PayrollAdjustmentType,
+  PayrollCalculationState,
   PayrollPeriodStatus,
   ShiftStatus,
   ShiftType,
@@ -35,13 +36,16 @@ import {
   TuranType,
 } from "@fieldmaster/shared-types";
 import {
-  calculateDailyCompensation,
-  calculateHourlyCompensation,
+  calculatePayrollMonth,
   calculateShiftCompensation,
   computeEmergencyCompensation,
   evaluateForgottenStampInfraction,
   toBusinessDate,
 } from "@fieldmaster/shared-validation";
+
+import type { PrismaService } from "../src/common/prisma/prisma.service";
+import { PayrollInputsService } from "../src/modules/payroll/payroll-inputs.service";
+import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION } from "../src/modules/payroll/payroll-snapshot";
 
 const prisma = new PrismaClient();
 const id = () => uuidv7();
@@ -102,7 +106,7 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       idempotency_records, otp_challenges,
-      payroll_calculation_snapshots, payroll_adjustments, payroll_items, payroll_periods,
+      payroll_calculation_snapshots, payroll_calculation_runs, payroll_adjustments, payroll_items, payroll_periods,
       forgotten_stamp_infractions, manual_time_corrections, attendance_approvals, daily_summaries,
       unpaid_breaks, rejected_clock_attempts, clock_events, emergency_callouts, time_entries,
       temporary_check_in_points, temporary_supervisor_assignments, shift_assignments, shifts,
@@ -491,35 +495,65 @@ async function main() {
     },
   });
 
-  // ── Payroll period: finalize last month ──────────────────────────────
+  // ── Payroll: last month calculated and finalized (version 1) ─────────
+  // Through the API's own input loader, payroll engine and snapshot format
+  // (Step 7), so the finalized version is exactly what an Owner's
+  // calculation would have stored: inputs, per-worker and per-entry results,
+  // totals, items, a finished calculation run.
   console.log("Calculating and finalizing a payroll period...");
   const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 15);
   const yearMonth = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, "0")}`;
 
+  // Representative approved entries for that historical month (9 h 30 m, 9 h, and 6 h at another site).
+  const historicalDays: [number, number, number, number][] = [
+    [10, 2, 0, 9.5],
+    [2, 2, 1, 9],
+    [5, 1, 2, 6],
+  ];
+  for (const [workerIndex, siteIndex, dayOffset, hours] of historicalDays) {
+    const start = new Date(lastMonth.getTime() + dayOffset * 24 * 3_600_000);
+    const shift = await createShift(ShiftType.STANDARD, siteIndex, start, new Date(start.getTime() + hours * 3_600_000), fm1User.id);
+    await prisma.shiftAssignment.create({ data: { id: id(), shiftId: shift.id, workerProfileId: workers[workerIndex].profile.id, assignedBy: fm1User.id } });
+    await approvedEntry(shift, workers[workerIndex], hours);
+  }
+
+  const { inputs: payrollInputs, inputsHash } = await new PayrollInputsService(prisma as unknown as PrismaService).load(org.id, yearMonth);
+  const payrollMonth = calculatePayrollMonth({ entries: payrollInputs.entries, profiles: payrollInputs.compensationProfiles, adjustments: payrollInputs.adjustments });
+  const { result: payrollResult, totals: payrollTotals } = buildPayrollSnapshotResult(payrollInputs, payrollMonth.workers, payrollMonth.entries);
+  const calculatedAt = new Date();
   const payrollPeriod = await prisma.payrollPeriod.create({
-    data: { id: id(), organizationId: org.id, yearMonth, status: PayrollPeriodStatus.OPEN },
+    data: { id: id(), organizationId: org.id, yearMonth, version: 1, status: PayrollPeriodStatus.OPEN, createdBy: owner1User.id },
   });
-
-  // A representative approved entry for that historical month
-  const historicalShift = await createShift(ShiftType.STANDARD, 2, lastMonth, new Date(lastMonth.getTime() + 9 * 3_600_000), fm1User.id);
-  await prisma.shiftAssignment.create({ data: { id: id(), shiftId: historicalShift.id, workerProfileId: workers[10].profile.id, assignedBy: fm1User.id } });
-  await approvedEntry(historicalShift, workers[10], 9.5);
-
-  const profile10 = await prisma.compensationProfile.findFirstOrThrow({ where: { workerProfileId: workers[10].profile.id } });
-  const comp = profile10.compensationType === CompensationType.DAILY
-    ? calculateDailyCompensation({ dailyBaseRateAgorot: profile10.dailyBaseRateAgorot!, overtimeHourlyRateAgorot: profile10.overtimeHourlyRateAgorot, approvedMinutes: 540, fullDayCredit: false })
-    : calculateHourlyCompensation({ baseHourlyRateAgorot: profile10.baseHourlyRateAgorot!, overtimeHourlyRateAgorot: profile10.overtimeHourlyRateAgorot, approvedMinutes: 540, fullDayCredit: false });
-
-  await prisma.payrollItem.create({
+  const calculationRun = await prisma.payrollCalculationRun.create({
     data: {
-      id: id(), payrollPeriodId: payrollPeriod.id, workerProfileId: workers[10].profile.id,
-      standardDaysCredited: 1, regularMinutes: 540, overtimeMinutes: 0,
-      grossBaseAgorot: "baseCompensationAgorot" in comp ? comp.baseCompensationAgorot : comp.regularCompensationAgorot,
-      overtimeAgorot: 0, netPayableAgorot: "baseCompensationAgorot" in comp ? comp.baseCompensationAgorot : comp.regularCompensationAgorot,
+      id: id(), organizationId: org.id, payrollPeriodId: payrollPeriod.id, state: PayrollCalculationState.SUCCEEDED, progress: 100,
+      processedWorkers: payrollTotals.workers, totalWorkers: payrollTotals.workers, idempotencyKey: `seed-${yearMonth}`,
+      requestedBy: owner1User.id, requestedAt: calculatedAt, startedAt: calculatedAt, finishedAt: calculatedAt,
     },
   });
+  const snapshot = await prisma.payrollCalculationSnapshot.create({
+    data: {
+      id: id(), payrollPeriodId: payrollPeriod.id, version: 1, schemaVersion: PAYROLL_SNAPSHOT_SCHEMA_VERSION,
+      inputsJson: payrollInputs as unknown as Prisma.InputJsonValue, resultJson: payrollResult as unknown as Prisma.InputJsonValue,
+      totalsJson: payrollTotals as unknown as Prisma.InputJsonValue, inputsHash, calculatedBy: owner1User.id, calculatedAt, calculationRunId: calculationRun.id,
+    },
+  });
+  for (const worker of payrollResult.workers) {
+    await prisma.payrollItem.create({
+      data: {
+        id: id(), payrollPeriodId: payrollPeriod.id, workerProfileId: worker.workerProfileId,
+        approvedShifts: worker.approvedShifts, standardDaysCredited: worker.standardDaysCredited,
+        regularMinutes: worker.regularMinutes, overtimeMinutes: worker.overtimeMinutes,
+        emergencyRetroactiveMinutes: worker.emergencyRetroactiveMinutes, emergencyReturnMinutes: worker.emergencyReturnMinutes,
+        grossBaseAgorot: worker.grossBaseAgorot, overtimeAgorot: worker.overtimeAgorot,
+        positiveAdjustmentsAgorot: worker.positiveAdjustmentsAgorot, forgottenStampPenaltiesAgorot: worker.forgottenStampPenaltiesAgorot,
+        reversalsAgorot: worker.reversalsAgorot, otherDeductionsAgorot: worker.otherDeductionsAgorot,
+        deductionsAgorot: worker.deductionsAgorot, netPayableAgorot: worker.netPayableAgorot,
+      },
+    });
+  }
 
-  await prisma.payrollPeriod.update({ where: { id: payrollPeriod.id }, data: { status: PayrollPeriodStatus.REVIEW } });
+  await prisma.payrollPeriod.update({ where: { id: payrollPeriod.id }, data: { status: PayrollPeriodStatus.REVIEW, currentSnapshotId: snapshot.id } });
   await recordAudit(org.id, owner1User.id, "PAYROLL_CALCULATED", "PayrollPeriod", payrollPeriod.id);
   await prisma.payrollPeriod.update({ where: { id: payrollPeriod.id }, data: { status: PayrollPeriodStatus.FINALIZED, finalizedAt: new Date(), finalizedBy: owner1User.id } });
   await recordAudit(org.id, owner1User.id, "PAYROLL_FINALIZED", "PayrollPeriod", payrollPeriod.id);

@@ -486,7 +486,7 @@ describe("Attendance detail page", () => {
     });
 
     const actions = card("الإجراءات");
-    expect(within(actions).getByText("فترة الرواتب لهذا الشهر مُقفلة، فلا يمكن الاعتماد أو التصحيح أو احتساب يوم كامل حتى يُعاد فتحها.")).toBeTruthy();
+    expect(within(actions).getByText("رواتب هذا الشهر معتمدة نهائياً، فلا يمكن الاعتماد أو التصحيح أو احتساب يوم كامل حتى يُعاد فتحها.")).toBeTruthy();
     expect(within(actions).getByRole("button", { name: "رفض" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "موافقة" })).toBeNull();
     expect(screen.queryByRole("button", { name: "تصحيح يدوي" })).toBeNull();

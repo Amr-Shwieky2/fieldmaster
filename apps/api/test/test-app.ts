@@ -28,7 +28,7 @@ export async function resetDatabase(app: INestApplication) {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       idempotency_records, otp_challenges,
-      payroll_calculation_snapshots, payroll_adjustments, payroll_items, payroll_periods,
+      payroll_calculation_snapshots, payroll_calculation_runs, payroll_adjustments, payroll_items, payroll_periods,
       forgotten_stamp_infractions, manual_time_corrections, attendance_approvals, daily_summaries,
       unpaid_breaks, rejected_clock_attempts, clock_events, emergency_callouts, time_entries,
       temporary_check_in_points, temporary_supervisor_assignments, shift_assignments, shifts,

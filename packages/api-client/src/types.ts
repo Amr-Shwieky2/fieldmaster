@@ -13,7 +13,12 @@ import type {
   NotificationType,
   OfflineSyncEventStatus,
   OrgRole,
+  PayrollAdjustmentSource,
+  PayrollAdjustmentType,
+  PayrollCalculationState,
+  PayrollFigureSource,
   PayrollPeriodStatus,
+  SalaryStatementStatus,
   ShiftStatus,
   ShiftType,
   ShiftWorkerPresence,
@@ -223,37 +228,351 @@ export interface WorkerSimulatorContext {
   temporarySupervisorAssignments: { id: string; shiftId: string; shiftTitle: string; activatedAt: string; expiresAt: string }[];
 }
 
-export interface PayrollPeriod {
+// ── Payroll (Step 7) ─────────────────────────────────────────────────
+// Every payroll response is Owner only (the API answers 403 to anyone else),
+// except `MySalaryStatements`, which holds only the caller's own pay.
+// A month's payroll has versions: the latest is the working one; a FINALIZED
+// version never changes, and reopening it creates the next version. A version
+// is always shown from its stored calculation, never recomputed.
+
+/** `GET /payroll-periods`: one row per month, with its latest version. */
+export interface PayrollPeriodSummary {
+  /** The latest version's id. */
   id: string;
-  organizationId: string;
   yearMonth: string;
-  status: PayrollPeriodStatus;
   version: number;
-  items?: PayrollItem[];
+  versionCount: number;
+  status: PayrollPeriodStatus;
+  /** From the latest version's calculation; null when it was never calculated. */
+  workers: number | null;
+  netPayableAgorot: number | null;
+  calculatedAt: string | null;
+  finalizedAt: string | null;
 }
 
-export interface PayrollItem {
+/** A background calculation of a version (`POST .../calculate` answers 202 with it). */
+export interface PayrollCalculationRun {
+  /** Also the job id: the same Idempotency-Key always gives the same run. */
   id: string;
+  yearMonth: string;
+  version: number;
+  state: PayrollCalculationState;
+  /** 0-100. */
+  progress: number;
+  processedWorkers: number;
+  totalWorkers: number;
+  requestedAt: string;
+  requestedByName: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** FAILED only: an API error code (`errors.<code>` in the messages). */
+  errorCode: string | null;
+}
+
+/** One worker's results in a version. */
+export interface PayrollWorkerLine {
   workerProfileId: string;
+  fullLegalName: string;
+  /** Null for versions calculated before Step 7 that did not store the entries. */
+  approvedShifts: number | null;
   standardDaysCredited: number;
+  regularMinutes: number;
+  overtimeMinutes: number;
+  /** The -60 / +15 minutes of emergency call-outs, already inside the paid minutes above. */
+  emergencyRetroactiveMinutes: number;
+  emergencyReturnMinutes: number;
+  grossBaseAgorot: number;
+  overtimeAgorot: number;
+  /** Manual bonuses. */
+  positiveAdjustmentsAgorot: number;
+  /** Forgotten-stamp penalties (a positive amount, deducted). */
+  forgottenStampPenaltiesAgorot: number;
+  /** Reversals of forgotten-stamp penalties (a positive amount, added back). */
+  reversalsAgorot: number;
+  /** Manual deductions (a positive amount, deducted). */
+  otherDeductionsAgorot: number;
+  netPayableAgorot: number;
+  /** Entries waiting for approval at calculation time: not included. Null before Step 7. */
+  pendingEntries: number | null;
+  /** Approved entries with no compensation profile on their date: not paid. Null before Step 7. */
+  entriesWithoutCompensation: number | null;
+}
+
+export interface PayrollTotals {
+  workers: number;
+  approvedShifts: number | null;
+  standardDaysCredited: number;
+  regularMinutes: number;
+  overtimeMinutes: number;
+  emergencyRetroactiveMinutes: number;
+  emergencyReturnMinutes: number;
+  grossBaseAgorot: number;
+  overtimeAgorot: number;
+  positiveAdjustmentsAgorot: number;
+  forgottenStampPenaltiesAgorot: number;
+  reversalsAgorot: number;
+  otherDeductionsAgorot: number;
+  netPayableAgorot: number;
+}
+
+/** A version's labor cost per project or per site (adjustments are per worker, so not included). */
+export interface PayrollCostGroup {
+  /** Project or site id; null = shifts without one (emergency call-outs). */
+  id: string | null;
+  name: string | null;
+  /** Sites only: the site's project. */
+  projectName?: string | null;
+  approvedShifts: number;
+  workers: number;
   regularMinutes: number;
   overtimeMinutes: number;
   grossBaseAgorot: number;
   overtimeAgorot: number;
-  positiveAdjustmentsAgorot: number;
-  deductionsAgorot: number;
-  netPayableAgorot: number;
-  worker?: { membership: { user: { fullLegalName: string } } };
+  totalAgorot: number;
 }
 
+export interface PayrollAdjustmentLine {
+  id: string;
+  workerProfileId: string;
+  fullLegalName: string;
+  type: PayrollAdjustmentType;
+  source: PayrollAdjustmentSource;
+  /** Signed: positive adds, negative deducts. */
+  amountAgorot: number;
+  reason: string | null;
+  createdAt: string;
+  createdByName: string | null;
+  /** Forgotten-stamp penalty: its infraction and the time entry it was recorded on. */
+  relatedInfractionId: string | null;
+  timeEntryId: string | null;
+  /** A reversal: the penalty adjustment it cancels. */
+  reversalOfId: string | null;
+  /** A penalty: the adjustment that reversed it, if any. */
+  reversedById: string | null;
+}
+
+/** What the Owner may do with this version now (the API enforces the same rules). */
+export interface PayrollAllowedActions {
+  calculate: boolean;
+  finalize: boolean;
+  reopen: boolean;
+  addAdjustment: boolean;
+}
+
+/** `GET /payroll-periods/:yearMonth` (latest version) and `.../versions/:version`. */
+export interface PayrollVersionDetail {
+  id: string;
+  yearMonth: string;
+  version: number;
+  status: PayrollPeriodStatus;
+  /** The month's latest version (the working one, or the last finalized one). */
+  isCurrent: boolean;
+  /** Restored from before Step 7: only what was stored then is shown (see the nullable fields). */
+  legacy: boolean;
+  createdAt: string;
+  createdByName: string | null;
+  /** Version 2 and later: the reopen that created this version. */
+  reopenedAt: string | null;
+  reopenedByName: string | null;
+  reopenReason: string | null;
+  previousVersion: number | null;
+  /** The calculation shown (the finalized one, once FINALIZED). */
+  calculatedAt: string | null;
+  calculatedByName: string | null;
+  finalizedAt: string | null;
+  finalizedByName: string | null;
+  /** The latest calculation run of this version (state, progress, error). */
+  calculation: PayrollCalculationRun | null;
+  /** Latest working version only: approved attendance, rates or adjustments changed after the calculation shown. */
+  changedSinceCalculation: boolean;
+  allowedActions: PayrollAllowedActions;
+  /** Null until the version is calculated. */
+  totals: PayrollTotals | null;
+  workers: PayrollWorkerLine[];
+  /** Null for legacy versions (not stored before Step 7). */
+  projects: PayrollCostGroup[] | null;
+  sites: PayrollCostGroup[] | null;
+  /** Adjustments included in the calculation shown. */
+  adjustments: PayrollAdjustmentLine[];
+  /** Latest working version only: adjustments added after the calculation shown (included at the next calculation). */
+  adjustmentsNotIncluded: PayrollAdjustmentLine[];
+  warnings: {
+    /** Approved entries that had no compensation profile on their date: not paid. */
+    workersWithoutCompensation: { workerProfileId: string; fullLegalName: string; entries: number; businessDates: string[] }[];
+  };
+  /** Entries waiting for approval at calculation time ("بانتظار الموافقة — غير محسوبة"). Null when not known (legacy, or never calculated). */
+  pending: { entries: number; byWorker: { workerProfileId: string; fullLegalName: string; entries: number }[] } | null;
+  /** Legacy versions without items: the net per worker their old calculation stored. */
+  legacyNetByWorker: { workerProfileId: string; fullLegalName: string; netPayableAgorot: number }[] | null;
+}
+
+/** `GET /payroll-periods/:yearMonth/versions`: the version history (who / when / why). */
+export interface PayrollVersionSummary {
+  id: string;
+  version: number;
+  status: PayrollPeriodStatus;
+  isCurrent: boolean;
+  legacy: boolean;
+  createdAt: string;
+  createdByName: string | null;
+  reopenedAt: string | null;
+  reopenedByName: string | null;
+  reopenReason: string | null;
+  calculatedAt: string | null;
+  calculatedByName: string | null;
+  finalizedAt: string | null;
+  finalizedByName: string | null;
+  workers: number | null;
+  netPayableAgorot: number | null;
+}
+
+/** One approved entry as a version's calculation saw and paid it. */
+export interface PayrollEntryLine {
+  timeEntryId: string;
+  businessDate: string;
+  shift: { id: string; title: string; shiftType: ShiftType };
+  projectName: string | null;
+  siteName: string | null;
+  clockInAt: string | null;
+  clockOutAt: string | null;
+  approvedRegularMinutes: number;
+  approvedOvertimeMinutes: number;
+  fullDayCredit: boolean;
+  isEmergency: boolean;
+  emergencyRetroactiveMinutes: number;
+  emergencyReturnMinutes: number;
+  /** Null: no compensation profile on that date, so the entry was not paid. */
+  compensationType: CompensationType | null;
+  standardDayCredited: boolean;
+  regularMinutes: number;
+  overtimeMinutes: number;
+  baseAgorot: number;
+  overtimeAgorot: number;
+  totalAgorot: number;
+}
+
+/** `GET /payroll-periods/:yearMonth/versions/:version/workers/:workerProfileId`: a worker's drill-down. */
+export interface PayrollWorkerDetail {
+  yearMonth: string;
+  version: number;
+  worker: PayrollWorkerLine;
+  /** Null for legacy versions (entries not stored before Step 7). */
+  entries: PayrollEntryLine[] | null;
+  adjustments: PayrollAdjustmentLine[];
+}
+
+export interface CreatePayrollAdjustmentInput {
+  workerProfileId: string;
+  type: "MANUAL_BONUS" | "MANUAL_DEDUCTION";
+  /** A positive amount; the type gives the sign. */
+  amountAgorot: number;
+  reason: string;
+}
+
+/** Labor cost of a project or site in the Owner dashboard. */
+export interface DashboardCostItem {
+  /** Null = shifts without a project / site (emergency call-outs). */
+  id: string | null;
+  name: string | null;
+  approvedShifts: number;
+  laborCostAgorot: number;
+  overtimeAgorot: number;
+}
+
+export interface DashboardWorkerCost {
+  workerProfileId: string;
+  fullLegalName: string;
+  approvedShifts: number;
+  overtimeMinutes: number;
+  /** Base + overtime. */
+  laborCostAgorot: number;
+  /** After the month's adjustments. */
+  netPayableAgorot: number;
+}
+
+export interface DashboardDay {
+  /** YYYY-MM-DD (Asia/Jerusalem business date). */
+  date: string;
+  laborCostAgorot: number;
+  overtimeAgorot: number;
+  overtimeMinutes: number;
+  isOvertimeSpike: boolean;
+}
+
+export interface DashboardOvertimeSpike {
+  date: string;
+  overtimeMinutes: number;
+  overtimeAgorot: number;
+  /** The day's threshold: max(spikeMinimumMinutes, spikeFactor x the average). */
+  thresholdMinutes: number;
+  workers: { workerProfileId: string; fullLegalName: string; overtimeMinutes: number }[];
+}
+
+/** `GET /payroll-periods/:yearMonth/dashboard` (Owner only). */
 export interface FinancialDashboard {
   yearMonth: string;
-  totalCurrentMonthPayrollAgorot: number;
-  totalPreviousMonthPayrollAgorot: number;
-  overtimeTotalAgorot: number;
+  /** FINALIZED: the month's latest version is finalized and the figures are its own; LIVE: approved attendance and adjustments so far. */
+  source: PayrollFigureSource;
+  finalizedVersion: number | null;
+  /** Labor cost + adjustments: what the month pays. */
+  netPayableAgorot: number;
+  laborCostAgorot: number;
+  previousMonth: { yearMonth: string; source: PayrollFigureSource; netPayableAgorot: number; laborCostAgorot: number };
+  costByProject: DashboardCostItem[];
+  costBySite: (DashboardCostItem & { projectName: string | null })[];
+  /** Every worker with pay this month, highest net first. */
+  costByWorker: DashboardWorkerCost[];
+  /** The first five of costByWorker. */
+  topEarners: DashboardWorkerCost[];
+  overtime: {
+    totalAgorot: number;
+    totalMinutes: number;
+    /** Overtime minutes per working day (a day with at least one approved shift). */
+    averageDailyMinutes: number;
+    spikeFactor: number;
+    spikeMinimumMinutes: number;
+    spikes: DashboardOvertimeSpike[];
+  };
+  forgottenStamps: { penalties: number; penaltiesAgorot: number; reversals: number; reversalsAgorot: number; netDeductionsAgorot: number };
+  emergencies: { callouts: number; compensatedMinutes: number; costAgorot: number };
+  /** Every day of the month up to today (the whole month for a past month). */
+  dailyTrend: DashboardDay[];
+  /** Entries waiting for approval now (always live): what they would cost if approved as recorded. */
+  pendingApproval: { entries: number; exposureAgorot: number; entriesWithoutCompensation: number };
+  workersWithoutCompensation: { workerProfileId: string; fullLegalName: string; entries: number }[];
+}
+
+/** One month of the caller's own salary (`GET /payroll-statements/me`). */
+export interface SalaryStatement {
+  yearMonth: string;
+  status: SalaryStatementStatus;
+  /** True for DRAFT: an estimate from the approved attendance so far, not a finalized payslip. */
+  isEstimate: boolean;
+  /** The finalized version the statement comes from; null for an estimate. */
+  version: number | null;
+  finalizedAt: string | null;
+  approvedShifts: number | null;
+  standardDaysCredited: number;
+  regularMinutes: number;
+  overtimeMinutes: number;
+  baseAgorot: number;
+  overtimeAgorot: number;
+  /** Base + overtime. */
+  grossAgorot: number;
+  /** Manual bonuses minus manual deductions. */
+  adjustmentsAgorot: number;
+  /** Forgotten-stamp penalties minus their reversals. */
   forgottenStampDeductionsAgorot: number;
-  costByProject: { projectId: string | null; projectName: string; totalAgorot: number }[];
-  pendingApprovalFinancialExposureAgorot: number;
+  netPayableAgorot: number;
+  /** Estimates only: the caller's entries still waiting for approval (not included). */
+  pendingEntries: number | null;
+}
+
+export interface MySalaryStatements {
+  /** Finalized months, newest first. */
+  statements: SalaryStatement[];
+  /** Months without a finalized version yet (the current month, and the previous one until it is finalized), newest first. */
+  estimates: SalaryStatement[];
 }
 
 export interface NotificationItem {

@@ -4,6 +4,7 @@ import { toBusinessDate } from "@fieldmaster/shared-validation";
 import { createTestApp, resetDatabase, loginAs, request } from "./test-app";
 import { PrismaService } from "../src/common/prisma/prisma.service";
 import { createOrgWithOwner, addFieldManager, addWorker, createProject, createSiteWithGeofence, createStandardShift, assignWorkerToShift } from "./fixtures";
+import { calculatePayroll } from "./payroll-helpers";
 import { v7 as uuidv7 } from "uuid";
 
 describe("Payroll engine (e2e)", () => {
@@ -63,18 +64,15 @@ describe("Payroll engine (e2e)", () => {
     const yearMonth = toBusinessDate(start).slice(0, 7);
     const ownerSession = await loginAs(app, "+972500000001");
 
-    const calc = await request(app.getHttpServer())
-      .post(`/api/v1/payroll-periods/${yearMonth}/calculate`)
-      .set("Authorization", `Bearer ${ownerSession.accessToken}`)
-      .set("Idempotency-Key", "calc-1")
-      .expect(201);
-    expect(calc.body.status).toBe("REVIEW");
+    // Step 7: the calculation is a background job (202), awaited here.
+    await calculatePayroll(app, ownerSession.accessToken, yearMonth, "calc-1");
 
     const detail = await request(app.getHttpServer())
       .get(`/api/v1/payroll-periods/${yearMonth}`)
       .set("Authorization", `Bearer ${ownerSession.accessToken}`)
       .expect(200);
-    const item = detail.body.items.find((i: { workerProfileId: string }) => i.workerProfileId === worker.workerProfile.id);
+    expect(detail.body.status).toBe("REVIEW");
+    const item = detail.body.workers.find((i: { workerProfileId: string }) => i.workerProfileId === worker.workerProfile.id);
     expect(item.standardDaysCredited).toBe(1);
     expect(item.grossBaseAgorot).toBe(40000);
     expect(item.netPayableAgorot).toBe(40000);
@@ -127,10 +125,10 @@ describe("Payroll engine (e2e)", () => {
 
     const yearMonth = toBusinessDate(start).slice(0, 7);
     const ownerSession = await loginAs(app, "+972500000001");
-    await request(app.getHttpServer()).post(`/api/v1/payroll-periods/${yearMonth}/calculate`).set("Authorization", `Bearer ${ownerSession.accessToken}`).set("Idempotency-Key", "calc-2").expect(201);
+    await calculatePayroll(app, ownerSession.accessToken, yearMonth, "calc-2");
 
     const detail = await request(app.getHttpServer()).get(`/api/v1/payroll-periods/${yearMonth}`).set("Authorization", `Bearer ${ownerSession.accessToken}`).expect(200);
-    const item = detail.body.items.find((i: { workerProfileId: string }) => i.workerProfileId === worker.workerProfile.id);
+    const item = detail.body.workers.find((i: { workerProfileId: string }) => i.workerProfileId === worker.workerProfile.id);
     expect(item.standardDaysCredited).toBe(0);
     expect(item.grossBaseAgorot).toBe(26_667); // 40000 * 360/540, rounded
   });

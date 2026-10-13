@@ -1,5 +1,145 @@
 # FieldMaster — Implementation Status
 
+## Step 7 of 10 — payroll engine completion and the Owner financial dashboard (2026-10-13)
+
+Scope: payroll API, the admin web's payroll pages and the Owner dashboard.
+PDFs are Step 8; the worker's mobile salary screen is Step 9 (its API
+exists). Arabic only, RTL, same i18n checks. No business rule changed.
+Design and reasoning: `docs/technical-decisions.md` ("Step 7: …") and
+`docs/payroll-calculations.md`.
+
+**Immutable payroll versions:**
+- **One row per version** of a month. Each calculation stores an immutable
+  snapshot: the inputs (approved entries with shift, project and site, the
+  compensation profiles, the adjustments, names, pending counts), the
+  per-worker and per-entry results, per project / per site, warnings and
+  totals. A version is always shown from it, never recalculated.
+- **Finalized versions never change:** database triggers refuse any update
+  or delete of a FINALIZED version or its items, and any change to a
+  snapshot. Every edit of a finalized month is 409
+  `PAYROLL_PERIOD_FINALIZED`.
+- **Reopen** (Owner, reason required) creates the next version; the
+  finalized one stays exactly as it was and readable. The period page's
+  «الإصدارات» tab shows who created, calculated, reopened (and why) and
+  finalized each version, and opens any old one read-only.
+- **Existing data migrated** (`20261013120000_payroll_versions`): versions
+  that the old in-place reopen had overwritten are restored as their own
+  FINALIZED `legacy` rows (with their snapshots, and their items when they
+  were still there); details from the audit log; item breakdowns backfilled
+  only where they reconcile. Checked on a scratch database with every old
+  shape, then the triggers were tried on it.
+
+**Calculation (BullMQ job):**
+- `POST /payroll-periods/:yearMonth/calculate` answers 202 with a run; the
+  page shows its progress and, when it fails, a clear error with «احسب».
+- The same Idempotency-Key always answers the same job; a second
+  calculation while one is queued or running is 409
+  `PAYROLL_CALCULATION_IN_PROGRESS` (a partial unique index, so even two
+  simultaneous requests can't both start one). A lost job is taken over
+  after 15 minutes.
+- **Inputs only:** approved entries, the compensation profile in effect on
+  each entry's date, full-day credit and overtime, the emergency -60 / +15
+  minutes, and the month's adjustments (penalties, reversals, manual).
+- **Per worker:** approved shifts, credited days, regular / overtime
+  minutes, emergency retroactive / return minutes, base, overtime, bonuses,
+  forgotten-stamp penalties, reversals, other deductions, net. Integer
+  agorot, the existing calculators.
+- **Warnings:** approved entries with no compensation profile (not paid,
+  workers listed); entries waiting for approval are counted as
+  «بانتظار الموافقة — غير محسوبة».
+
+**Period page `/payroll/[yearMonth]`** (Owner): «احسب»، «اعتمد نهائياً»، «أعد فتح»
+(reason), tabs العمال (drill-down to each worker's entries) / المشاريع /
+المواقع / التعديلات (manual +/- with a reason; penalties and reversals with
+links) / الإصدارات, and CSV export (UTF-8 with BOM, Western digits, shekels
+with 2 decimals).
+
+**Owner dashboard (`/dashboard`):** the month's net vs. the previous month,
+cost by project, site and worker, top earners, overtime and overtime spikes
+(a day with at least twice the month's average overtime per working day and
+at least 60 minutes), forgotten-stamp deductions, emergency call-out cost,
+the daily labor cost trend (Recharts, RTL) and the pending-approval
+exposure. Finalized months come from their version; others are live. The
+Field Manager's dashboard is unchanged and money-free.
+
+**Worker "my salary" API:** `GET /payroll-statements/me`: the caller's own
+statements from finalized versions only (gross, base, overtime, adjustments,
+forgotten-stamp deductions, net, status) plus a DRAFT estimate for the open
+month. `my-payslip` now serves finalized versions only.
+
+**Gaps closed (the finalized-month rule was missing on three paths):**
+sending an entry back for correction, a manual adjustment, and reversing a
+forgotten-stamp deduction are now refused in a finalized month. A worker
+with only adjustments (no approved entry) used to be left out of the
+calculation. A blank reopen reason and a malformed month are refused.
+
+**Browser check** (dev servers, Owner and Field Manager; driven with
+headless Playwright because the app's browser pane was hidden). A realistic
+October for 3 workers, built with the worker simulator (clock-in, rewind,
+clock-out, emergency) plus the manager's corrections for earlier days:
+
+| Worker | Entries | Hand-checked |
+|---|---|---|
+| إياد سعدي (daily ₪450, overtime ₪70/h) | 8.10: 6 h + full-day credit; 12.10: 10 h 30 m (simulator rewind); 11.10: 9 h left waiting | 450.00 + (450.00 + 1.5 × 70 = 555.00) = **1,005.00**; the waiting day listed under «بانتظار الموافقة — غير محسوبة» |
+| خالد ناصر (hourly ₪55) | 3.10: 9 h; 12.10: 6 h (simulator rewind) | 495.00 + 330.00 = **825.00** |
+| باسل عازر (hourly ₪55) | 1.10, 2.10, 6.10: 9 h each (1.10 and 2.10 entered as forgotten clock-in and clock-out: 4 infractions); 13.10: Night Turan emergency from the simulator, actual 03:02–03:04 | 3 × 495.00 + 77 min × 55/60 = 70.58 → 1,555.58; stamps 3 and 4: −20.00 → **1,535.58** |
+
+| Scenario | Result |
+|---|---|
+| Calculate | ✅ «احسب رواتب أكتوبر 2026» → background job → «قيد المراجعة», version 1. The page, its CSV, the drill-downs and the dashboard all equal the hand calculation (emergency: 02:02–03:19, «-60 / +15», no project or site) |
+| Finalize | ✅ «اعتمد نهائياً» with a confirmation → «معتمدة نهائياً»; only «أعد فتح» and the CSV remain |
+| Field Manager edit | ✅ the entry page shows the finalized notice and no approve button; API 409 `PAYROLL_PERIOD_FINALIZED` for approval, a correction and sending back for correction; `/payroll` redirects to the dashboard (API 403), which shows no ₪ |
+| Reopen | ✅ an empty reason is refused; with a reason → version 2 («أُعيد فتحها»), version 1 kept |
+| Recalculate | ✅ after the Owner reversed one of باسل's deductions and the Field Manager approved إياد's waiting day: إياد **1,455.00** (+450.00), باسل **1,545.58** (penalties −20.00 kept, reversal +10.00), خالد unchanged. «الإصدارات» shows both versions (who / when / why); version 1 opens read-only with its own numbers (₪6,358.08 in all); version 2 finalized |
+| CSV | ✅ `payroll-2026-10-v1.csv`: BOM (`EF BB BF`), Western digits, `1535.58`, `-20.00`, totals row |
+| Dashboard | ✅ Owner: ₪6,818.08 «من الرواتب المعتمدة نهائياً — الإصدار 2» vs. ₪2,225.00 in September (+206.4%), overtime ₪105.00, stamps ₪20.00 (3, one reversed), emergencies ₪283.08, pending ₪555.00, the daily chart (day 1 on the right, 12.10 a spike), cost by project / site / worker, top earners. Field Manager: no money |
+| Worker statements | ✅ إياد: October version 2, 1,455.00; باسل: gross 1,555.58, stamps −10.00, net 1,545.58; both 403 on the Owner routes |
+
+`pnpm db:seed` was run afterwards. The seed's finalized month is now a real
+Step 7 version (same loader, engine and snapshot format as the API).
+
+**Tests** (runtime counts):
+
+| | Before Step 7 | After |
+|---|---|---|
+| shared-validation | 47 | 66 |
+| @fieldmaster/i18n | 73 | 76 |
+| admin-web | 516 | 641 |
+| API unit | 25 | 29 |
+| mobile | 131 | 131 |
+| API e2e | 107 | 120 |
+| **Total** | **899** | **1,063** |
+
+- **New:** `payroll-month.test.ts` (19: the engine with the spec's
+  numbers), `payroll-versions.e2e-spec.ts` (13), API unit tests for the
+  queue prefix and the route parameters (4), the i18n labels of the 3 new
+  enums (3), admin-web payroll (89 in 5 files, incl. the CSV builder and
+  the shekel parser) and dashboard (60 in 9 files).
+- **Changed, not weakened:**
+  - `payroll.e2e-spec.ts` and 2 tests of `attendance-screens.e2e-spec.ts`
+    wait for the calculation job (it used to answer synchronously);
+    `items` is now `workers`.
+  - `financial-leak-scanner.e2e-spec.ts` finalizes its month (a Worker's
+    pay only comes from finalized versions), expects the money on the new
+    Owner routes, adds `GET /payroll-statements/me` to the Worker-own
+    exceptions and checks it holds only the Worker's data.
+  - `dev-login.e2e-spec.ts` lists the 4 new financial routes.
+  - Wording only («مُقفلة» → «معتمدة نهائياً», «تم إقفال الرواتب» →
+    «اعتُمدت الرواتب نهائياً»): `attendance-page`, `attendance-detail-page`,
+    `correction-dialog`, `notifications-page`, `notification-text`.
+  - The payroll list, payroll month and dashboard page tests were
+    rewritten for the new screens, keeping every behavior that still exists.
+- **Removed:** one payroll month test (a worker without a name falls back to
+  its id): every worker line now carries its name.
+
+**Financial isolation:** the leak scanner scans 50 GET routes (45 before)
+as Field Manager, Worker and Temporary Supervisor: no money key for any of
+them. The Owner pass confirms the money is in the new Owner-only routes.
+`GET /payroll-statements/me` and `my-payslip` are the only Worker-own-money
+exceptions and contain only the Worker's own data.
+
+---
+
 ## Step 6 of 10 — temporary supervisors, live operations, settings, users and devices (2026-10-12)
 
 Scope: API + admin web. The supervisor's mobile screens come in Step 9; their
@@ -1166,14 +1306,15 @@ Approve / reject / request-correction, each producing an immutable
 monetary figure, enforced by TimeEntry never carrying money fields at all
 (money lives only in `PayrollItem`, which Field Managers cannot query).
 
-## 23. Payroll engine — ✅ (core), 🟡 (dashboard depth)
+## 23. Payroll engine — ✅ (Step 7: versions, background calculation, Owner dashboard)
 
 - ✅ Effective-dated-profile lookup per time entry (a worker's mid-month rate change is honored correctly, per entry)
-- ✅ Standing `PayrollAdjustment`s (e.g. forgotten-stamp penalties) exist independently of a `PayrollItem` and get linked the first time the period is calculated — this is what lets a penalty apply the instant the 3rd infraction happens, not at month-end
-- ✅ Calculate → Review → Finalize → Reopen state machine; **finalized periods block further edits** (both full-day-credit and manual corrections check this — tested); reopening requires a reason and bumps the version
-- ✅ `PayrollCalculationSnapshot` recorded on every calculation
-- 🟡 Financial dashboard implements: current vs. previous month totals, overtime total, forgotten-stamp deductions, cost-by-project, pending-approval financial exposure. Not implemented: cost-by-worker ranking, "highest earners," overtime-spike detection.
-- 🟡 Payroll "reopen" increments version on the *same* `PayrollPeriod` row rather than creating a fully separate immutable row-per-version with duplicated historical `PayrollItem`s — see technical-decisions.md.
+- ✅ Standing `PayrollAdjustment`s (e.g. forgotten-stamp penalties) exist independently of a `PayrollItem`, so a penalty applies the instant the 3rd infraction happens, not at month-end; each calculation records exactly which adjustments it included
+- ✅ Immutable versions (Step 7): one `payroll_periods` row per version; a calculation stores an immutable snapshot (inputs, per-worker and per-entry results, totals); a FINALIZED version never changes (database triggers) and every edit of a finalized month is 409; reopening (Owner, reason) creates the next version and keeps the old one readable; version history (who / when / why)
+- ✅ Calculation as a BullMQ job (Step 7): Idempotency-Key = same job, one active run per version (concurrent request 409), progress and a clear failed state
+- ✅ Per-worker breakdown: approved shifts, credited days, regular / overtime minutes, emergency -60 / +15 minutes, base, overtime, bonuses, forgotten-stamp penalties, reversals, other deductions, net; warnings for approved entries without a compensation profile; entries waiting for approval counted, not paid
+- ✅ Financial dashboard (Step 7): month vs. previous month, cost by project / site / worker, top earners, overtime and overtime spikes (defined in `docs/payroll-calculations.md`), forgotten-stamp deductions, emergency call-out cost, daily labor cost trend (Recharts), pending-approval exposure
+- ✅ Worker "my salary" API (Step 7; the mobile screen is Step 9): finalized statements + a labeled estimate
 
 ## 24. Notifications — ✅ (in-app + real-time), 🟡 (push)
 
@@ -1398,6 +1539,10 @@ can no longer be clocked into, online or offline).
   expiring temporary check-in points past their `expiresAt` (60s interval)
   and expiring unused onboarding invitations (5min interval) — verified by
   watching them fire in the API logs against real seeded data.
+- ✅ Step 6: the "open for more than 9 hours" sweep (every minute).
+- ✅ Step 7: payroll calculations run as jobs (one per calculation run).
+  Every queue's Redis prefix is now per database (`fm:<database>`), so the
+  dev server and the e2e tests never take each other's jobs.
 - ⬜ No transactional outbox table. Notifications and audit writes still
   happen synchronously inside the same request transaction rather than via
   an outbox-and-relay pattern. Documented as a real gap, not silently
