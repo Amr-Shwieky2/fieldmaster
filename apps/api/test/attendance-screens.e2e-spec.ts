@@ -5,6 +5,7 @@ import { toBusinessYearMonth } from "@fieldmaster/shared-validation";
 import { createTestApp, loginAs, request, resetDatabase } from "./test-app";
 import { PrismaService } from "../src/common/prisma/prisma.service";
 import { addFieldManager, addWorker, assignWorkerToShift, createOrgWithOwner, createProject, createSiteWithGeofence, createStandardShift } from "./fixtures";
+import { calculatePayroll } from "./payroll-helpers";
 
 /**
  * Step 5: the attendance screens' API -- the list, the evidence of one entry,
@@ -311,7 +312,8 @@ describe("Attendance screens API (Step 5)", () => {
 
     // The monthly payroll pays the same amount for this entry.
     const yearMonth = (await prisma.timeEntry.findUniqueOrThrow({ where: { id: timeEntryId } })).businessDate.slice(0, 7);
-    await post(ctx.tokens.owner, `/payroll-periods/${yearMonth}/calculate`).expect(201);
+    // Step 7: the calculation is a background job (202), awaited here.
+    await calculatePayroll(app, ctx.tokens.owner, yearMonth);
     const item = await prisma.payrollItem.findFirstOrThrow({ where: { workerProfileId: ctx.worker.workerProfile.id } });
     expect(item.grossBaseAgorot + item.overtimeAgorot).toBe(49_000);
 
@@ -419,7 +421,8 @@ describe("Attendance screens API (Step 5)", () => {
     await post(ctx.tokens.manager, `/time-entries/${timeEntryId}/approve`).expect(201);
     const before = await prisma.timeEntry.findUniqueOrThrow({ where: { id: timeEntryId } });
     const yearMonth = before.businessDate.slice(0, 7);
-    await post(ctx.tokens.owner, `/payroll-periods/${yearMonth}/calculate`).expect(201);
+    // Step 7: the calculation is a background job (202), awaited here.
+    await calculatePayroll(app, ctx.tokens.owner, yearMonth);
     await post(ctx.tokens.owner, `/payroll-periods/${yearMonth}/finalize`).expect(201);
 
     const refused = await post(ctx.tokens.manager, "/manual-corrections", {

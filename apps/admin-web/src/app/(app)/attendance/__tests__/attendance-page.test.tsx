@@ -224,7 +224,7 @@ describe("Attendance approval page", () => {
     expect((card.getByLabelText("سبب احتساب يوم كامل") as HTMLTextAreaElement).value).toBe("توقّف العمل بسبب الطقس");
     fireEvent.click(card.getByRole("button", { name: "تأكيد احتساب يوم كامل" }));
 
-    const alert = await card.findByText("فترة الرواتب هذه مُقفلة. أعد فتحها لإجراء التعديلات.");
+    const alert = await card.findByText("رواتب هذا الشهر معتمدة نهائياً. أعد فتحها لإجراء التعديلات.");
     expect(alert.getAttribute("role")).toBe("alert");
     expect(screen.queryByText("The payroll period for this date is finalized.")).toBeNull();
     // The prompt stays open so the manager can cancel or try again.

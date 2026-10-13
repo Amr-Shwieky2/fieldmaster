@@ -154,6 +154,8 @@ export class AttendanceApprovalsService {
   async requestCorrection(organizationId: string, timeEntryId: string, notes: string, actor: AuthenticatedUser, correlationId: string) {
     const timeEntry = await this.prisma.timeEntry.findFirst({ where: { id: timeEntryId, organizationId } });
     if (!timeEntry) throw new AppException(404, ErrorCodes.NOT_FOUND, "Time entry not found.");
+    // Step 7: sending an entry back changes its status (an approved one would leave payroll), so a finalized month refuses it like any other edit.
+    await this.assertPeriodNotFinalized(organizationId, timeEntry.businessDate);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const entry = await tx.timeEntry.update({ where: { id: timeEntryId }, data: { status: TimeEntryStatus.CORRECTION_REQUESTED } });

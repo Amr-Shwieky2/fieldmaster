@@ -457,7 +457,7 @@ describe("CorrectionDialog", () => {
     chooseReason("DEVICE_FAILURE");
     submit();
 
-    const alert = await within(dialog).findByText("فترة الرواتب هذه مُقفلة. أعد فتحها لإجراء التعديلات.");
+    const alert = await within(dialog).findByText("رواتب هذا الشهر معتمدة نهائياً. أعد فتحها لإجراء التعديلات.");
     expect(alert.getAttribute("role")).toBe("alert");
     expect(screen.queryByText("The payroll period for this date is finalized.")).toBeNull();
     expect(onSaved).not.toHaveBeenCalled();

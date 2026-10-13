@@ -74,8 +74,8 @@
     "deductions": "الخصومات",
     "adjustments": "التعديلات",
     "calculate": "احتساب",
-    "finalize": "إقفال الفترة",
-    "reopen": "إعادة فتح",
+    "finalize": "اعتمد نهائياً",
+    "reopen": "أعد فتح",
     "dashboard": "لوحة التحكم",
     "workers": "العمال",
     "worker": "عامل",
@@ -138,7 +138,12 @@
     "SUMMARY_REQUIRED": "ملخص العمل اليومي مطلوب قبل إنهاء الدوام.",
     "MAX_OWNERS_REACHED": "تم الوصول إلى الحد الأقصى لعدد المالكين في هذه المؤسسة.",
     "OVERLAPPING_COMPENSATION_PROFILE": "تتداخل فترة هذا الأجر مع فترة أجر أخرى لنفس العامل.",
-    "PAYROLL_PERIOD_FINALIZED": "فترة الرواتب هذه مُقفلة. أعد فتحها لإجراء التعديلات.",
+    "PAYROLL_PERIOD_FINALIZED": "رواتب هذا الشهر معتمدة نهائياً. أعد فتحها لإجراء التعديلات.",
+    "PAYROLL_PERIOD_NOT_READY": "احسب رواتب هذا الشهر وراجعها قبل اعتمادها نهائياً.",
+    "PAYROLL_PERIOD_NOT_FINALIZED": "يمكن إعادة فتح رواتب الشهر بعد اعتمادها نهائياً فقط.",
+    "PAYROLL_CALCULATION_IN_PROGRESS": "يجري احتساب رواتب هذا الشهر الآن. انتظر حتى ينتهي ثم حاول مرة أخرى.",
+    "PAYROLL_CALCULATION_FAILED": "تعذّر احتساب الرواتب بسبب خطأ غير متوقع. حاول مرة أخرى.",
+    "PAYROLL_CALCULATION_STALE": "توقف هذا الاحتساب قبل أن يكتمل، فحلّ محله احتساب جديد.",
     "IDEMPOTENCY_KEY_REQUIRED": "الطلب غير مكتمل. حاول مرة أخرى.",
     "IDEMPOTENCY_KEY_CONFLICT": "سبق إرسال هذا الطلب ببيانات مختلفة. حاول مرة أخرى.",
     "EMERGENCY_NOT_ELIGIBLE": "هذا العامل غير مؤهل لاستدعاء طوارئ.",
@@ -269,7 +274,7 @@
       "OPEN": "مفتوحة",
       "CALCULATING": "قيد الاحتساب",
       "REVIEW": "قيد المراجعة",
-      "FINALIZED": "مُقفلة",
+      "FINALIZED": "معتمدة نهائياً",
       "REOPENED": "أُعيد فتحها"
     },
     "PayrollAdjustmentType": {
@@ -281,6 +286,20 @@
     "PayrollAdjustmentSource": {
       "SYSTEM": "النظام",
       "MANUAL": "يدوي"
+    },
+    "PayrollCalculationState": {
+      "QUEUED": "في الانتظار",
+      "RUNNING": "جارٍ الاحتساب",
+      "SUCCEEDED": "اكتمل",
+      "FAILED": "فشل"
+    },
+    "SalaryStatementStatus": {
+      "FINALIZED": "معتمد نهائياً",
+      "DRAFT": "مسودة تقديرية"
+    },
+    "PayrollFigureSource": {
+      "FINALIZED": "من الرواتب المعتمدة نهائياً",
+      "LIVE": "تقدير مباشر من الحضور المعتمد حتى الآن"
     },
     "ApprovalAction": {
       "APPROVE": "موافقة",
@@ -312,7 +331,7 @@
       "TURAN_ASSIGNMENT_CREATED": "تم إنشاء تكليف مناوبة",
       "TURAN_ASSIGNMENT_CHANGED": "تم تغيير تكليف مناوبة",
       "TEMPORARY_CHECK_IN_POINT_OPENED": "تم فتح نقطة تسجيل مؤقتة",
-      "PAYROLL_FINALIZED": "تم إقفال فترة الرواتب",
+      "PAYROLL_FINALIZED": "اعتُمدت الرواتب نهائياً",
       "OFFLINE_EVENT_SYNCED": "تمت مزامنة حضور دون اتصال",
       "OFFLINE_EVENT_REJECTED": "تم رفض حضور مسجّل دون اتصال",
       "SUSPICIOUS_LOCATION_DETECTED": "تم رصد موقع مشبوه",

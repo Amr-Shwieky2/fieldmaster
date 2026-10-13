@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import { OrgRole, PayrollAdjustmentSource, PayrollAdjustmentType } from "@fieldmaster/shared-types";
+import { OrgRole, PayrollAdjustmentSource, PayrollAdjustmentType, PayrollPeriodStatus } from "@fieldmaster/shared-types";
 import { evaluateForgottenStampInfraction } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
@@ -111,6 +111,16 @@ export class ForgottenStampService {
 
     const originalAdjustment = await this.prisma.payrollAdjustment.findFirst({ where: { relatedInfractionId: infraction.id } });
     if (!originalAdjustment) throw new AppException(404, ErrorCodes.NOT_FOUND, "Original payroll adjustment not found.");
+
+    // Step 7: a finalized month's payroll never changes; reopen it first (the reversal then counts in the new version).
+    const latestVersion = await this.prisma.payrollPeriod.findFirst({
+      where: { organizationId, yearMonth: infraction.businessMonth },
+      orderBy: { version: "desc" },
+      select: { status: true },
+    });
+    if (latestVersion?.status === PayrollPeriodStatus.FINALIZED) {
+      throw new AppException(409, ErrorCodes.PAYROLL_PERIOD_FINALIZED, "This payroll period has been finalized. Reopen it before reversing a deduction.");
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
       const reversal = await tx.payrollAdjustment.create({

@@ -129,7 +129,7 @@
       "actions": {
         "title": "الإجراءات",
         "rejectedReason": "سبب الرفض",
-        "periodFinalized": "فترة الرواتب لهذا الشهر مُقفلة، فلا يمكن الاعتماد أو التصحيح أو احتساب يوم كامل حتى يُعاد فتحها.",
+        "periodFinalized": "رواتب هذا الشهر معتمدة نهائياً، فلا يمكن الاعتماد أو التصحيح أو احتساب يوم كامل حتى يُعاد فتحها.",
         "manualCorrection": "تصحيح يدوي",
         "none": "لا توجد إجراءات متاحة لهذا السجل الآن."
       },
@@ -336,8 +336,10 @@
       "ONBOARDING_INVITATION_REVOKED": "إلغاء دعوة انضمام",
       "ONBOARDING_SUBMITTED": "تقديم طلب انضمام",
       "PAYROLL_CALCULATED": "احتساب الرواتب",
-      "PAYROLL_FINALIZED": "إقفال فترة الرواتب",
-      "PAYROLL_PERIOD_REOPENED": "إعادة فتح فترة الرواتب",
+      "PAYROLL_CALCULATION_REQUESTED": "طلب احتساب الرواتب",
+      "PAYROLL_CALCULATION_FAILED": "تعذّر احتساب الرواتب",
+      "PAYROLL_FINALIZED": "اعتماد الرواتب نهائياً",
+      "PAYROLL_PERIOD_REOPENED": "إعادة فتح الرواتب (إصدار جديد)",
       "PAYROLL_ADJUSTMENT_CREATED": "إضافة تعديل على الراتب",
       "TEMPORARY_CHECK_IN_POINT_CREATED": "إنشاء نقطة تسجيل مؤقتة",
       "TEMPORARY_CHECK_IN_POINT_REVOKED": "إلغاء نقطة تسجيل مؤقتة",
@@ -389,24 +391,106 @@
     "stats": {
       "activeWorkers": "العمال النشطون",
       "pendingApprovals": "حضور بانتظار الموافقة",
-      "payrollThisMonth": "رواتب هذا الشهر",
-      "previousMonth": "مقابل <ltr>{amount}</ltr> في الشهر الماضي",
-      "overtimeCost": "تكلفة الساعات الإضافية"
+      "overtime": "تكلفة الساعات الإضافية",
+      "overtimeHint": "المدة: <minutes></minutes>",
+      "forgottenStamps": "خصومات نسيان تسجيل",
+      "forgottenStampsHint": "عدد الخصومات: {penalties} · خصومات أُلغيت: {reversals}",
+      "emergencies": "تكلفة استدعاءات الطوارئ",
+      "emergenciesHint": "عدد الاستدعاءات: {count} · المدة المحتسبة: <minutes></minutes>",
+      "pendingExposure": "تقدير تكلفة الحضور بانتظار الموافقة",
+      "pendingExposureHint": "عدد السجلات: {count}",
+      "pendingWithoutCompensation": "{count, plural, one {منها سجل واحد بلا أجر مسجّل، فلا يدخل في التقدير.} two {منها سجلان بلا أجر مسجّل، فلا يدخلان في التقدير.} few {منها {count} سجلات بلا أجر مسجّل، فلا تدخل في التقدير.} many {منها {count} سجلًا بلا أجر مسجّل، فلا يدخل في التقدير.} other {منها {count} سجل بلا أجر مسجّل، فلا يدخل في التقدير.}}"
     },
     "financial": {
       "loading": "جارٍ تحميل الأرقام المالية…",
       "ownersOnly": "الأرقام المالية تظهر للمالك فقط."
     },
-    "costByProject": {
-      "title": "التكلفة حسب المشروع",
-      "unassigned": "بدون مشروع",
+    "headline": {
+      "title": "صافي المستحق للدفع في {month}",
+      "version": "الإصدار {version}",
+      "laborCost": "تكلفة العمل (الأجر الأساسي والساعات الإضافية): <money></money>",
+      "comparison": {
+        "title": "مقارنة بشهر {month}",
+        "previous": "صافي الشهر السابق",
+        "difference": "الفرق",
+        "change": "نسبة التغيير",
+        "none": "لا توجد أرقام للمقارنة: صافي الشهر السابق صفر."
+      }
+    },
+    "trend": {
+      "title": "تكلفة العمل اليومية",
+      "description": "تكلفة العمل في كل يوم من {month} حتى اليوم، بالأجر الأساسي والساعات الإضافية.",
+      "chartLabel": "مخطط أعمدة لتكلفة العمل اليومية في {month}، أول أيام الشهر على اليمين",
+      "loadingChart": "جارٍ تحميل المخطط…",
+      "legend": {
+        "label": "مفتاح المخطط",
+        "base": "الأجر الأساسي",
+        "overtime": "الساعات الإضافية",
+        "spike": "يوم ارتفاع حاد في الساعات الإضافية"
+      },
+      "spikeNote": "الأعمدة الحمراء المعلَّمة بمثلث هي أيام الارتفاع الحاد، وتفاصيلها في أسفل الصفحة.",
+      "showTable": "عرض البيانات كجدول",
+      "caption": "تكلفة العمل اليومية في {month}",
+      "columns": {
+        "date": "اليوم",
+        "laborCost": "تكلفة العمل",
+        "overtimeCost": "منها الساعات الإضافية",
+        "overtimeMinutes": "مدة الساعات الإضافية",
+        "note": "ملاحظة"
+      },
+      "spike": "ارتفاع حاد",
+      "emptyTitle": "لا توجد أيام عمل بعد هذا الشهر",
+      "emptyDescription": "تظهر هنا تكلفة كل يوم بعد الموافقة على الحضور."
+    },
+    "costs": {
+      "shifts": "الورديات: {count}",
+      "overtime": "منها ساعات إضافية: <money></money>",
       "emptyTitle": "لا توجد تكاليف بعد",
       "emptyDescription": "لا توجد هذا الشهر بعد ورديات تمت الموافقة عليها واحتُسبت تكلفتها."
     },
-    "exposure": {
-      "title": "مبالغ معلّقة وخصومات",
-      "pendingApprovalEstimate": "تقدير تكلفة الحضور بانتظار الموافقة",
-      "forgottenStampDeductions": "خصومات نسيان تسجيل"
+    "costByProject": {
+      "title": "التكلفة حسب المشروع",
+      "unassigned": "بدون مشروع"
+    },
+    "costBySite": {
+      "title": "التكلفة حسب الموقع",
+      "unassigned": "بدون موقع",
+      "project": "المشروع: {name}"
+    },
+    "costByWorker": {
+      "title": "التكلفة حسب العامل",
+      "description": "الأعلى حسب صافي المستحق: {shown} من {total}.",
+      "caption": "تكلفة العمل وصافي المستحق للعمال الأعلى أجراً في {month}",
+      "columns": {
+        "worker": "العامل",
+        "shifts": "الورديات",
+        "overtime": "الساعات الإضافية",
+        "laborCost": "تكلفة العمل",
+        "net": "صافي المستحق"
+      },
+      "viewAll": "عرض كل العمال",
+      "emptyTitle": "لا توجد أجور هذا الشهر بعد",
+      "emptyDescription": "تظهر هنا الأجور بعد الموافقة على الحضور."
+    },
+    "topEarners": {
+      "title": "الأعلى أجراً",
+      "description": "حسب صافي المستحق هذا الشهر."
+    },
+    "spikes": {
+      "title": "أيام الارتفاع الحاد في الساعات الإضافية",
+      "rule": "يوم ارتفاع حاد: دقائق الساعات الإضافية في اليوم (لكل العمال معًا) لا تقل عن {factor} أضعاف المعدل اليومي (<average></average>) ولا عن <minimum></minimum>.",
+      "overtimeMinutes": "الساعات الإضافية",
+      "overtimeCost": "تكلفتها",
+      "threshold": "حد الارتفاع في هذا اليوم",
+      "workers": "عمال الساعات الإضافية في {date}",
+      "worker": "{name}: <minutes></minutes>",
+      "emptyTitle": "لا توجد أيام ارتفاع حاد هذا الشهر",
+      "emptyDescription": "لم تبلغ الساعات الإضافية في أي يوم حد الارتفاع."
+    },
+    "withoutCompensation": {
+      "title": "حضور معتمد بلا أجر مسجّل",
+      "description": "سجلات هؤلاء العمال المعتمدة غير محسوبة في أرقام هذه الصفحة، إذ لا يوجد أجر مسجّل في تواريخها. سجّل الأجر من صفحة العامل لتدخل في الرواتب.",
+      "entries": "{count, plural, one {سجل واحد} two {سجلان} few {{count} سجلات} many {{count} سجلًا} other {{count} سجل}}"
     }
   },
   "geofenceMap": {
@@ -516,9 +600,9 @@
         "fallbackBody": "تم فتح نقطة تسجيل مؤقتة لإحدى الورديات."
       },
       "PAYROLL_FINALIZED": {
-        "title": "تم إقفال الرواتب",
-        "body": "تم إقفال رواتب شهر {month}.",
-        "fallbackBody": "تم إقفال إحدى فترات الرواتب."
+        "title": "اعتُمدت الرواتب نهائياً",
+        "body": "اعتُمدت رواتب شهر {month} نهائياً.",
+        "fallbackBody": "اعتُمدت رواتب أحد الأشهر نهائياً."
       },
       "OFFLINE_EVENT_SYNCED": {
         "title": "تمت مزامنة حضور دون اتصال",
@@ -545,59 +629,286 @@
   },
   "payroll": {
     "title": "الرواتب",
-    "description": "للمالك فقط. احتسب رواتب الشهر وراجعها، ثم أقفل الفترة.",
-    "actions": {
-      "calculateMonth": "احتساب رواتب {month}",
-      "calculating": "جارٍ الاحتساب…"
-    },
-    "messages": {
-      "calculated": "تم احتساب رواتب {month}. راجعها قبل إقفال الفترة."
-    },
+    "description": "للمالك فقط. احسب رواتب الشهر من الحضور المعتمد وراجعها، ثم اعتمدها نهائياً.",
+    "calculateMonth": "احسب رواتب {month}",
+    "calculating": "جارٍ الاحتساب…",
+    "viewMonth": "عرض رواتب {month}",
+    "entries": "{count, plural, zero {{count} إدخال} one {إدخال واحد} two {إدخالان} few {{count} إدخالات} many {{count} إدخالًا} other {{count} إدخال}}",
     "list": {
       "title": "فترات الرواتب",
-      "caption": "فترات الرواتب مع رقم الإصدار والحالة",
+      "caption": "رواتب كل شهر: الإصدار الحالي وعدد الإصدارات والحالة والعمال وصافي الرواتب وآخر احتساب والاعتماد النهائي",
       "columns": {
         "month": "الشهر",
         "version": "الإصدار",
-        "status": "الحالة"
+        "versionCount": "عدد الإصدارات",
+        "status": "الحالة",
+        "workers": "العمال",
+        "net": "صافي الرواتب",
+        "calculatedAt": "آخر احتساب",
+        "finalizedAt": "الاعتماد النهائي"
       },
       "empty": {
         "title": "لا توجد فترات رواتب بعد",
-        "description": "احتسب رواتب الشهر الحالي للبدء."
+        "description": "احسب رواتب الشهر الحالي للبدء."
       }
     },
     "period": {
       "title": "رواتب {month}",
       "backToList": "العودة إلى الرواتب",
       "version": "الإصدار {version}",
-      "breakdownTitle": "رواتب العمال بالتفصيل",
       "totalNet": "إجمالي الصافي: <ltr>{total}</ltr>",
-      "caption": "تفاصيل رواتب العمال لشهر {month}",
-      "columns": {
-        "worker": "العامل",
-        "days": "الأيام المحتسبة",
-        "regular": "الساعات العادية",
-        "adjustments": "الإضافات والخصومات"
-      },
-      "added": "إضافة:",
-      "deducted": "خصم:",
-      "actions": {
-        "finalizing": "جارٍ إقفال الفترة…",
-        "reopening": "جارٍ إعادة الفتح…"
-      },
-      "messages": {
-        "finalized": "تم إقفال فترة الرواتب.",
-        "reopened": "أُعيد فتح فترة الرواتب، ويمكنك الآن تعديلها."
-      },
-      "empty": {
-        "title": "لا توجد رواتب محتسبة لهذا الشهر",
-        "description": "اضغط «احتساب» في صفحة الرواتب لاحتساب رواتب العمال."
+      "workersCount": "العمال: {count}",
+      "calculated": "آخر احتساب: <date></date> بواسطة {name}",
+      "calculatedUnknown": "آخر احتساب: <date></date>",
+      "finalized": "الاعتماد النهائي: <date></date> بواسطة {name}",
+      "finalizedUnknown": "الاعتماد النهائي: <date></date>",
+      "notCalculated": {
+        "title": "لم يُحتسب هذا الإصدار بعد",
+        "description": "اضغط «احسب» لاحتساب الرواتب من الحضور المعتمد."
       },
       "notFound": {
         "title": "لم تُحتسب رواتب هذا الشهر بعد",
-        "description": "لا توجد فترة رواتب لهذا الشهر. ارجع إلى صفحة الرواتب لاحتسابها."
+        "description": "اضغط «احسب» لاحتساب رواتب هذا الشهر من الحضور المعتمد."
       },
+      "versionNotFound": {
+        "title": "لم نعثر على هذا الإصدار",
+        "description": "لا يوجد إصدار بهذا الرقم لرواتب هذا الشهر."
+      },
+      "oldVersion": "تعرض الإصدار {version} — إصدار سابق للقراءة فقط",
+      "viewCurrent": "عرض الإصدار الحالي",
       "reopenReason": "يلزم تصحيح بعد المراجعة"
+    },
+    "origin": {
+      "created": "أُنشئ بواسطة {name} في <date></date>",
+      "createdUnknown": "أُنشئ في <date></date>",
+      "reopened": "أُعيد فتحه بواسطة {name} في <date></date> — السبب: {reason}",
+      "reopenedNoReason": "أُعيد فتحه بواسطة {name} في <date></date>",
+      "reopenedUnknown": "أُعيد فتحه في <date></date> — السبب: {reason}",
+      "reopenedUnknownNoReason": "أُعيد فتحه في <date></date>",
+      "by": "<date></date> بواسطة {name}"
+    },
+    "actions": {
+      "calculate": "احسب",
+      "finalize": "اعتمد نهائياً",
+      "reopen": "أعد فتح",
+      "exportCsv": "تصدير CSV",
+      "starting": "جارٍ بدء الاحتساب…",
+      "finalizing": "جارٍ الاعتماد النهائي…",
+      "reopening": "جارٍ إعادة الفتح…"
+    },
+    "finalize": {
+      "confirmTitle": "اعتماد رواتب {month} نهائياً (الإصدار {version})؟",
+      "confirmText": "بعد الاعتماد النهائي لا يتغيّر هذا الإصدار. لتعديل الرواتب لاحقاً أعد فتحها، فيُنشأ إصدار جديد ويبقى هذا الإصدار محفوظاً للقراءة.",
+      "confirm": "تأكيد الاعتماد النهائي",
+      "success": "اعتُمدت رواتب {month} نهائياً (الإصدار {version})."
+    },
+    "reopen": {
+      "label": "سبب إعادة الفتح",
+      "hint": "السبب مطلوب ويُحفظ مع الإصدار الجديد في سجل الإصدارات. يبقى الإصدار المعتمد كما هو للقراءة.",
+      "submit": "تأكيد إعادة الفتح",
+      "success": "أُعيد فتح الرواتب: الإصدار {version} هو الإصدار الحالي الآن، والإصدار {previous} المعتمد محفوظ للقراءة."
+    },
+    "calculation": {
+      "started": "بدأ احتساب الرواتب.",
+      "succeeded": "اكتمل احتساب الرواتب.",
+      "progressLabel": "تقدّم احتساب الرواتب",
+      "queued": "الاحتساب في الانتظار…",
+      "running": "جارٍ احتساب الرواتب…",
+      "percent": "{percent}%",
+      "valueText": "{percent}%، {processed} من {total}",
+      "workers": "{processed} من {total, plural, zero {{total} عامل} one {{total} عامل} two {{total} عاملين} few {{total} عمال} many {{total} عاملًا} other {{total} عامل}}",
+      "failedTitle": "تعذّر احتساب الرواتب",
+      "failedAt": "توقف الاحتساب في <date></date>.",
+      "retry": "احسب مرة أخرى"
+    },
+    "banners": {
+      "changed": "تغيّرت بيانات الشهر بعد آخر احتساب — أعد الاحتساب قبل الاعتماد النهائي",
+      "legacy": "إصدار من قبل حفظ التفاصيل: تُعرض البيانات المحفوظة فقط",
+      "noCompensation": {
+        "title": "إدخالات معتمدة بلا أجر ساري — لم تُدفع",
+        "description": "لم يكن لهؤلاء العمال ملف أجر ساري في تواريخ هذه الإدخالات، فلم تدخل في الرواتب. أضف ملف أجر ثم أعد الاحتساب.",
+        "listLabel": "العمال الذين لديهم إدخالات معتمدة بلا أجر ساري",
+        "datesLabel": "تواريخ الإدخالات بلا أجر ساري لـ{name}"
+      },
+      "pending": {
+        "title": "بانتظار الموافقة — غير محسوبة: {count}",
+        "description": "لم تكن هذه الإدخالات معتمدة عند الاحتساب، فلم تدخل في الرواتب. راجعها ثم أعد الاحتساب.",
+        "listLabel": "الإدخالات بانتظار الموافقة لكل عامل",
+        "review": "مراجعة في الحضور",
+        "reviewFor": "مراجعة في الحضور: إدخالات {name}"
+      }
+    },
+    "tabs": {
+      "label": "تفاصيل رواتب الإصدار",
+      "workers": "العمال",
+      "projects": "المشاريع",
+      "sites": "المواقع",
+      "adjustments": "التعديلات",
+      "versions": "الإصدارات"
+    },
+    "workers": {
+      "caption": "رواتب العمال لشهر {month}، الإصدار {version}",
+      "columns": {
+        "worker": "العامل",
+        "approvedShifts": "الورديات المعتمدة",
+        "standardDays": "الأيام المحتسبة",
+        "regular": "الساعات العادية",
+        "emergencyRetroactive": "طوارئ: قبل البدء",
+        "emergencyReturn": "طوارئ: بعد الإنهاء",
+        "grossBase": "الأجر الأساسي",
+        "overtimePay": "أجر الساعات الإضافية",
+        "positiveAdjustments": "إضافات",
+        "forgottenStampPenalties": "خصم نسيان التسجيل",
+        "reversals": "إلغاء خصومات",
+        "otherDeductions": "خصومات أخرى",
+        "net": "الصافي"
+      },
+      "totals": "الإجمالي ({count, plural, zero {لا عمال} one {عامل واحد} two {عاملان} few {{count} عمال} many {{count} عاملًا} other {{count} عامل}})",
+      "pending": "بانتظار الموافقة — غير محسوبة: {count}",
+      "withoutCompensation": "بلا أجر ساري — لم تُدفع: {count}",
+      "drilldownHint": "اضغط اسم العامل لعرض الورديات المعتمدة والتعديلات كما احتُسبت.",
+      "emergencyNote": "دقائق الطوارئ المضافة قبل البدء وبعد الإنهاء جزء من الساعات المدفوعة، وتُعرض في عمودين للتوضيح فقط.",
+      "empty": {
+        "title": "لا يوجد عمال في هذا الإصدار",
+        "description": "لم تكن هناك إدخالات معتمدة لهذا الشهر عند الاحتساب."
+      },
+      "legacyCaption": "صافي الرواتب المحفوظ لكل عامل في الإصدار {version}"
+    },
+    "drill": {
+      "entriesTitle": "الورديات المعتمدة المحتسبة",
+      "entriesCaption": "الورديات المعتمدة التي احتُسبت لـ{name}",
+      "columns": {
+        "date": "يوم العمل",
+        "shift": "الوردية",
+        "project": "المشروع",
+        "site": "الموقع",
+        "approvedRegular": "عادية معتمدة",
+        "approvedOvertime": "إضافية معتمدة",
+        "notes": "ملاحظات",
+        "compensation": "الأجر",
+        "base": "الأساسي",
+        "overtimePay": "الإضافي",
+        "total": "المجموع"
+      },
+      "emergency": "استدعاء طوارئ <ltr>-{before} / +{after}</ltr> د",
+      "noCompensation": "بلا أجر ساري — لم يُحتسب",
+      "noProject": "بدون مشروع",
+      "noSite": "بدون موقع",
+      "noEntries": "لا توجد ورديات معتمدة لهذا العامل في هذا الإصدار.",
+      "notAvailable": "غير متوفر لهذا الإصدار",
+      "adjustmentsTitle": "التعديلات",
+      "adjustmentsCaption": "تعديلات {name} في هذا الإصدار",
+      "noAdjustments": "لا توجد تعديلات لهذا العامل في هذا الإصدار."
+    },
+    "groups": {
+      "projectsCaption": "تكلفة العمل لكل مشروع في الإصدار {version}",
+      "sitesCaption": "تكلفة العمل لكل موقع في الإصدار {version}",
+      "columns": {
+        "project": "المشروع",
+        "site": "الموقع",
+        "shifts": "الورديات",
+        "workers": "العمال",
+        "regular": "الساعات العادية",
+        "base": "الأجر الأساسي",
+        "overtimePay": "أجر الساعات الإضافية",
+        "total": "الإجمالي"
+      },
+      "noProject": "بدون مشروع",
+      "noSite": "بدون موقع",
+      "note": "تكلفة العمل فقط: الأجر الأساسي وأجر الساعات الإضافية. التعديلات تُسجَّل لكل عامل، فلا تظهر هنا.",
+      "empty": "لا توجد ورديات معتمدة في هذا الإصدار.",
+      "notAvailable": "غير متوفر لهذا الإصدار",
+      "notAvailableDescription": "لم تُحفظ هذه التفاصيل مع إصدارات الرواتب القديمة."
+    },
+    "adjustments": {
+      "includedTitle": "التعديلات المحتسبة في هذا الإصدار",
+      "notIncludedTitle": "تعديلات أُضيفت بعد آخر احتساب",
+      "notIncludedBadge": "لم يُحتسب بعد — أعد الاحتساب",
+      "includedCaption": "التعديلات المحتسبة في الإصدار {version}",
+      "notIncludedCaption": "التعديلات التي لم تُحتسب بعد",
+      "columns": {
+        "worker": "العامل",
+        "type": "النوع",
+        "source": "المصدر",
+        "amount": "المبلغ",
+        "reason": "السبب",
+        "created": "الإضافة",
+        "links": "روابط"
+      },
+      "createdBy": "<date></date> بواسطة {name}",
+      "viewEntry": "عرض الحضور",
+      "forgottenStamps": "نسيان التسجيل",
+      "reversed": "أُلغي هذا الخصم",
+      "viewReversal": "عرض الإلغاء",
+      "reverses": "يلغي خصم نسيان التسجيل",
+      "empty": "لا توجد تعديلات محتسبة في هذا الإصدار.",
+      "emptyDescription": "تظهر هنا خصومات نسيان التسجيل وإلغاؤها، والإضافات والخصومات اليدوية.",
+      "notCalculated": "تظهر هنا التعديلات المحتسبة بعد احتساب الإصدار."
+    },
+    "adjustmentForm": {
+      "title": "إضافة تعديل يدوي",
+      "description": "يُحفظ التعديل فوراً ويدخل في الرواتب عند الاحتساب التالي.",
+      "worker": "العامل",
+      "workerPlaceholder": "اختر العامل",
+      "type": "النوع",
+      "bonus": "إضافة",
+      "deduction": "خصم",
+      "amount": "المبلغ بالشيكل",
+      "amountHint": "مبلغ موجب بخانتين عشريتين على الأكثر، مثل 150 أو 12.50. يحدد النوع إن كان إضافة أو خصماً.",
+      "reason": "السبب",
+      "reasonHint": "يُحفظ السبب مع التعديل ويظهر في قائمة التعديلات.",
+      "submit": "إضافة التعديل",
+      "pending": "جارٍ الإضافة…",
+      "success": "أُضيف التعديل. أعد الاحتساب ليدخل في الرواتب.",
+      "errors": {
+        "worker": "اختر العامل.",
+        "amount": {
+          "empty": "اكتب المبلغ.",
+          "invalid": "اكتب المبلغ بالأرقام فقط، مثل 12.50.",
+          "negative": "اكتب المبلغ دون إشارة سالبة، واختر «خصم» لخصمه.",
+          "zero": "يجب أن يكون المبلغ أكبر من صفر.",
+          "tooManyDecimals": "اكتب خانتين عشريتين على الأكثر (الأغورات).",
+          "tooLarge": "المبلغ أكبر من الحد المسموح."
+        },
+        "reason": "اكتب سبب التعديل."
+      }
+    },
+    "versions": {
+      "title": "سجل الإصدارات",
+      "caption": "إصدارات رواتب {month}: كيف بدأ كل إصدار ومتى ولماذا، واحتسابه واعتماده النهائي",
+      "columns": {
+        "version": "الإصدار",
+        "status": "الحالة",
+        "origin": "البداية",
+        "calculated": "آخر احتساب",
+        "finalized": "الاعتماد النهائي",
+        "workers": "العمال",
+        "net": "الصافي",
+        "view": "العرض"
+      },
+      "current": "الحالي",
+      "viewing": "المعروض الآن",
+      "legacy": "قبل حفظ التفاصيل",
+      "view": "عرض",
+      "viewVersion": "عرض الإصدار {version}",
+      "empty": "لا توجد إصدارات لهذا الشهر بعد."
+    },
+    "csv": {
+      "worker": "العامل",
+      "approvedShifts": "الورديات المعتمدة",
+      "standardDays": "الأيام المحتسبة",
+      "regularMinutes": "الدقائق العادية",
+      "overtimeMinutes": "الدقائق الإضافية",
+      "emergencyRetroactiveMinutes": "دقائق الطوارئ قبل البدء",
+      "emergencyReturnMinutes": "دقائق الطوارئ بعد الإنهاء",
+      "grossBase": "الأجر الأساسي",
+      "overtimePay": "أجر الساعات الإضافية",
+      "positiveAdjustments": "إضافات",
+      "forgottenStampPenalties": "خصم نسيان التسجيل",
+      "reversals": "إلغاء خصومات",
+      "otherDeductions": "خصومات أخرى",
+      "net": "الصافي",
+      "totals": "الإجمالي"
     }
   },
   "reports": {

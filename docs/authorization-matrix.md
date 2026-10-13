@@ -133,6 +133,33 @@ its third role.
   now checks that the user is a member of the caller's organization too
   (before, it did not).
 
+## Payroll and the financial dashboard (Step 7)
+
+| Route | Permission | Owner | Field Manager | Worker |
+|---|---|---|---|---|
+| `GET /payroll-periods` (one row per month, its latest version) | `VIEW_PAYROLL` **(financial)** | ✅ | 403 | 403 |
+| `GET /payroll-periods/:yearMonth` (latest version), `/versions`, `/versions/:version`, `/versions/:version/workers/:workerProfileId`, `/calculation` | `VIEW_PAYROLL` **(financial)** | ✅ | 403 | 403 |
+| `GET /payroll-periods/:yearMonth/dashboard` | `VIEW_FINANCIAL_DASHBOARD` **(financial)** | ✅ | 403 | 403 |
+| `POST /payroll-periods/:yearMonth/calculate` (202, background job) | `MANAGE_PAYROLL` **(financial)** | ✅ | 403 | 403 |
+| `POST /payroll-periods/:yearMonth/adjustments` (manual +/-, reason) | `MANAGE_PAYROLL` **(financial)** | ✅ | 403 | 403 |
+| `POST /payroll-periods/:yearMonth/finalize`, `/reopen` (reason) | `FINALIZE_PAYROLL` **(financial)** | ✅ | 403 | 403 |
+| `GET /payroll-statements/me` | none: the caller's own worker profile | own (if time-trackable; 404 otherwise) | own (if time-trackable; 404 otherwise) | own only |
+| `GET /payroll-periods/:yearMonth/my-payslip` | none: the caller's own worker profile | own | own | own only |
+
+- **The Worker's own pay** (`/payroll-statements/me`, `my-payslip`) takes no
+  worker id: every query is bound to the worker profile of the token. It
+  comes only from FINALIZED versions (a month's latest finalized one);
+  `/payroll-statements/me` adds a DRAFT estimate (`isEstimate: true`) for the
+  open month(s). The leak scanner lists both as the only Worker-own-money
+  exceptions and checks they never contain another worker's data.
+- **The Field Manager's dashboard** is the same page without its financial
+  section: it never calls `/dashboard` (and the API answers 403).
+- **A finalized month** refuses every edit with 409
+  `PAYROLL_PERIOD_FINALIZED`: corrections, full-day credit, approval, sending
+  an entry back for correction (Step 7), manual adjustments (Step 7),
+  reversing a forgotten-stamp deduction (Step 7), and a new calculation. The
+  Owner reopens it with a reason to get a new working version.
+
 ## Defense in depth for financial data (spec section 6.2 / 23.5)
 
 A Field Manager must never see rates, earnings, deductions, or cost

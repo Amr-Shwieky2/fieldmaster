@@ -175,7 +175,7 @@ describe("renderNotificationText", () => {
     });
 
     it("payroll finalized names the month", () => {
-      expect(render("PAYROLL_FINALIZED", { yearMonth: "2026-09" }).body).toBe("تم إقفال رواتب شهر سبتمبر 2026.");
+      expect(render("PAYROLL_FINALIZED", { yearMonth: "2026-09" }).body).toBe("اعتُمدت رواتب شهر سبتمبر 2026 نهائياً.");
     });
 
     it("offline review shows the counts and a generic name when the worker is unknown", () => {

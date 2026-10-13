@@ -107,8 +107,8 @@ describe("Notifications page", () => {
     expect(visible(items[0])).not.toContain("₪");
     expect(visible(items[0])).not.toMatch(/[٠-٩]/);
 
-    expect(within(items[1]).getByText("تم إقفال الرواتب")).toBeTruthy();
-    expect(visible(items[1])).toContain("تم إقفال رواتب شهر سبتمبر 2026.");
+    expect(within(items[1]).getByText("اعتُمدت الرواتب نهائياً")).toBeTruthy();
+    expect(visible(items[1])).toContain("اعتُمدت رواتب شهر سبتمبر 2026 نهائياً.");
     // Old notification without data: the type's title and generic Arabic sentence.
     expect(within(items[2]).getByText("بدأ استدعاء طوارئ")).toBeTruthy();
     expect(visible(items[2])).toContain("بدأ أحد العمال استدعاء طوارئ.");

@@ -114,12 +114,141 @@ exist independently of a `PayrollItem`. An Owner can reverse a deduction; the
 reversal creates a *new*, offsetting adjustment — the original deducting
 adjustment is never deleted or mutated, preserving history.
 
-## Payroll period lifecycle
+## A month's payroll (Step 7)
 
-`OPEN → CALCULATING → REVIEW → FINALIZED`, with `REOPENED` available from
-`FINALIZED` (Owner-only, requires a reason, bumps `version`).
-`PayrollCalculationSnapshot` records a JSON snapshot of inputs and results
-on every calculation. Finalized periods block further edits to included
-shifts — both full-day-credit and manual-correction endpoints check the
-period's status and reject with `409 PAYROLL_PERIOD_FINALIZED`, tested in
-`payroll.e2e-spec.ts` (`calculate → finalize → block-edit → reopen`).
+`packages/shared-validation/src/payroll-month.ts` turns plain data into a
+month's payroll. The background calculation, the Owner dashboard's live
+figures, the worker's estimate and the seed all call it.
+
+**Inputs, and only these** (`PayrollInputsService`):
+- the month's **APPROVED** time entries (business date `YYYY-MM-*`, Asia/Jerusalem) with their approved regular / overtime minutes and full-day credit;
+- for an emergency call-out, its -60 / +15 minutes (already inside its approved, compensated minutes: they are reported, not added again);
+- each entry's compensation profile **in effect on its business date** (`pickEffectiveCompensationProfile`: started on or before it, not ended before it);
+- the month's adjustments: forgotten-stamp penalties and their reversals, manual bonuses and deductions.
+
+Entries waiting for approval (`PENDING_APPROVAL`, `CORRECTION_REQUESTED`)
+are only **counted** ("بانتظار الموافقة — غير محسوبة"), never paid. An
+approved entry with no profile on its date pays nothing and the calculation
+**warns** with the worker's name and dates; it does not block.
+
+**Per worker** (`calculateWorkerPayroll`; everyone with an approved entry or an adjustment):
+
+```text
+approvedShifts             = approved entries that had a profile
+standardDaysCredited       = daily entries credited a full day
+regularMinutes, overtimeMinutes          (from the calculators above)
+emergencyRetroactiveMinutes, emergencyReturnMinutes   (60 / 15 per call-out)
+grossBaseAgorot, overtimeAgorot          (sum of each entry's calculator result)
+positiveAdjustmentsAgorot     = manual bonuses
+forgottenStampPenaltiesAgorot = penalties (positive amount)
+reversalsAgorot               = reversals of penalties (positive amount)
+otherDeductionsAgorot         = manual deductions (positive amount)
+netPayableAgorot = gross + overtime + positive + reversals - penalties - other
+```
+
+Only additions of integer agorot: every amount comes from the calculators'
+single rounding step. Worked examples (tests, fixtures daily 45,000 /
+hourly 5,000 / overtime 7,000 agorot):
+
+| Case | Pay |
+|---|---|
+| Daily 9 h | 45,000 |
+| Daily 6 h, no credit | round(45,000 × 360 / 540) = 30,000 |
+| Daily 6 h, full-day credit | 45,000 |
+| Daily 10 h 30 m | 45,000 + round(90 × 7,000 / 60) = 45,000 + 10,500 |
+| Hourly 6 h | 5,000 × 6 = 30,000 |
+| Hourly, Night Turan emergency 02:00-03:00 | paid 01:00-03:15 = 135 min → 5,000 × 135 / 60 = 11,250 |
+| 4 forgotten stamps in a month | sequences 3 and 4 → -1,000 each = -2,000 |
+| … one of them reversed | -2,000 + 1,000 = -1,000 (the penalty stays; the reversal offsets it) |
+
+## Payroll period lifecycle and versions (Step 7)
+
+A month's payroll is a chain of **versions** (one `payroll_periods` row
+each). The latest is the working version:
+
+```text
+OPEN ──calculate──▶ CALCULATING ──job done──▶ REVIEW ──finalize──▶ FINALIZED
+  ▲                      │ job failed: back to OPEN / REVIEW / REOPENED     │
+  │                      ▼                                                  │ reopen (Owner, reason)
+  └─────────── REVIEW ◀── recalculate                    next version: REOPENED
+```
+
+- **Calculate** is a BullMQ job: `POST .../calculate` answers 202 with a
+  `payroll_calculation_runs` row (`QUEUED` → `RUNNING` → `SUCCEEDED` /
+  `FAILED`, progress 0-100). The same Idempotency-Key always answers the same
+  run. One QUEUED/RUNNING run per version (a partial unique index); another
+  request is 409 `PAYROLL_CALCULATION_IN_PROGRESS`. A run with no news for 15
+  minutes (its job was lost) is marked FAILED (`PAYROLL_CALCULATION_STALE`)
+  by the next request, which takes over.
+- **A calculation** stores one immutable **snapshot**: the inputs (every
+  approved entry with its shift, project and site, the profiles, the
+  adjustments, worker names, pending counts), the per-worker and per-entry
+  results, the per-project / per-site labor cost, the warnings and the
+  totals. The version's items mirror it. A failed job leaves the previous
+  results as they were.
+- **Finalize** (Owner, REVIEW only) freezes the version. Database triggers
+  refuse any later change to it, its items or any snapshot. Every edit of a
+  finalized month is 409 `PAYROLL_PERIOD_FINALIZED`: corrections, full-day
+  credit, approval, sending an entry back for correction, manual
+  adjustments, reversing a forgotten-stamp deduction, and a new calculation.
+- **Reopen** (Owner, reason required) creates the next version (`REOPENED`,
+  nothing calculated yet) linked to the finalized one, which stays exactly
+  as it was and readable (`GET .../versions/:version`). The version history
+  shows who created, calculated, reopened (and why) and finalized each one.
+- **Reading a version never recalculates anything**: it is shown from its
+  snapshot. Live data is only used to say what a WORKING version lacks:
+  adjustments added after its calculation, and whether the approved entries,
+  profiles or adjustments changed since (`changedSinceCalculation`, from the
+  snapshot's inputs hash).
+
+Before Step 7, reopen bumped the version on the same row and the next
+calculation overwrote it; the migration restored those earlier versions as
+their own rows (see `database-design.md`).
+
+## The Owner dashboard (Step 7)
+
+`GET /payroll-periods/:yearMonth/dashboard`, Owner only. A month whose
+latest version is FINALIZED is shown from that version's snapshot (`source:
+FINALIZED`); any other month is calculated live, with the same engine, from
+its approved attendance and adjustments (`source: LIVE`). It returns the
+month's net payable and labor cost against the previous month, labor cost
+per project, per site and per worker (net after adjustments), the five top
+earners, overtime (agorot, minutes, spikes), forgotten-stamp deductions
+(penalties, reversals, net), emergency call-outs (count, compensated
+minutes, cost), the daily labor cost of every day of the month (up to
+today), and the pending-approval exposure (always live: entries waiting for
+approval, priced as approval would split them).
+
+**Overtime spike** (a reporting rule; no pay depends on it): a business day
+is a spike when its approved overtime minutes, all workers together, are at
+least **twice the month's average overtime per working day** and at least
+**60 minutes**. A working day is a day with at least one approved, paid
+shift. Compared in integers (`dayMinutes × workingDays ≥ 2 × totalMinutes`),
+so there is no rounding. Example: 240 overtime minutes over 4 working days →
+average 60 → threshold 120: a day with 180 minutes is a spike, a day with 60
+is not. Constants `OVERTIME_SPIKE_FACTOR` / `OVERTIME_SPIKE_MIN_MINUTES` in
+`packages/shared-types`, function `findOvertimeSpikes`.
+
+## The worker's own statements (Step 7)
+
+`GET /payroll-statements/me` (the mobile screen is Step 9): the caller's
+own months only, bound to the worker profile of the token.
+- **Statements** come only from FINALIZED versions: each month's latest
+  finalized version (a reopened month keeps showing it until the next
+  version is finalized).
+- **Estimates** (`status: DRAFT`, `isEstimate: true`): the current month,
+  and the previous one until it is finalized, calculated from the caller's
+  approved attendance and adjustments so far, with the count of their
+  entries still waiting for approval.
+- Each has base, overtime, gross (base + overtime), adjustments (bonuses
+  minus manual deductions), forgotten-stamp deductions (penalties minus
+  reversals) and net.
+
+## CSV export (admin web)
+
+The period page exports the version shown (`payroll-YYYY-MM-vN.csv`):
+UTF-8 with a BOM, Western digits, shekels with 2 decimals and no thousands
+separator (`450.00`, `-20.00`), minutes as integers, one row per worker plus
+a totals row. Deductions are negative, so each row's money cells add up to
+its net. Text cells starting with `=`, `+`, `-`, `@` (or a tab / carriage
+return) are prefixed with `'` so a spreadsheet never runs them as formulas.

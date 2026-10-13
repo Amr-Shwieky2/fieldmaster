@@ -1,62 +1,24 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { OrgRole } from "@fieldmaster/shared-types";
-import type { FinancialDashboard } from "@fieldmaster/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { currentYearMonth } from "@/lib/business-date";
 import { useFormat } from "@/lib/use-format";
 import { useEnumLabel } from "@/i18n/enums";
-import { LtrText, Money } from "@/components/formatted";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
-
-function StatCard({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
-  return (
-    <Card>
-      <CardContent className="py-5">
-        <p className="text-sm text-slate-500">{label}</p>
-        <p className="mt-1 text-2xl font-semibold text-slate-900">{value}</p>
-        {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * Cost per project as a bar list. Each bar is a block inside a full-width
- * track, so it starts at the inline-start edge (the right, since the app is
- * RTL). Widths are relative to the most expensive project.
- */
-function CostByProject({ items }: { items: FinancialDashboard["costByProject"] }) {
-  const t = useTranslations("dashboard");
-  if (items.length === 0) {
-    return <EmptyState title={t("costByProject.emptyTitle")} description={t("costByProject.emptyDescription")} />;
-  }
-  const max = Math.max(0, ...items.map((p) => p.totalAgorot));
-  return (
-    <ul className="space-y-3">
-      {items.map((p) => {
-        const percent = max > 0 ? Math.max(0, Math.min(100, Math.round((p.totalAgorot / max) * 100))) : 0;
-        return (
-          <li key={p.projectId ?? "unassigned"} className="space-y-1.5 text-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span className="min-w-0 truncate text-slate-700">{p.projectId === null ? t("costByProject.unassigned") : p.projectName}</span>
-              <Money agorot={p.totalAgorot} className="font-medium text-slate-900" />
-            </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden data-testid="cost-bar-track">
-              <div className="h-full rounded-full bg-brand-600" style={{ width: `${percent}%` }} />
-            </div>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+import { Card, CardContent } from "@/components/ui/card";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { CostByProject, CostBySite } from "@/components/dashboard/cost-bars";
+import { CostByWorker, TopEarners } from "@/components/dashboard/cost-by-worker";
+import { DailyTrend } from "@/components/dashboard/daily-trend";
+import { FinancialStatCards } from "@/components/dashboard/financial-stat-cards";
+import { NetPayableHeadline } from "@/components/dashboard/net-payable-headline";
+import { OvertimeSpikes } from "@/components/dashboard/overtime-spikes";
+import { StatCard } from "@/components/dashboard/stat-card";
+import { WorkersWithoutCompensation } from "@/components/dashboard/workers-without-compensation";
 
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
@@ -118,25 +80,6 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {header}
 
-      {/* Two columns until xl: four columns next to the sidebar are too narrow for "₪ 123,456.78". */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label={t("stats.activeWorkers")} value={fmt.number(activeWorkers)} />
-        <StatCard label={t("stats.pendingApprovals")} value={fmt.number(pendingQuery.data?.length ?? 0)} />
-        {financials && (
-          <>
-            <StatCard
-              label={t("stats.payrollThisMonth")}
-              value={<Money agorot={financials.totalCurrentMonthPayrollAgorot} />}
-              hint={t.rich("stats.previousMonth", {
-                amount: fmt.money(financials.totalPreviousMonthPayrollAgorot),
-                ltr: (chunks) => <LtrText>{chunks}</LtrText>,
-              })}
-            />
-            <StatCard label={t("stats.overtimeCost")} value={<Money agorot={financials.overtimeTotalAgorot} />} />
-          </>
-        )}
-      </div>
-
       {isOwner && dashboardQuery.isLoading && (
         <Card>
           <LoadingState label={t("financial.loading")} />
@@ -149,38 +92,31 @@ export default function DashboardPage() {
         </Card>
       )}
 
+      {financials && <NetPayableHeadline data={financials} />}
+
+      {/* Up to three columns: narrower cards next to the sidebar are too tight for "₪ 123,456.78". */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <StatCard label={t("stats.activeWorkers")} value={fmt.number(activeWorkers)} />
+        <StatCard label={t("stats.pendingApprovals")} value={fmt.number(pendingQuery.data?.length ?? 0)} />
+        {financials && <FinancialStatCards data={financials} />}
+      </div>
+
       {financials && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("costByProject.title")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CostByProject items={financials.costByProject} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("exposure.title")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <dl className="space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-slate-600">{t("exposure.pendingApprovalEstimate")}</dt>
-                  <dd>
-                    <Money agorot={financials.pendingApprovalFinancialExposureAgorot} className="font-medium text-slate-900" />
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-slate-600">{t("exposure.forgottenStampDeductions")}</dt>
-                  <dd>
-                    <Money agorot={financials.forgottenStampDeductionsAgorot} className="font-medium text-slate-900" />
-                  </dd>
-                </div>
-              </dl>
-            </CardContent>
-          </Card>
-        </div>
+        <>
+          <WorkersWithoutCompensation workers={financials.workersWithoutCompensation} />
+          <DailyTrend days={financials.dailyTrend} yearMonth={financials.yearMonth} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <CostByProject items={financials.costByProject} />
+            <CostBySite items={financials.costBySite} />
+          </div>
+          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="min-w-0 xl:col-span-2">
+              <CostByWorker workers={financials.costByWorker} yearMonth={financials.yearMonth} />
+            </div>
+            <TopEarners workers={financials.topEarners} />
+          </div>
+          <OvertimeSpikes overtime={financials.overtime} />
+        </>
       )}
 
       {!isOwner && (

@@ -94,6 +94,24 @@ needed only a seeded id per new `:id` parameter.
 - The scanner's Owner pass confirms the money is exactly where expected:
   those two routes and the Owner's emergency call-out DTO.
 
+Step 7 added 5 GET routes (50 in all): the payroll versions, a worker's
+drill-down, the calculation run, and `GET /payroll-statements/me`.
+- The Field Manager, Worker and Temporary Supervisor passes read the Owner-only
+  payroll routes as 403 (no body), and the Owner pass confirms the money is
+  in them (`$.workers[n].netPayableAgorot`, `$.entries[0].totalAgorot`,
+  `$.costByWorker[0].netPayableAgorot`, ...).
+- `GET /payroll-statements/me` joins `my-payslip` as a Worker-own-money
+  exception. The scanner's seed now finalizes its month (a Worker's pay only
+  ever comes from a finalized version), and its own-data test checks the
+  statement is the Worker's own item and that the response contains no other
+  worker's id; the same month seen by a worker without pay in it has no
+  statement at all.
+
+**Finalized payroll cannot be changed, even directly in the database (Step
+7).** Triggers refuse any UPDATE or DELETE of a FINALIZED version, any
+INSERT/UPDATE/DELETE of its items, and any UPDATE or DELETE of a
+calculation snapshot (`payroll-versions.e2e-spec.ts` tries all three).
+
 See `authorization-matrix.md` for the full defense-in-depth breakdown and
 `docs/testing.md` for how to run these tests yourself.
 

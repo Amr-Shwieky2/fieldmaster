@@ -1,19 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { ApiRequestError, type FinancialDashboard } from "@fieldmaster/api-client";
+import { ApiRequestError, type DashboardDay } from "@fieldmaster/api-client";
 import { OrgRole } from "@fieldmaster/shared-types";
 import { renderWithIntl } from "@/test/render-with-intl";
+import { currentYearMonth } from "@/lib/business-date";
+import { DAILY_TREND, FINANCIALS, financials } from "@/components/dashboard/__tests__/dashboard-fixtures";
 import DashboardPage from "../page";
 
 const mocks = vi.hoisted(() => ({
   auth: { session: null as unknown, client: null as unknown },
   replace: vi.fn(),
+  chart: null as { days: unknown; label: string } | null,
 }));
 
 vi.mock("@/lib/auth-context", () => ({ useAuth: () => mocks.auth }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: mocks.replace, push: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/dashboard",
+}));
+// Recharts stays out of the page test (the chart has its own test): the dynamically loaded chart is a
+// stub that keeps the props it was given. Everything around it (legend, data table) is real.
+vi.mock("next/dynamic", () => ({
+  default: () =>
+    function DailyTrendChartStub(props: { days: DashboardDay[]; label: string }) {
+      mocks.chart = props;
+      return <div data-testid="chart-stub" />;
+    },
 }));
 
 const WORKERS = [
@@ -22,24 +34,15 @@ const WORKERS = [
   { id: "w3", accountStatus: "PENDING_APPROVAL" },
 ];
 const PENDING = [{ id: "te1" }, { id: "te2" }, { id: "te3" }];
-const FINANCIALS: FinancialDashboard = {
-  yearMonth: "2026-10",
-  totalCurrentMonthPayrollAgorot: 1234567,
-  totalPreviousMonthPayrollAgorot: 1000000,
-  overtimeTotalAgorot: 98050,
-  forgottenStampDeductionsAgorot: 15000,
-  pendingApprovalFinancialExposureAgorot: 432100,
-  costByProject: [
-    { projectId: "p1", projectName: "Highway 6 signs", totalAgorot: 800000 },
-    { projectId: null, projectName: "Unassigned", totalAgorot: 200000 },
-  ],
-};
 
 function apiError(status: number, code: string) {
   return new ApiRequestError(status, { statusCode: status, code, message: `API says ${code}`, details: {}, correlationId: "c" });
 }
 
-function setup(role: OrgRole, overrides: Partial<Record<"listWorkers" | "listPendingAttendanceApprovals" | "getFinancialDashboard", ReturnType<typeof vi.fn>>> = {}) {
+function setup(
+  role: OrgRole,
+  overrides: Partial<Record<"listWorkers" | "listPendingAttendanceApprovals" | "getFinancialDashboard", ReturnType<typeof vi.fn>>> = {},
+) {
   const client = {
     listWorkers: vi.fn(async () => WORKERS),
     listPendingAttendanceApprovals: vi.fn(async () => PENDING),
@@ -58,12 +61,33 @@ function renderPage() {
 }
 
 const ARABIC_INDIC_DIGITS = /[٠-٩۰-۹]/;
-/** UI wording of the removed English version; none of it may appear (project names are user data and may be Latin). */
-const ENGLISH_UI_TEXT = /Dashboard|Overview for|Active workers|Pending approvals|Payroll this month|last month|Overtime cost|Cost by project|Unassigned|Financial exposure|Pending-approval estimate|Forgotten-stamp deductions|Owner/;
+/**
+ * UI wording of the removed English version and English names of the Step 7 widgets; none of it may
+ * appear (project names are user data and may be Latin, e.g. "Highway 6 signs").
+ */
+const ENGLISH_UI_TEXT =
+  /Dashboard|Overview for|Active workers|Pending approvals|Payroll this month|last month|Overtime cost|Cost by project|Unassigned|Financial exposure|Pending-approval estimate|Forgotten-stamp deductions|Owner|Net payable|Labor cost|Previous month|Difference|LIVE|FINALIZED|Version|Daily|Show data|Cost by (site|worker)|View all|Top earners|Overtime spike|Spike|compensation|Emergency/;
+
+/** Every Owner-only widget, by its title. */
+const FINANCIAL_TITLES = [
+  /صافي المستحق للدفع/,
+  "تكلفة الساعات الإضافية",
+  "خصومات نسيان تسجيل",
+  "تكلفة استدعاءات الطوارئ",
+  "تقدير تكلفة الحضور بانتظار الموافقة",
+  "حضور معتمد بلا أجر مسجّل",
+  "تكلفة العمل اليومية",
+  "التكلفة حسب المشروع",
+  "التكلفة حسب الموقع",
+  "التكلفة حسب العامل",
+  "الأعلى أجراً",
+  "أيام الارتفاع الحاد في الساعات الإضافية",
+];
 
 describe("Dashboard page", () => {
   beforeEach(() => {
     mocks.replace.mockClear();
+    mocks.chart = null;
   });
 
   it("renders the Owner dashboard in Arabic with money as ₪ in Western digits", async () => {
@@ -71,31 +95,29 @@ describe("Dashboard page", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { level: 1, name: "لوحة التحكم" })).toBeTruthy();
+    // The headline: the month's net payable, where it comes from, and the previous month.
     expect(await screen.findByText("₪ 12,345.67")).toBeTruthy();
-    expect(screen.getByText("رواتب هذا الشهر")).toBeTruthy();
-    expect(screen.getByText("تكلفة الساعات الإضافية")).toBeTruthy();
-    expect(screen.getByText("₪ 980.50")).toBeTruthy();
-    // Previous month: the amount sits inside the Arabic sentence as an LTR isolate.
-    const previous = screen.getByText("₪ 10,000.00");
-    expect(previous.closest("bdi")?.getAttribute("dir")).toBe("ltr");
-    expect(previous.parentElement?.textContent).toBe("مقابل ₪ 10,000.00 في الشهر الماضي");
-    // Money is bidi-isolated left-to-right.
+    expect(screen.getByRole("heading", { level: 2, name: "صافي المستحق للدفع في أكتوبر 2026" })).toBeTruthy();
+    expect(screen.getByText("تقدير مباشر من الحضور المعتمد حتى الآن")).toBeTruthy();
+    expect(screen.getByText("صافي الشهر السابق").nextElementSibling?.textContent).toBe("₪ 10,000.00من الرواتب المعتمدة نهائياً");
+    expect(screen.getByText("الفرق").nextElementSibling?.textContent).toBe("+₪ 2,345.67");
+    expect(screen.getByText("نسبة التغيير").nextElementSibling?.textContent).toBe("+23.5%");
+    // Money is bidi-isolated left-to-right, also inside Arabic sentences.
     expect(screen.getByText("₪ 12,345.67").closest("bdi")?.getAttribute("dir")).toBe("ltr");
+    expect(screen.getByText("₪ 10,000.00").closest("bdi")?.getAttribute("dir")).toBe("ltr");
     // Counts in Western digits.
     expect(screen.getByText("العمال النشطون").nextElementSibling?.textContent).toBe("2");
     expect(screen.getByText("حضور بانتظار الموافقة").nextElementSibling?.textContent).toBe("3");
-    // Cost by project, with the unassigned bucket translated (the API sends English "Unassigned").
-    expect(screen.getByText("التكلفة حسب المشروع")).toBeTruthy();
-    expect(screen.getByText("Highway 6 signs")).toBeTruthy();
-    expect(screen.getByText("بدون مشروع")).toBeTruthy();
-    expect(screen.queryByText("Unassigned")).toBeNull();
-    expect(screen.getByText("₪ 8,000.00")).toBeTruthy();
-    // Financial exposure.
-    expect(screen.getByText("مبالغ معلّقة وخصومات")).toBeTruthy();
-    expect(screen.getByText("خصومات نسيان تسجيل")).toBeTruthy();
-    expect(screen.getByText("₪ 150.00")).toBeTruthy();
-    expect(screen.getByText("تقدير تكلفة الحضور بانتظار الموافقة")).toBeTruthy();
-    expect(screen.getByText("₪ 4,321.00")).toBeTruthy();
+    // The money cards, including the forgotten-stamp deductions and the pending-approval estimate.
+    expect(screen.getByText("تكلفة الساعات الإضافية").nextElementSibling?.textContent).toBe("₪ 980.50");
+    expect(screen.getByText("خصومات نسيان تسجيل").nextElementSibling?.textContent).toBe("₪ 150.00");
+    expect(screen.getByText("تكلفة استدعاءات الطوارئ").nextElementSibling?.textContent).toBe("₪ 640.00");
+    expect(screen.getByText("تقدير تكلفة الحضور بانتظار الموافقة").nextElementSibling?.textContent).toBe("₪ 4,321.00");
+    // Cost by project, with the bucket without a project in Arabic.
+    const projects = screen.getByRole("list", { name: "التكلفة حسب المشروع" });
+    expect(within(projects).getByText("Highway 6 signs")).toBeTruthy();
+    expect(within(projects).getByText("بدون مشروع")).toBeTruthy();
+    expect(within(projects).getByText("₪ 8,000.00")).toBeTruthy();
     // Role badge from the glossary.
     expect(screen.getByText("المالك")).toBeTruthy();
     expect(screen.queryByText("الأرقام المالية تظهر للمالك فقط.")).toBeNull();
@@ -104,13 +126,40 @@ describe("Dashboard page", () => {
     expect(document.body.textContent).not.toMatch(ENGLISH_UI_TEXT);
     expect(screen.queryByRole("button", { name: "English" })).toBeNull();
     expect(client.getFinancialDashboard).toHaveBeenCalledTimes(1);
+    expect(client.getFinancialDashboard).toHaveBeenCalledWith(currentYearMonth());
+  });
+
+  it("shows an Owner every financial widget of the month", async () => {
+    setup(OrgRole.OWNER);
+    renderPage();
+    await screen.findByText("₪ 12,345.67");
+
+    for (const title of FINANCIAL_TITLES) expect(screen.getAllByText(title).length).toBeGreaterThan(0);
+    // Daily trend: the chart region with the month's days, and the same data as a table.
+    expect(screen.getByRole("figure", { name: "تكلفة العمل اليومية" })).toBeTruthy();
+    expect(mocks.chart?.days).toEqual(DAILY_TREND);
+    const trendTable = screen.getByRole("table", { name: "تكلفة العمل اليومية في أكتوبر 2026" });
+    expect(within(trendTable).getByRole("row", { name: /7 أكتوبر 2026/ }).textContent).toContain("ارتفاع حاد");
+    // Cost by site and by worker, with the link to the month's payroll.
+    expect(within(screen.getByRole("list", { name: "التكلفة حسب الموقع" })).getByText("بدون موقع")).toBeTruthy();
+    const workers = screen.getByRole("table", { name: "تكلفة العمل وصافي المستحق للعمال الأعلى أجراً في أكتوبر 2026" });
+    expect(within(workers).getAllByRole("row")).toHaveLength(11);
+    expect(screen.getByRole("link", { name: "عرض كل العمال" }).getAttribute("href")).toBe("/payroll/2026-10");
+    expect(within(screen.getByRole("list", { name: "الأعلى أجراً" })).getAllByRole("listitem")).toHaveLength(5);
+    // Overtime spikes with the rule, and the warning about approved attendance without a rate.
+    expect(screen.getByText(/^يوم ارتفاع حاد:/).textContent).toContain("لا تقل عن 2 أضعاف المعدل اليومي (1 س 30 د) ولا عن 2 س 0 د");
+    expect(screen.getAllByTestId("overtime-spike")).toHaveLength(1);
+    const warning = screen.getByRole("region", { name: "حضور معتمد بلا أجر مسجّل" });
+    expect(within(warning).getByRole("link", { name: "رامي سعيد" }).getAttribute("href")).toBe("/workers/wp-13");
   });
 
   it("draws the cost bars relative to the most expensive project, without physical left/right styles", async () => {
     setup(OrgRole.OWNER);
     renderPage();
-    await screen.findByText("₪ 8,000.00");
-    const bars = screen.getAllByTestId("cost-bar-track").map((track) => track.firstElementChild as HTMLElement);
+    const projects = await screen.findByRole("list", { name: "التكلفة حسب المشروع" });
+    const bars = within(projects)
+      .getAllByTestId("cost-bar-track")
+      .map((track) => track.firstElementChild as HTMLElement);
     expect(bars.map((bar) => bar.style.width)).toEqual(["100%", "25%"]);
     for (const bar of bars) {
       expect(bar.style.left).toBe("");
@@ -125,23 +174,36 @@ describe("Dashboard page", () => {
     expect(await screen.findByText("الأرقام المالية تظهر للمالك فقط.")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "لوحة التحكم" })).toBeTruthy();
     expect(screen.getByText("مدير ميدان")).toBeTruthy();
-    // No money anywhere in the DOM, and the financial endpoint is never called.
+    // No money anywhere in the DOM, no financial widget, and the financial endpoint is never called.
     expect(document.body.textContent).not.toContain("₪");
-    expect(screen.queryByText("رواتب هذا الشهر")).toBeNull();
-    expect(screen.queryByText("تكلفة الساعات الإضافية")).toBeNull();
-    expect(screen.queryByText("التكلفة حسب المشروع")).toBeNull();
-    expect(screen.queryByText("مبالغ معلّقة وخصومات")).toBeNull();
+    for (const title of FINANCIAL_TITLES) expect(screen.queryByText(title)).toBeNull();
+    expect(screen.queryByRole("figure")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByRole("link", { name: "عرض كل العمال" })).toBeNull();
+    expect(mocks.chart).toBeNull();
     expect(client.getFinancialDashboard).not.toHaveBeenCalled();
     // The non-financial counts are still shown.
     expect(screen.getByText("العمال النشطون").nextElementSibling?.textContent).toBe("2");
     expect(screen.getByText("حضور بانتظار الموافقة").nextElementSibling?.textContent).toBe("3");
+    expect(document.body.textContent).not.toMatch(ARABIC_INDIC_DIGITS);
   });
 
   it("shows a page-specific empty state when no project has costs yet", async () => {
-    setup(OrgRole.OWNER, { getFinancialDashboard: vi.fn(async () => ({ ...FINANCIALS, costByProject: [] })) });
+    setup(OrgRole.OWNER, { getFinancialDashboard: vi.fn(async () => financials({ costByProject: [] })) });
     renderPage();
     expect(await screen.findByText("لا توجد تكاليف بعد")).toBeTruthy();
     expect(screen.getByText("لا توجد هذا الشهر بعد ورديات تمت الموافقة عليها واحتُسبت تكلفتها.")).toBeTruthy();
+  });
+
+  it("shows the Owner a loading state for the financial figures, keeping the counts", async () => {
+    setup(OrgRole.OWNER, { getFinancialDashboard: vi.fn(() => new Promise(() => {})) });
+    renderPage();
+
+    expect(await screen.findByText("جارٍ تحميل الأرقام المالية…")).toBeTruthy();
+    expect(screen.getByText("العمال النشطون").nextElementSibling?.textContent).toBe("2");
+    expect(screen.getByText("حضور بانتظار الموافقة").nextElementSibling?.textContent).toBe("3");
+    expect(document.body.textContent).not.toContain("₪");
+    expect(screen.queryByRole("figure")).toBeNull();
   });
 
   it("shows a translated error with retry when the base data fails, then recovers", async () => {

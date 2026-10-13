@@ -60,7 +60,47 @@ point a clock-in was validated against, `SET NULL`).
 Offline sync: `offline_sync_batches`, `offline_sync_events`.
 
 Payroll: `payroll_periods`, `payroll_items`, `payroll_adjustments`,
-`payroll_calculation_snapshots`.
+`payroll_calculation_snapshots`, `payroll_calculation_runs`.
+
+### Payroll versions (Step 7, migration `20261013120000_payroll_versions`)
+
+- **`payroll_periods` is one row per version** of a month (the existing
+  unique `(organization_id, year_month, version)`). New columns:
+  `previous_version_id` (unique; the finalized version a reopen replaced),
+  `created_by`, `current_snapshot_id` (unique; the calculation the version's
+  items come from), `legacy` (see below). `reopened_at/by/reason` now
+  describe how THIS version was created.
+- **`payroll_calculation_snapshots`**: one immutable row per calculation.
+  `schema_version` 2 stores everything a version is shown from:
+  `inputs_json` (approved entries with shift / project / site / emergency
+  minutes, compensation profiles, adjustments, worker names, pending
+  counts), `result_json` (per-worker and per-entry results, per project and
+  per site, warnings), `totals_json`, `inputs_hash` (sha256 of entry ids +
+  updates, adjustment ids, profile ids + updates) and `calculation_run_id`.
+- **`payroll_calculation_runs`** (new): one row per background calculation
+  (its id is the BullMQ job id): `state` (`PayrollCalculationState`),
+  `progress`, `processed_workers`, `total_workers`, `idempotency_key`,
+  requested/started/finished times, `error_code` / `error_message`. A partial
+  unique index (`payroll_period_id WHERE state IN ('QUEUED','RUNNING')`)
+  allows one active run per version.
+- **`payroll_items`**: `approved_shifts` (null for items calculated before
+  Step 7 without an entry list), `forgotten_stamp_penalties_agorot`,
+  `reversals_agorot`, `other_deductions_agorot`;
+  `positive_adjustments_agorot` now holds manual bonuses only.
+- **Immutability triggers:** `payroll_periods_finalized_immutable`,
+  `payroll_items_finalized_immutable`,
+  `payroll_calculation_snapshots_immutable` (TRUNCATE, used by the seed and
+  the tests, is unaffected).
+- **Existing data:** a period reopened in place before Step 7 keeps its row
+  (same id) as the latest version; each earlier version is restored as a
+  FINALIZED `legacy` row with that version's snapshots (and, if the row was
+  reopened but not recalculated, the items, which were the previous
+  version's). Finalization and reopen details come from the audit log. Item
+  breakdowns are backfilled from the adjustments linked to them when they
+  reconcile with the stored totals. Checked on a scratch database with every
+  pre-Step-7 shape (reopened twice and recalculated, reopened once and not
+  recalculated, a crashed CALCULATING row, a finalized month without a
+  snapshot).
 
 Notifications: `notifications`, `notification_deliveries`.
 
