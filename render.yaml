@@ -38,6 +38,10 @@ services:
         value: "false"
       - key: API_PREFIX
         value: api/v1
+      # Render's proxy sits in front of the service: one hop, so the rate
+      # limits see each client's own address (see apps/api/.env.example).
+      - key: TRUST_PROXY
+        value: "1"
 
       # --- Database (Supabase Postgres + PostGIS) ---
       - key: DATABASE_URL

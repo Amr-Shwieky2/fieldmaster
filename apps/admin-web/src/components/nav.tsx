@@ -14,6 +14,7 @@ type NavKey =
   | "dashboard"
   | "operations"
   | "workers"
+  | "invitations"
   | "sitesProjects"
   | "scheduling"
   | "turanEmergency"
@@ -33,6 +34,8 @@ const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[]; devOnly?: boolea
   { href: "/dashboard", key: "dashboard", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/operations", key: "operations", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/workers", key: "workers", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
+  // Step 8: single-use join links (Owners and Field Managers invite; only an Owner reviews the applications).
+  { href: "/workers/invitations", key: "invitations", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/sites", key: "sitesProjects", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/shifts", key: "scheduling", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
   { href: "/turan", key: "turanEmergency", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },

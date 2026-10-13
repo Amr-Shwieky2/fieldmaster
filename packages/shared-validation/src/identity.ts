@@ -1,18 +1,26 @@
+import { GovernmentIdType } from "@fieldmaster/shared-types";
+
 /**
  * Shapes of what a worker types on the public onboarding page (Step 8). The
  * page checks them as the worker types (clear Arabic messages) and the API
  * checks them again: input validation only, no business rule.
  */
 
+/** Only zeros ("00000", "000000000"): a placeholder, never a real document number. */
+function isAllZeros(value: string): boolean {
+  return /^0+$/.test(value);
+}
+
 /**
  * An Israeli ID number (מספר זהות): up to 9 digits (shorter ones are
- * left-padded with zeros) whose check digit is valid: every digit is
- * multiplied by 1, 2, 1, 2, ... from the left, two-digit products have their
- * digits added, and the total is a multiple of 10.
+ * left-padded with zeros), not all zeros, whose check digit is valid: every
+ * digit is multiplied by 1, 2, 1, 2, ... from the left, two-digit products
+ * have their digits added, and the total is a multiple of 10. All zeros has a
+ * "valid" check digit (the total is 0), so it is refused explicitly.
  */
 export function isValidIsraeliIdNumber(raw: string): boolean {
   const value = raw.trim();
-  if (!/^\d{5,9}$/.test(value)) return false;
+  if (!/^\d{5,9}$/.test(value) || isAllZeros(value)) return false;
   const digits = value.padStart(9, "0");
   let sum = 0;
   for (let i = 0; i < 9; i++) {
@@ -22,9 +30,36 @@ export function isValidIsraeliIdNumber(raw: string): boolean {
   return sum % 10 === 0;
 }
 
-/** A passport number: 5 to 20 Latin letters and digits (case-insensitive). */
+/**
+ * A Palestinian ID number (رقم الهوية الفلسطينية): exactly 9 digits, as printed
+ * on the card, and not all zeros. No check digit is enforced: no official
+ * published specification of one was found, and refusing a real worker's
+ * number would block their onboarding. The Owner compares the number with
+ * the ID photo on the review page before approving.
+ */
+export function isValidPalestinianIdNumber(raw: string): boolean {
+  const value = raw.trim();
+  return /^\d{9}$/.test(value) && !isAllZeros(value);
+}
+
+/** A passport number: 5 to 20 Latin letters and digits (case-insensitive), not all zeros. */
 export function isValidPassportNumber(raw: string): boolean {
-  return /^[A-Za-z0-9]{5,20}$/.test(raw.trim());
+  const value = raw.trim();
+  return /^[A-Za-z0-9]{5,20}$/.test(value) && !isAllZeros(value);
+}
+
+/** A document number checked by its type's rule (above); an unknown type is refused. */
+export function isValidGovernmentIdNumber(type: string, raw: string): boolean {
+  switch (type) {
+    case GovernmentIdType.ISRAELI_ID:
+      return isValidIsraeliIdNumber(raw);
+    case GovernmentIdType.PALESTINIAN_ID:
+      return isValidPalestinianIdNumber(raw);
+    case GovernmentIdType.PASSPORT:
+      return isValidPassportNumber(raw);
+    default:
+      return false;
+  }
 }
 
 /** A phone number in international (E.164) form, the form workers sign in with: "+" and 8 to 15 digits. */

@@ -33,6 +33,7 @@ function parseRedisUrl(url: string) {
       { name: QUEUE_NAMES.EXPIRE_ONBOARDING_INVITATIONS },
       { name: QUEUE_NAMES.LONG_OPEN_ENTRIES },
       { name: QUEUE_NAMES.PAYROLL_CALCULATION },
+      { name: QUEUE_NAMES.REPORT_GENERATION },
     ),
   ],
   providers: [ExpireTemporaryCheckInPointsProcessor, ExpireOnboardingInvitationsProcessor],

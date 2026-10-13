@@ -1332,9 +1332,10 @@ still in review, and a worker would otherwise see nothing for it).
 
 Arabic PDF and CSV reports generated as background jobs, seven report
 types, and the complete onboarding flow (invitations, the public join page,
-private uploads, the Owner's review). In progress: the sections below cover
-the foundations; the report types, uploads and review are documented as they
-land.
+private uploads, the Owner's review). The first part (the shared contract
+and the migration `20261013180000_reports_onboarding`) was merged on its own
+as PR #14; that migration is never edited, and any later schema change is a
+new migration.
 
 ### The API uses the shared Arabic labels through a Node build of `@fieldmaster/i18n`
 
@@ -1374,3 +1375,196 @@ API runs compiled CommonJS and cannot load `.ts`.
   too, and `GET /reports/:id/verify` downloads the stored files and hashes
   them again, so a changed file is detected.
 
+### Identity document numbers: one rule per type
+
+A joining worker picks one of three document types: هوية إسرائيلية
+(`ISRAELI_ID`), هوية فلسطينية (`PALESTINIAN_ID`) or جواز سفر (`PASSPORT`). The
+page and the API check the number with the same shared function,
+`isValidGovernmentIdNumber(type, number)` in
+`@fieldmaster/shared-validation`. The column stays plain text, so adding a
+type needed no migration.
+- **Israeli ID:** 5–9 digits, left-padded to 9, with a valid check digit
+  (digits multiplied by 1, 2, 1, 2, … and the digit sums added up to a
+  multiple of 10). All zeros adds up to 0, which passes that test, so it is
+  refused explicitly.
+- **Palestinian ID:** exactly 9 digits, as printed on the card, not all
+  zeros, **with no check digit**. No official published specification of a
+  Palestinian check digit was found. Applying the Israeli algorithm on a
+  guess could refuse a real worker's number and block their onboarding with
+  no way around it. A typo is caught by the Owner instead: the review page
+  shows the decrypted number next to the ID image before approval. If a
+  verified rule turns up, it is a one-function change with its tests.
+- **Passport:** 5–20 Latin letters and digits, not all zeros.
+- **Not chosen:** a soft warning (accept the number but flag a failed
+  Israeli check digit to the Owner). It looks precise without being right,
+  and a stored warning flag would need a new column.
+
+### Uploads: metadata stripped in place, not re-encoded
+
+The spec allows either re-encoding images or stripping their metadata.
+- **Chosen: stripping, segment by segment.**
+  - JPEG: APP1 (Exif, XMP), APP13 (IPTC), COM and the APP2 MPF index are
+    dropped, including between progressive scans, and anything after the
+    end-of-image marker (for example a motion photo's video) is dropped.
+    JFIF, the ICC profile and the Adobe segment are kept.
+  - PNG: tEXt, zTXt, iTXt, eXIf and tIME are dropped, and anything after
+    IEND; the kept chunks are byte-identical.
+  - The decoded pixels are unchanged (checked with ImageMagick), so an ID
+    photo loses no detail. A file that only starts like an image fails the
+    walk and is refused (415).
+- **Not chosen: re-encoding** (e.g. sharp). It is a native dependency in
+  the API image, it re-compresses (lossy) every identity photo, and it would
+  run a full image decoder on untrusted input in the API process.
+- **PDFs are stored as received.** Removing a PDF's metadata safely needs a
+  PDF parser and writer the API does not ship. A PDF is only ever shown to
+  Owners, through a 60-second signed URL.
+- **The type comes from the content** (JPEG, PNG and `%PDF-` signatures),
+  never the file name or the browser's mimetype, and the files are stored
+  under ids, without their names.
+- **Malware scanning is a hook** (`MALWARE_SCANNER`), called before a file is
+  stored. Development binds a no-op that records `NOT_SCANNED`, so unscanned
+  files can be found and scanned once a real scanner is bound.
+
+### The invitation link is the only key of the public page
+
+- **Constant work for every token.** One guard serves the three public
+  routes and runs before multer reads an upload. It hashes the token (a
+  placeholder when it is not 64 hex characters), looks it up by its hash,
+  compares with `timingSafeEqual` (against a placeholder when nothing was
+  found) and derives the status. Unknown, malformed, used, expired and
+  revoked links all get one 404 with the same body, so the answer tells
+  nothing about which links exist.
+- **Single use under concurrency:** the application re-claims the
+  invitation inside its transaction (`usedAt IS NULL AND revokedAt IS NULL
+  AND expiresAt > now`), so two submissions cannot both succeed.
+- **Status is derived, not stored.** The existing expiry sweep marks expired
+  invitations as revoked without a revoker; those read as EXPIRED. Only a
+  revocation by a person (`revoked_by`) reads as REVOKED.
+- **Rate limits:**
+  - `ONBOARDING_RATE_LIMIT` requests per minute per IP address and route
+    (default 10), read on every request;
+  - at most 20 stored files per link, which bounds what one leaked link can
+    put in storage;
+  - behind a proxy, `TRUST_PROXY` (the number of proxies) makes the limits
+    see the client's address. It is off by default, because trusting
+    `X-Forwarded-For` without a proxy would let a client choose its own
+    address.
+- **The raw token is returned once**, to the manager who created the link,
+  and never logged; before Step 8 the creation path logged it.
+
+### Proving that ID numbers and bank details do not leak
+
+The ID number and bank details are decrypted only in the Owner's review
+(`VIEW_BANK_INFO`, audited, `no-store`). Two kinds of tests back this up:
+- **Logs, audit rows, notifications:** `onboarding.e2e-spec.ts` captures
+  the Nest logger, the console and stdout/stderr for the whole file, plus
+  every audit row and notification. It asserts that no ID number, account
+  number, branch-and-account, invitation token, uploaded file name or photo
+  metadata appears in them.
+- **Responses:** the leak scanner searches every GET response for the seeded
+  ID numbers, account numbers, account holders and invitation tokens, as
+  values in any string under any key (a value copied into a notification
+  body would be found), as well as for the keys. It does this for every
+  non-Owner role, and for the Owner outside the review. It reports only the
+  JSON path, so its own output never contains a value.
+- **Not chosen: key names only.** The scanner's original approach misses a
+  value copied into free text.
+
+### Object storage in CI
+
+The upload and report tests store real files. Locally they use the MinIO
+container from `docker-compose.yml` (through `apps/api/.env`). CI's e2e job
+starts the same image with `docker run`: a service container cannot pass
+MinIO's `server` command. A fake `FilesService` would not test the signed
+URLs, the stored bytes (metadata really gone) or a verify that downloads the
+file again.
+
+### Reports: one background job per report, the report row is the truth
+
+- **The job:** `POST /reports` creates the report (`QUEUED`) and one
+  BullMQ job (`report-generation` queue, the `fm:<database>` prefix of Step
+  7, one attempt). The job loads the data, hashes it, renders the PDF
+  (Chromium) and the CSV, uploads both, and only then marks the report
+  READY. That update writes the file keys and the SHA-256 of each file, in
+  the same transaction as the `REPORT_GENERATED` audit, so a client that
+  sees READY also finds the audit entry.
+- **Failure handling:**
+  - Any error marks the report FAILED (`INTERNAL_ERROR`; the message stays
+    in the database, not in the API's answer) and removes what was
+    uploaded.
+  - A job BullMQ delivers again after a crash is failed rather than
+    rendered twice.
+  - A report with no progress for 15 minutes is failed when it is next
+    listed or read.
+  - If Redis cannot take the job, the report fails at once instead of
+    staying queued.
+- **Idempotency:** the existing `IdempotencyService`, with the caller in
+  the stored request. The same key always answers the same report, in its
+  current state; someone else's key is a 409, never their report.
+- **One Chromium per report.** A fresh browser never carries state from
+  another organization's report. It is slower, which suits a background
+  job.
+- **Page count** is read from the PDF's page objects, not with pdf-parse,
+  which stays a test-only dependency.
+- **Not chosen: rendering in the request.** That was the pre-Step 8
+  ledger: one slow request per click, no progress, and a failure in the
+  middle left nothing to retry from.
+
+### Financial and operational copies are separate code paths
+
+- **Chosen:** for a type with both copies, the operational loader returns
+  data types without money fields, and the financial loader builds on it,
+  adding pay computed by the payroll service with the profile in effect on
+  each day. Each copy has its own template and CSV function. A unit test
+  checks the two copies use different functions, and that operational PDFs
+  and CSVs contain no ₪ and no amounts. The browser check confirmed every
+  Field Manager PDF and CSV has no ₪.
+- **Not chosen: one template with financial sections hidden by a flag** (the
+  spec rules it out). One missed condition would print money for a Field
+  Manager, and the data would still be loaded.
+
+### Who sees a report
+
+An Owner, the worker the report is about (their own pay), and whoever
+requested it. A requester who is neither never sees a financial copy, for
+example one requested while they were an Owner. Everyone else gets a 404 on
+the details, the download and the verify alike, as for another worker's
+shift: answering 403 on the files would confirm the report exists.
+
+### CSV format
+
+- UTF-8 with a BOM, so Excel opens the Arabic correctly.
+- CRLF line ends and RFC 4180 quoting.
+- Arabic headers, with the unit in the header («المدة (دقائق)»,
+  «(₪)»).
+- Western digits; dates as `YYYY-MM-DD` and times as `YYYY-MM-DD HH:mm`
+  (Asia/Jerusalem).
+- Money as plain numbers in shekels with two decimals (computed from
+  integer agorot), in financial copies only.
+- Text cells starting with `=`, `+`, `-`, `@`, a tab or a carriage return
+  get a leading `'`, so a worker's daily summary can never run as a
+  spreadsheet formula (OWASP CSV injection).
+
+### Testing what the PDFs say
+
+- **pdf-parse runs in a child process.** Its pdf.js worker needs a dynamic
+  `import()`, which Jest's CommonJS sandbox does not allow.
+- **Matching Arabic words.** pdf.js returns Arabic in visual order and as
+  presentation forms, so the tests normalize the text (NFKC) and match
+  each expected word's letters as a contiguous run.
+- **What is asserted:** the Arabic labels, the report ID and the data hash
+  are in the text, and a Field Manager's copy has no ₪.
+- **Verify** is tested against a stored file changed after generation.
+- **The browser check** (every type, Owner and Field Manager) rendered
+  each first page with pdf.js.
+
+### Opening signed URLs in the browser
+
+A signed URL arrives from an API call made after the click. A
+`window.open` at that moment can be blocked as a popup (Safari blocks it by
+default).
+- **Report files:** the page follows the URL with a link. The file is
+  served as an attachment, so it downloads and the page stays.
+- **An ID document shown in a new tab:** the tab is opened during the
+  click, cut off from the page (`opener = null`), then sent to the URL. It
+  is closed again if the API refuses.

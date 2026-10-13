@@ -1,5 +1,182 @@
 # FieldMaster — Implementation Status
 
+## Step 8 of 10 — Arabic PDF reports, operational reports, complete worker onboarding (2026-10-13)
+
+Scope: API, admin web and the public onboarding page. The mobile app is
+Step 9. Arabic only, RTL, same i18n checks. No business rule changed. The
+shared contract and the migration `20261013180000_reports_onboarding` were
+merged first, as PR #14; that migration is never edited. This part needed
+no schema change. Design and reasoning: `docs/technical-decisions.md`
+("Step 8: …").
+
+**Arabic reports (PDF + CSV):**
+- **Seven types:** worker attendance ledger, operational attendance,
+  overtime, emergency call-outs (−60 / +15), site violations, forgotten
+  stamps, and payroll from one stored version.
+- **Generation:** a background job (Idempotency-Key, progress, READY /
+  FAILED), stored privately; downloads go through 5-minute signed URLs.
+  Generation, downloads and integrity checks are audited, and
+  `GET /reports/:id/verify` hashes the stored files again.
+- **PDF:** IBM Plex Sans Arabic embedded from the package (the same in
+  Docker and locally). Shared labels, Western digits, Asia/Jerusalem times,
+  `1,234.50 ₪`. Every page's footer has «صفحة N من M», the report ID and
+  the data SHA-256.
+- **CSV:** UTF-8 with a BOM, Arabic headers, Western digits, guarded
+  against formula injection.
+- **Copies:** the Owner's copy is financial. The Field Manager's copy is
+  operational, from a separate loader and template without any money (the
+  forgotten-stamp report shows counts only). A worker's own ledger includes
+  their own pay.
+- **Reports page:** type, filters, generate, progress and retry; the
+  history with status, download and verify.
+
+**Onboarding:**
+- **Invitations:**
+  - «دعوة عامل» gives a single-use link, shown once, with a copy button
+    and an optional fixed phone.
+  - The list shows active / used / expired / revoked, and an invitation can
+    be revoked.
+  - Only the token's SHA-256 is stored, and the token is never logged (the
+    old creation path logged it).
+- **The public page `/join/[token]`:**
+  - Phone-sized, no sign-in. Fields: names, phone, ID type (هوية
+    إسرائيلية / هوية فلسطينية / جواز سفر) and number, ID image or PDF,
+    bank details, optional photo.
+  - Consent with the privacy-notice version and time, and Arabic
+    validation messages from the shared validators.
+  - Every bad link gets the same friendly page.
+- **ID numbers:**
+  - All zeros is refused for every type (it passed the Israeli check digit
+    before).
+  - Israeli ID: up to 9 digits with the check digit.
+  - **Palestinian ID: exactly 9 digits, not all zeros, no check digit.**
+    There is no published specification, and refusing a real number would
+    block the worker. The Owner compares the number with the ID image.
+  - Passport: 5–20 letters and digits.
+- **Uploads:**
+  - `file_assets` + `identity_documents` in private MinIO/S3 storage.
+  - The type is read from the file's content (JPEG / PNG / PDF), up to
+    10 MB, and image metadata (Exif, XMP, IPTC, PNG text, …) is removed.
+  - A malware-scan hook, a no-op in development.
+  - 60-second view URLs for the Owner only, every view audited.
+- **Sensitive data:**
+  - The ID number and bank details are encrypted.
+  - They are decrypted only in the Owner's review, which is audited and
+    sent with `no-store`.
+  - Tests show they reach no log line, audit row, notification or
+    non-Owner response.
+- **Public endpoints:** rate limited per IP and route
+  (`ONBOARDING_RATE_LIMIT`; `TRUST_PROXY` behind a proxy). The token is
+  checked in constant time.
+- **The Owner's review page:**
+  - the decrypted application and the ID image on request;
+  - approve, with the compensation required; reject, with a reason
+    required;
+  - after approval the worker can sign in and appears in the dev quick
+    login.
+
+**Also fixed on the way:**
+- PR #14 left one i18n test failing on main: the check of API error codes
+  missed a code written over several lines. The check now follows such
+  values, with a test.
+- Downloads and ID-document tabs no longer use `window.open` after the API
+  answers, which popup blockers can refuse (Safari).
+- Approving with a malformed id is 404 (was 500); approving without a
+  compensation profile is 400 (was 500).
+- `GET /onboarding-invitations/pending-workers` returned raw database rows;
+  it now returns the same safe rows as `/workers/pending-approval`.
+- The approval date uses the Israel business date (it used the UTC date,
+  a day off between 00:00 and 03:00).
+- CI's e2e job now starts MinIO (the upload and report tests store real
+  files).
+
+**Browser check** (dev servers; headless Playwright, as the app's browser
+pane was hidden). Every type was generated on the reports page and
+downloaded with the page's own buttons, then each PDF's first page was
+rendered:
+
+| Report | Owner (نسخة مالية) | Field Manager (نسخة تشغيلية — بدون مبالغ) |
+|---|---|---|
+| سجل حضور العامل (نادر مصالحة, Sep–Oct) | 3 pages: header (organization, period, worker, by, report ID, data hash), period summary with pay 1,485.00 ₪, stamp deductions −10.00 ₪, net 1,475.00 ₪, then the first day with corrections and forgotten stamps | 2 pages: the same facts, summary without any amount |
+| الحضور التشغيلي | 2 pages: 16 entries (14 approved, 1 pending, 1 rejected), flags, the entries table; no money for anyone | the same |
+| الساعات الإضافية | overtime pay 35.00 ₪ (رامي طه, 30 min), note that one pending entry with overtime is not included | the same rows, no ₪ |
+| استدعاءات الطوارئ | محمود جبارين, actual 00:00–03:00, compensated 23:00–03:15 (60 / 15 min), cost 212.50 ₪ | the same, no cost column |
+| مخالفات الموقع | 3 refused attempts: outside the site (401 m of 150 m), weak GPS (120 m, 50 required), phone clock off by 540 s, with the exact message the worker saw | the same |
+| نسيان التسجيل | 3 infractions of نادر مصالحة, the third −10.00 ₪, net −10.00 ₪ | counts only |
+| الرواتب (September, version 1) | 4 workers, total net 2,225.00 ₪ | not offered (403) |
+
+Every Field Manager PDF and CSV has no ₪. Every CSV has a BOM, Arabic
+headers and no Arabic-Indic digits. «تحقق من السلامة» answered «الملفات
+سليمة: تطابقت البصمة».
+
+The onboarding, with the join page at 375 px, went through these steps:
+1. The Owner created an invitation for 059-7654321.
+2. The worker filled the form with a Palestinian ID. All zeros showed
+   «رقم غير صالح: لا يمكن أن يتكون من أصفار فقط.».
+3. The worker uploaded an ID photo with Exif and a profile photo with a PNG
+   text chunk, and submitted.
+   - The page had no horizontal scroll, every input used 16 px text, and
+     the form was removed after submitting.
+4. The same link, and a random one, then showed «رابط الانضمام غير صالح».
+5. The Owner's review showed the decrypted number (401234567), the bank
+   details and the ID image.
+   - Read back from storage, the photos were 5,506 and 3,821 bytes instead
+     of 5,574 and 3,891, with their Exif and PNG text gone.
+6. The Owner approved at 450 ₪ / 60 ₪, and the worker appeared in the
+   quick login.
+
+`pnpm db:seed` was run afterwards. The seed has invitations in every state,
+one pending application with a Palestinian ID and an ID image, and three
+refused clock-ins for the site violations report.
+
+**Tests** (runtime counts):
+
+| | Before Step 8 | After |
+|---|---|---|
+| shared-validation | 66 | 103 |
+| @fieldmaster/i18n | 76 | 82 |
+| admin-web | 641 | 697 |
+| API unit | 29 | 99 |
+| mobile | 131 | 131 |
+| API e2e | 120 | 148 |
+| **Total** | **1,063** | **1,260** |
+
+- **New:**
+  - shared-validation: identity documents (37), including all zeros for
+    every type and the Palestinian rule.
+  - API unit: reports (42) and uploads / invitations (28).
+  - API e2e: `reports.e2e-spec.ts` (15) and `onboarding.e2e-spec.ts` (13).
+  - i18n: the new enum labels, and the multi-line error-code check.
+  - admin-web: reports (16), invitations (10), review (10), approval form
+    (10), join page (20), join route (2), navigation (6).
+- **Changed, not weakened:**
+  - `reports-page.test.tsx` was rewritten for the new reports page; the old
+    ledger-only flow no longer exists, and the cases that still apply were
+    kept.
+  - `approve-worker-page.test.tsx` now tests the redirect to the review
+    page. Its 9 form tests moved to `approval-form.test.tsx`, where amounts
+    must now be typed (there were defaults) and rejecting needs a written
+    reason.
+  - `workers-page.test.tsx`: the review link, and 2 new tests.
+  - `financial-leak-scanner.e2e-spec.ts`:
+    - seeds encrypted ID and bank data and a real application;
+    - searches values as well as keys, and adds two key names;
+    - checks the Owner sees the values only in the review;
+    - the Temporary Supervisor's 404 on the three `/reports/:id*` routes
+      is expected (a report they may not see does not exist for them).
+  - `dev-login.e2e-spec.ts` lists the 2 new Owner-only routes.
+  - `reports.e2e-spec.ts`: the files of a report the caller may not see
+    are 404 like its details (they were 403).
+- **Removed:** none.
+
+**Financial isolation:** the leak scanner reads 56 GET routes (50 before)
+as Field Manager, Worker and Temporary Supervisor. No money or identity
+key, and none of the seeded ID numbers, account numbers, account holders
+or invitation tokens, appears in any of their responses. In the Owner's
+responses those values appear only in the onboarding review.
+
+---
+
 ## Step 7 of 10 — payroll engine completion and the Owner financial dashboard (2026-10-13)
 
 Scope: payroll API, the admin web's payroll pages and the Owner dashboard.
@@ -1161,12 +1338,36 @@ the same org; a Field Manager gets `403` on every financial route).
 - 🟡 Web-specific concerns (httpOnly cookie storage, CSRF token) are not implemented — admin-web stores the access token in memory/localStorage rather than an httpOnly cookie
 - ✅ Mobile Keychain/Keystore storage — `apps/mobile` stores the session via `expo-secure-store` (real iOS Keychain / Android Keystore on-device). Verified live in the Expo web preview (the one environment reachable here — no full Xcode install, see section 27), where `expo-secure-store` has no web implementation so the mobile app falls back to `AsyncStorage` on that platform only; native builds always use the real Keychain/Keystore path
 
-## 8. Worker onboarding — 🟡
+## 8. Worker onboarding — ✅ (Step 8)
 
-- ✅ Single-use, hashed, expiring invitation tokens (`OnboardingInvitation`), revocable, org-scoped
-- ✅ Public redemption endpoint creates `User` + `Membership` + `WorkerProfile` in `PENDING_APPROVAL`, encrypts bank details, records consent + privacy-notice version
-- ✅ Owner approval sets the worker `ACTIVE` and creates their first `CompensationProfile` in one transaction; push/in-app notification fires both ways (submission → Owners, approval → worker)
-- 🟡 Identity-document upload (image capture, private S3 storage, signed URLs) is **not implemented** — the `identity_documents` table exists but nothing writes to it. This is the one piece of section 8 genuinely deferred; see technical-decisions.md.
+- ✅ **Invitations:**
+  - single-use, hashed (SHA-256), expiring tokens (`OnboardingInvitation`), org-scoped;
+  - «دعوة عامل» on the admin web: a link with a copy button and an optional prefilled phone;
+  - a list with derived status (active / used / expired / revoked) and revocation (audited, a used one is 409).
+- ✅ **Public page `/join/[token]`** (no sign-in, phone-sized):
+  - fields: legal and preferred name, phone, ID type (هوية إسرائيلية / هوية فلسطينية / جواز سفر) and number, ID image or PDF, bank name, branch, account number, account holder, optional photo;
+  - consent with the privacy-notice version and time;
+  - Arabic validation messages from the same shared validators as the API;
+  - one friendly page for every unusable link.
+- ✅ **Uploads:**
+  - `file_assets` + `identity_documents`, private MinIO/S3 storage;
+  - type detected from the content (JPEG/PNG/PDF), 10 MB limit;
+  - JPEG/PNG metadata stripped;
+  - a malware-scan hook (no-op `NOT_SCANNED` in development);
+  - Owner-only 60 s view URLs, every view audited.
+- ✅ **Sensitive data:**
+  - The ID number and bank details are encrypted at rest.
+  - Only the Owner's review decrypts them (audited, `Cache-Control: no-store`).
+  - Tests prove they reach no log line, audit row, notification or non-Owner response: the onboarding tests capture every log line, and the leak scanner searches every GET response for the values.
+- ✅ **Abuse controls:** the public routes are rate limited (`ONBOARDING_RATE_LIMIT` per IP and route) and the token check runs in constant time with the same 404 for every failure.
+- ✅ **Approval:**
+  - The Owner approves (a compensation profile is required) or rejects (a reason is required).
+  - Approval sets the worker `ACTIVE` with their first `CompensationProfile` in one transaction.
+  - Notifications go both ways: submission to Owners (and Field Managers when the settings say so), approval to the worker.
+  - The approved worker can sign in and appears in dev quick-login.
+- 🟡 **Not done:**
+  - files uploaded on a link that is never submitted are not cleaned up yet;
+  - no real malware scanner is bound (production must provide one).
 
 ## 9. Compensation model — ✅
 
@@ -1333,20 +1534,38 @@ Manager notifications never do — tested for clock-out and emergency-end).
   stub selected only when `FIREBASE_PROJECT_ID` is set, but was never
   exercised against a live project).
 
-## 25. PDF dispute ledger — ✅
+## 25. PDF and CSV reports — ✅ (Step 8)
 
-Implemented: `POST /reports/worker-attendance-ledger` renders a real PDF via
-Playwright (`chromium.launch()` → `page.setContent()` → `page.pdf()`),
-computing per-entry compensation through the same `PayrollCalculationService`
-used by payroll itself (never a re-derived/duplicated calculation), embeds a
-SHA-256 hash of the *source data* (not the PDF bytes, to avoid a
-hash-of-itself circularity) in the footer, uploads to MinIO/S3, and persists
-a `GeneratedReport` row. Authorization mirrors the rest of the financial
-surface: Owner can generate for any worker with financials included,
-Field Manager can generate for any worker *without* financials, a worker can
-generate their own with financials. Verified live: generated a real PDF
-against seeded data from the admin-web Reports page and downloaded it via
-its signed URL.
+Seven report types, each as an Arabic PDF and a CSV, generated by a
+background job (BullMQ, Idempotency-Key, progress, READY / FAILED) and
+stored privately:
+- سجل حضور العامل (the dispute ledger: every fact, with the
+  phone-vs-server timeline, GPS, corrections, approvals and summaries);
+- الحضور التشغيلي, الساعات الإضافية, استدعاءات الطوارئ (with the
+  −60 / +15 breakdown), مخالفات الموقع, نسيان التسجيل;
+- الرواتب, from one stored payroll version (Owner only).
+
+How the files are made:
+- **PDF:** right to left, with an embedded font (IBM Plex Sans Arabic). The
+  labels are the shared Arabic ones, with Western digits, Asia/Jerusalem
+  times and `1,234.50 ₪`. Every page's footer carries «صفحة N من M», the
+  report ID and the data SHA-256.
+- **CSV:** UTF-8 with a BOM, Arabic headers, Western digits, and guarded
+  against formula injection.
+
+Copies and access:
+- **Two copies:** the Owner's copy is financial. The Field Manager's copy
+  is operational, built from a separate loader and template with no money
+  at all, for example forgotten stamps as counts only. A worker's own
+  ledger includes their own pay.
+- **Downloads:** 5-minute signed URLs with an Arabic file name. Requests,
+  generation, downloads and integrity checks are all audited.
+- **Verify:** `GET /reports/:id/verify` hashes the stored files again; a
+  changed or missing file is reported as invalid.
+
+The old synchronous `POST /reports/worker-attendance-ledger` was replaced
+by `POST /reports`. Details: `docs/api.md`, `docs/authorization-matrix.md`,
+`docs/technical-decisions.md` ("Step 8: …").
 
 ## 26. Admin web app — 🟡
 
@@ -1367,6 +1586,16 @@ and a seeded Field Manager and clicked through every page). Implemented:
   Owner and show `—` / "No compensation profile visible" for the Field
   Manager — driven entirely by the API's own DTO stripping, not a
   frontend-only check
+- ✅ Step 8 — reports: one form for the 7 types (the payroll one for the
+  Owner only), the copy shown («نسخة مالية» / «نسخة تشغيلية — بدون مبالغ»),
+  progress and retry, the history with status, PDF / CSV downloads and the
+  integrity check.
+- ✅ Step 8 — onboarding:
+  - «دعوة عامل» (a link shown once, a copy button, an optional fixed phone);
+  - the invitation list with status and revocation;
+  - the public, phone-sized `/join/[token]` page;
+  - the Owner's review page: the decrypted application, the ID image on
+    request, approval with the compensation, rejection with a reason.
 - ✅ Scheduling: shift list, create-shift form (project → site →
   geofence cascading selects), shift detail with worker assignment
 - ✅ Attendance approval queue: approve / reject / "Credit as Full Day",
@@ -1543,6 +1772,8 @@ can no longer be clocked into, online or offline).
 - ✅ Step 7: payroll calculations run as jobs (one per calculation run).
   Every queue's Redis prefix is now per database (`fm:<database>`), so the
   dev server and the e2e tests never take each other's jobs.
+- ✅ Step 8: reports run as jobs (one per report, `report-generation`); a
+  lost one is marked FAILED after 15 minutes without progress.
 - ⬜ No transactional outbox table. Notifications and audit writes still
   happen synchronously inside the same request transaction rather than via
   an outbox-and-relay pattern. Documented as a real gap, not silently
@@ -1554,7 +1785,8 @@ can no longer be clocked into, online or offline).
 - ✅ Audit log is an app-level append-only SHA-256 hash chain, verified by both an automated test and a standalone CLI (`pnpm --filter @fieldmaster/api verify-audit`)
 - ✅ Financial-isolation tests: Field Manager gets 403 on payroll/dashboard routes; worker list never serializes `compensation` for a Field Manager viewer
 - ✅ Helmet, global validation pipe (`whitelist`/`forbidNonWhitelisted`), throttling
-- 🟡 Not implemented: malware-scanning integration point, file-size/type validation (no file upload exists yet), explicit brute-force lockout beyond the OTP attempt counter
+- ✅ Step 8: uploads typed by content, size-limited and stripped of metadata, a malware-scan hook, rate-limited public onboarding routes with a constant-time token check, ID numbers encrypted like bank details
+- 🟡 Not implemented: a real malware scanner binding (the hook records `NOT_SCANNED`), explicit brute-force lockout beyond the OTP attempt counter
 
 ## 32. Privacy and retention — 🟡
 
@@ -1600,7 +1832,12 @@ infractions for one worker (2 free, 1 deducting 1000 agorot — matching the
 spec's own worked example), 1 completed emergency call-out with full
 compensation breakdown, 1 Temporary Supervisor assignment + an expired
 temporary check-in point, 1 finalized payroll period, and a handful of
-notifications — all fictional data.
+notifications — all fictional data. Step 8 adds:
+- onboarding invitations in every state;
+- one pending application (Palestinian ID, encrypted ID number and bank
+  details, a drawn ID image in MinIO, an Owner notification);
+- three clock-ins the server refused (outside the geofence, weak GPS, phone
+  clock off), for the site violations report.
 
 ## 37–40. Local dev, CI, deployment, docs — 🟡
 

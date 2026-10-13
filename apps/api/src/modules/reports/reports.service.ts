@@ -1,233 +1,276 @@
-import { Injectable } from "@nestjs/common";
-import { createHash } from "node:crypto";
-import { chromium } from "playwright";
-import { OrgRole } from "@fieldmaster/shared-types";
+import { Injectable, Logger } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
+import type { Queue } from "bullmq";
+import type { GeneratedReport, Prisma } from "@prisma/client";
+import { ReportStatus, ReportType } from "@fieldmaster/shared-types";
+import { toBusinessDay } from "@fieldmaster/i18n/node";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { FilesService } from "../../common/files/files.service";
-import { PayrollCalculationService } from "../payroll/payroll-calculation.service";
+import { IdempotencyService } from "../../common/idempotency/idempotency.service";
+import { QUEUE_NAMES } from "../../common/queue/queue.constants";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
+import { UUID_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
-import { renderWorkerAttendanceLedgerHtml, type ReportData, type ReportShiftRow } from "./report-template";
-import type { GenerateWorkerLedgerDto } from "./dto/generate-report.dto";
+import { canAccessReport, decideReportAccess, reportVisibilityWhere } from "./report-access";
+import { normalizeReportFilters } from "./report-filters";
+import { templateVersionFor } from "./report-definitions";
+import { ReportGenerationService } from "./report-generation.service";
+import { sha256Hex } from "./report-hash";
+import { enumLabel } from "./render/messages";
+import type { CreateReportDto } from "./dto/create-report.dto";
+import type { GeneratedReportDto, ReportDownloadDto, ReportFileFormat, ReportFilters, ReportVerificationDto } from "./report.types";
 
-const TEMPLATE_VERSION = "worker-attendance-ledger-v1";
+/** Signed download URLs live this long. */
+export const REPORT_DOWNLOAD_TTL_SECONDS = 300;
 
+/**
+ * Reports (Step 8): requesting one (a background job, see
+ * ReportGenerationService), listing, reading, downloading (a short-lived
+ * signed URL, audited) and verifying the stored files. Who may generate
+ * which report and who may see it is decided in report-access.ts.
+ */
 @Injectable()
 export class ReportsService {
+  private readonly logger = new Logger(ReportsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
-    private readonly filesService: FilesService,
-    private readonly payrollCalculation: PayrollCalculationService,
+    private readonly files: FilesService,
+    private readonly idempotencyService: IdempotencyService,
+    private readonly generation: ReportGenerationService,
+    @InjectQueue(QUEUE_NAMES.REPORT_GENERATION) private readonly queue: Queue,
   ) {}
 
-  async generateWorkerAttendanceLedger(
-    organizationId: string,
-    dto: GenerateWorkerLedgerDto,
-    actor: AuthenticatedUser,
-    correlationId: string,
-  ) {
-    const isOwner = actor.role === OrgRole.OWNER;
-    const isSelf = actor.workerProfileId === dto.workerProfileId;
-    const isManager = actor.role === OrgRole.FIELD_MANAGER;
+  /**
+   * Starts a report: checks the filters (400), the caller's right to this
+   * report (403) and that what the filters name exists in the organization
+   * (404), then creates the report (QUEUED) and its job. The same
+   * Idempotency-Key always answers the same report, in its current state.
+   */
+  async create(dto: CreateReportDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string): Promise<GeneratedReportDto> {
+    const reportType = dto.reportType;
+    const filters = normalizeReportFilters(reportType, dto.filters ?? {});
+    const { includesFinancials } = decideReportAccess(reportType, actor, filters);
+    const resolved = await this.resolveFilters(actor.organizationId, reportType, filters);
 
-    if (!isOwner && !isSelf && !isManager) {
-      throw new AppException(403, ErrorCodes.FORBIDDEN, "You cannot generate a report for another worker.");
-    }
-    const includesFinancials = isOwner || isSelf;
-
-    const worker = await this.prisma.workerProfile.findFirst({
-      where: { id: dto.workerProfileId, organizationId },
-      include: { membership: { include: { user: true } } },
-    });
-    if (!worker) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
-
-    const organization = await this.prisma.organization.findUniqueOrThrow({ where: { id: organizationId } });
-
-    const entries = await this.prisma.timeEntry.findMany({
-      where: { organizationId, workerProfileId: dto.workerProfileId, businessDate: { gte: dto.fromDate, lte: dto.toDate } },
-      include: {
-        shift: { include: { project: true, site: true } },
-        clockEvents: true,
-        dailySummary: true,
-        corrections: true,
-        approvals: true,
-        forgottenStampInfractions: true,
-        emergencyCallout: true,
-      },
-      orderBy: { businessDate: "asc" },
-    });
-
-    const actorIds = new Set<string>([actor.sub]);
-    for (const e of entries) {
-      for (const a of e.approvals) actorIds.add(a.actedBy);
-      for (const c of e.corrections) actorIds.add(c.editedBy);
-    }
-    const actorUsers = await this.prisma.user.findMany({ where: { id: { in: Array.from(actorIds) } } });
-    const actorNameById = new Map(actorUsers.map((u) => [u.id, u.fullLegalName]));
-
-    let totalNetAgorot = 0;
-    const rows: ReportShiftRow[] = [];
-
-    for (const entry of entries) {
-      const clockIn = entry.clockEvents.find((e) => e.eventType === "CLOCK_IN");
-      const clockOut = entry.clockEvents.find((e) => e.eventType === "CLOCK_OUT");
-
-      let financials: ReportShiftRow["financials"] = null;
-      if (includesFinancials && entry.approvedRegularMinutes !== null) {
-        const profile = await this.payrollCalculation.findEffectiveCompensationProfile(dto.workerProfileId, entry.businessDate);
-        if (profile) {
-          const comp = this.payrollCalculation.computeEntryCompensation(entry, profile);
-          financials = { regularMinutes: comp.regularMinutes, overtimeMinutes: comp.overtimeMinutes, totalAgorot: comp.baseAgorot + comp.overtimeAgorot };
-          totalNetAgorot += financials.totalAgorot;
-        }
-      }
-
-      const forgottenStamp = entry.forgottenStampInfractions[0]
-        ? { sequence: entry.forgottenStampInfractions[0].monthlySequenceNumber, deductionAgorot: entry.forgottenStampInfractions[0].deductionAgorot }
-        : null;
-      if (includesFinancials && forgottenStamp) totalNetAgorot -= forgottenStamp.deductionAgorot;
-
-      rows.push({
-        businessDate: entry.businessDate,
-        shiftTitle: entry.shift.title,
-        projectName: entry.shift.project?.name ?? null,
-        siteName: entry.shift.site?.name ?? null,
-        checkInMethod: entry.checkInMethod,
-        rawClockIn: clockIn?.deviceTimestamp.toISOString() ?? null,
-        validatedClockIn: entry.clockInAt?.toISOString() ?? null,
-        rawClockOut: clockOut?.deviceTimestamp.toISOString() ?? null,
-        validatedClockOut: entry.clockOutAt?.toISOString() ?? null,
-        clockInGps: clockIn ? `${clockIn.latitude.toFixed(5)}, ${clockIn.longitude.toFixed(5)} (±${clockIn.accuracyMeters}m)` : null,
-        clockOutGps: clockOut ? `${clockOut.latitude.toFixed(5)}, ${clockOut.longitude.toFixed(5)} (±${clockOut.accuracyMeters}m)` : null,
-        locationValidationStatus: clockIn?.locationValidationStatus ?? null,
-        isEmergency: entry.isEmergency,
-        emergencyBreakdown: entry.emergencyCallout
-          ? `Retroactive +${entry.emergencyCallout.retroactiveMinutes}min, return buffer +${entry.emergencyCallout.returnBufferMinutes ?? 0}min, total compensated ${entry.emergencyCallout.compensatedDurationMinutes ?? "—"}min`
-          : null,
-        status: entry.status,
-        fullDayCredit: entry.fullDayCredit,
-        corrections: entry.corrections.map((c) => ({
-          field: c.field,
-          reason: c.reason,
-          note: c.note,
-          editedBy: actorNameById.get(c.editedBy) ?? c.editedBy,
-          editedAt: c.createdAt.toISOString(),
-        })),
-        summaryText: entry.dailySummary?.text ?? null,
-        approvals: entry.approvals.map((a) => ({
-          action: a.action,
-          actedBy: actorNameById.get(a.actedBy) ?? a.actedBy,
-          actedAt: a.createdAt.toISOString(),
-        })),
-        forgottenStamp,
-        financials,
+    // The request includes who asks: a key reused by someone else is a conflict, never their report.
+    const request = { organizationId: actor.organizationId, userId: actor.sub, reportType, filters: dto.filters };
+    const { body } = await this.idempotencyService.withIdempotency(idempotencyKey, "report-create", request, async () => {
+      const report = await this.prisma.generatedReport.create({
+        data: {
+          id: generateId(),
+          organizationId: actor.organizationId,
+          reportType,
+          requestedByUserId: actor.sub,
+          subjectWorkerProfileId: resolved.workerProfileId ?? null,
+          filtersJson: resolved as Prisma.InputJsonValue,
+          includesFinancials,
+          templateVersion: templateVersionFor(reportType),
+          status: ReportStatus.QUEUED,
+          progress: 0,
+          idempotencyKey: idempotencyKey ?? null,
+        },
       });
-    }
-
-    const reportId = generateId();
-    const generatedAt = new Date();
-
-    const dataForHash = { reportId, organizationId, workerId: dto.workerProfileId, fromDate: dto.fromDate, toDate: dto.toDate, includesFinancials, rows };
-    const dataHash = createHash("sha256").update(JSON.stringify(dataForHash)).digest("hex");
-
-    const reportData: ReportData = {
-      reportId,
-      organizationName: organization.name,
-      workerName: worker.membership.user.fullLegalName,
-      workerId: worker.id,
-      periodLabel: `${dto.fromDate} to ${dto.toDate}`,
-      generatedAt: generatedAt.toISOString(),
-      generatedByName: actorNameById.get(actor.sub) ?? actor.sub,
-      includesFinancials,
-      dataHash,
-      rows,
-      totalNetAgorot: includesFinancials ? totalNetAgorot : null,
-    };
-
-    const html = renderWorkerAttendanceLedgerHtml(reportData);
-    const pdfBuffer = await this.renderPdf(html);
-
-    const storageKey = `reports/${organizationId}/${reportId}.pdf`;
-    await this.filesService.putObject(storageKey, pdfBuffer, "application/pdf");
-
-    await this.prisma.generatedReport.create({
-      data: {
-        id: reportId,
-        organizationId,
-        reportType: "WORKER_ATTENDANCE_LEDGER",
-        requestedByUserId: actor.sub,
-        subjectWorkerProfileId: dto.workerProfileId,
-        filtersJson: { fromDate: dto.fromDate, toDate: dto.toDate },
-        includesFinancials,
-        templateVersion: TEMPLATE_VERSION,
-        sha256Hash: dataHash,
-        storageKey,
-      },
+      await this.auditService.record({
+        organizationId: actor.organizationId,
+        actorUserId: actor.sub,
+        action: "REPORT_REQUESTED",
+        entityType: "GeneratedReport",
+        entityId: report.id,
+        note: `${reportType} (${includesFinancials ? "financial" : "operational"})`,
+        correlationId,
+      });
+      try {
+        await this.queue.add("generate", { reportId: report.id }, { jobId: report.id, attempts: 1, removeOnComplete: 100, removeOnFail: 100 });
+      } catch (error) {
+        // Redis unreachable: fail the report at once instead of leaving it queued.
+        this.logger.error(`Could not queue report ${report.id}: ${error instanceof Error ? error.message : String(error)}`);
+        await this.generation.failReport(report.id, "The report could not be queued.");
+      }
+      return { status: 202, body: { reportId: report.id } };
     });
-
-    await this.auditService.record({
-      organizationId,
-      actorUserId: actor.sub,
-      action: "REPORT_GENERATED",
-      entityType: "GeneratedReport",
-      entityId: reportId,
-      newValue: dataHash,
-      correlationId,
-    });
-
-    const downloadUrl = await this.filesService.getSignedDownloadUrl(storageKey);
-    return { reportId, sha256Hash: dataHash, includesFinancials, downloadUrl };
+    return this.get(body.reportId, actor);
   }
 
-  async getDownloadUrl(organizationId: string, reportId: string, actor: AuthenticatedUser) {
-    const report = await this.prisma.generatedReport.findFirst({ where: { id: reportId, organizationId } });
-    if (!report) throw new AppException(404, ErrorCodes.NOT_FOUND, "Report not found.");
+  /** 404 for a worker, project, site or payroll version that is not in the caller's organization; a payroll report's version is resolved (the latest when not given). */
+  private async resolveFilters(organizationId: string, reportType: ReportType, filters: ReportFilters): Promise<ReportFilters> {
+    const notFound = (what: string) => new AppException(404, ErrorCodes.NOT_FOUND, `${what} not found.`);
+    const [worker, project, site] = await Promise.all([
+      filters.workerProfileId ? this.prisma.workerProfile.findFirst({ where: { id: filters.workerProfileId, organizationId }, select: { id: true } }) : null,
+      filters.projectId ? this.prisma.project.findFirst({ where: { id: filters.projectId, organizationId }, select: { id: true } }) : null,
+      filters.siteId ? this.prisma.site.findFirst({ where: { id: filters.siteId, organizationId }, select: { id: true } }) : null,
+    ]);
+    if (filters.workerProfileId && !worker) throw notFound("Worker");
+    if (filters.projectId && !project) throw notFound("Project");
+    if (filters.siteId && !site) throw notFound("Site");
 
-    const isOwner = actor.role === OrgRole.OWNER;
-    const isSelf = actor.workerProfileId !== null && actor.workerProfileId === report.subjectWorkerProfileId;
-    const isRequester = report.requestedByUserId === actor.sub;
-    if (!isOwner && !isSelf && !isRequester) {
-      throw new AppException(403, ErrorCodes.FORBIDDEN, "You cannot access this report.");
-    }
-
-    const downloadUrl = await this.filesService.getSignedDownloadUrl(report.storageKey);
-    return { downloadUrl, sha256Hash: report.sha256Hash, generatedAt: report.generatedAt };
+    if (reportType !== ReportType.PAYROLL) return filters;
+    const yearMonth = filters.yearMonth as string;
+    const period =
+      filters.version === undefined
+        ? await this.prisma.payrollPeriod.findFirst({ where: { organizationId, yearMonth }, orderBy: { version: "desc" }, select: { version: true } })
+        : await this.prisma.payrollPeriod.findUnique({
+            where: { organizationId_yearMonth_version: { organizationId, yearMonth, version: filters.version } },
+            select: { version: true },
+          });
+    if (!period) throw notFound("Payroll version");
+    return { ...filters, version: period.version };
   }
 
-  async listForOrganization(organizationId: string, actor: AuthenticatedUser) {
-    const isOwner = actor.role === OrgRole.OWNER;
-    return this.prisma.generatedReport.findMany({
-      where: {
-        organizationId,
-        // Reports they requested, plus reports about themselves if they have a worker profile.
-        ...(isOwner
-          ? {}
-          : { OR: [{ requestedByUserId: actor.sub }, ...(actor.workerProfileId ? [{ subjectWorkerProfileId: actor.workerProfileId }] : [])] }),
-      },
-      orderBy: { generatedAt: "desc" },
+  async list(actor: AuthenticatedUser): Promise<GeneratedReportDto[]> {
+    await this.generation.failStaleReports(actor.organizationId);
+    const reports = await this.prisma.generatedReport.findMany({
+      where: { organizationId: actor.organizationId, ...reportVisibilityWhere(actor) },
+      orderBy: [{ generatedAt: "desc" }, { id: "desc" }],
       take: 100,
     });
+    return this.toDtos(reports);
   }
 
-  private async renderPdf(html: string): Promise<Buffer> {
-    const browser = await chromium.launch();
-    try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: "load" });
-      const pdf = await page.pdf({
-        format: "A4",
-        margin: { top: "16mm", bottom: "16mm", left: "12mm", right: "12mm" },
-        displayHeaderFooter: true,
-        headerTemplate: "<span></span>",
-        footerTemplate:
-          '<div style="width:100%;font-size:8px;color:#94a3b8;text-align:center;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
-      });
-      return Buffer.from(pdf);
-    } finally {
-      await browser.close();
-    }
+  /** The report, if the caller may see it; otherwise (or for a malformed id) 404. */
+  async get(reportId: string, actor: AuthenticatedUser): Promise<GeneratedReportDto> {
+    await this.generation.failStaleReports(actor.organizationId);
+    const report = await this.findInOrganization(reportId, actor.organizationId);
+    if (!report || !canAccessReport(report, actor)) throw new AppException(404, ErrorCodes.NOT_FOUND, "Report not found.");
+    const [dto] = await this.toDtos([report]);
+    return dto;
   }
+
+  /** A short-lived signed URL to the PDF or the CSV of a READY report (audited). */
+  async download(reportId: string, format: ReportFileFormat, actor: AuthenticatedUser, correlationId: string): Promise<ReportDownloadDto> {
+    const report = await this.findAccessible(reportId, actor);
+    if (report.status !== ReportStatus.READY) throw new AppException(409, ErrorCodes.REPORT_NOT_READY, "The report is not ready yet.");
+    const key = format === "csv" ? report.csvStorageKey : report.storageKey;
+    if (!key) throw new AppException(404, ErrorCodes.NOT_FOUND, `This report has no ${format.toUpperCase()} file.`);
+
+    const fileName = downloadFileName(report.reportType as ReportType, report.generatedAt, format);
+    const downloadUrl = await this.files.getSignedDownloadUrl(key, {
+      expiresInSeconds: REPORT_DOWNLOAD_TTL_SECONDS,
+      downloadFileName: fileName,
+      contentType: format === "csv" ? "text/csv; charset=utf-8" : "application/pdf",
+    });
+    await this.auditService.record({
+      organizationId: actor.organizationId,
+      actorUserId: actor.sub,
+      action: "REPORT_DOWNLOADED",
+      entityType: "GeneratedReport",
+      entityId: report.id,
+      field: "format",
+      newValue: format,
+      correlationId,
+    });
+    return { downloadUrl, expiresInSeconds: REPORT_DOWNLOAD_TTL_SECONDS, fileName, sha256: format === "csv" ? report.csvSha256 : report.pdfSha256 };
+  }
+
+  /**
+   * Reads the stored files back and hashes them again: valid only when every
+   * file matches the hash recorded when it was generated. A missing object,
+   * or a report from before Step 8 (no file hash was recorded), is not valid
+   * -- never an error.
+   */
+  async verify(reportId: string, actor: AuthenticatedUser, correlationId: string): Promise<ReportVerificationDto> {
+    const report = await this.findAccessible(reportId, actor);
+    if (report.status !== ReportStatus.READY) throw new AppException(409, ErrorCodes.REPORT_NOT_READY, "The report is not ready yet.");
+
+    const checks: { format: "PDF" | "CSV"; key: string | null; expected: string | null }[] = [
+      { format: "PDF", key: report.storageKey, expected: report.pdfSha256 },
+      { format: "CSV", key: report.csvStorageKey, expected: report.csvSha256 },
+    ];
+    const files: ReportVerificationDto["files"] = [];
+    for (const check of checks) {
+      if (check.key === null && check.expected === null) continue;
+      let actual: string | null = null;
+      if (check.key !== null) {
+        try {
+          const bytes = await this.files.getObject(check.key);
+          actual = bytes ? sha256Hex(bytes) : null;
+        } catch (error) {
+          this.logger.warn(`Could not read ${check.key} to verify report ${report.id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      files.push({ format: check.format, expectedSha256: check.expected, actualSha256: actual, matches: check.expected !== null && actual === check.expected });
+    }
+    const valid = files.length > 0 && files.every((file) => file.matches);
+
+    await this.auditService.record({
+      organizationId: actor.organizationId,
+      actorUserId: actor.sub,
+      action: "REPORT_VERIFIED",
+      entityType: "GeneratedReport",
+      entityId: report.id,
+      newValue: valid ? "valid" : "invalid",
+      note: files.map((file) => `${file.format}: ${file.matches ? "matches" : "does not match"}`).join("; ") || "No file to check",
+      correlationId,
+    });
+    return { reportId: report.id, valid, checkedAt: new Date(), dataSha256: report.sha256Hash, files };
+  }
+
+  private findInOrganization(reportId: string, organizationId: string): Promise<GeneratedReport | null> {
+    if (!UUID_PATTERN.test(reportId)) return Promise.resolve(null);
+    return this.prisma.generatedReport.findFirst({ where: { id: reportId, organizationId } });
+  }
+
+  /**
+   * Download and verify: 404 when the report is not in the organization or the caller may not see it, like the
+   * details -- a different answer would tell someone who may not see a report that it exists.
+   */
+  private async findAccessible(reportId: string, actor: AuthenticatedUser): Promise<GeneratedReport> {
+    const report = await this.findInOrganization(reportId, actor.organizationId);
+    if (!report || !canAccessReport(report, actor)) throw new AppException(404, ErrorCodes.NOT_FOUND, "Report not found.");
+    return report;
+  }
+
+  /** DTOs with the requester's and the subject worker's names, from one users query. */
+  private async toDtos(reports: readonly GeneratedReport[]): Promise<GeneratedReportDto[]> {
+    const requesterIds = [...new Set(reports.map((report) => report.requestedByUserId))];
+    const subjectIds = [...new Set(reports.map((report) => report.subjectWorkerProfileId).filter((id): id is string => id !== null))];
+    const users =
+      reports.length > 0
+        ? await this.prisma.user.findMany({
+            where: {
+              OR: [{ id: { in: requesterIds } }, ...(subjectIds.length > 0 ? [{ memberships: { some: { workerProfile: { id: { in: subjectIds } } } } }] : [])],
+            },
+            select: { id: true, fullLegalName: true, memberships: { select: { workerProfile: { select: { id: true } } } } },
+          })
+        : [];
+    const nameOfUser = new Map(users.map((user) => [user.id, user.fullLegalName]));
+    const nameOfWorker = new Map(
+      users.flatMap((user) =>
+        user.memberships.flatMap((membership) => (membership.workerProfile ? [[membership.workerProfile.id, user.fullLegalName] as const] : [])),
+      ),
+    );
+
+    return reports.map((report) => ({
+      id: report.id,
+      reportType: report.reportType as ReportType,
+      status: report.status as ReportStatus,
+      progress: report.progress,
+      filters: (report.filtersJson ?? {}) as unknown as ReportFilters,
+      includesFinancials: report.includesFinancials,
+      templateVersion: report.templateVersion,
+      requestedByUserId: report.requestedByUserId,
+      requestedByName: nameOfUser.get(report.requestedByUserId) ?? null,
+      subjectWorkerProfileId: report.subjectWorkerProfileId,
+      subjectWorkerName: report.subjectWorkerProfileId ? (nameOfWorker.get(report.subjectWorkerProfileId) ?? null) : null,
+      sha256Hash: report.sha256Hash,
+      pdfSha256: report.pdfSha256,
+      csvSha256: report.csvSha256,
+      pageCount: report.pageCount,
+      errorCode: report.errorCode,
+      generatedAt: report.generatedAt,
+      finishedAt: report.finishedAt,
+    }));
+  }
+}
+
+/** "سجل-حضور-العامل-2026-10-13.pdf": the report's Arabic name and the (Asia/Jerusalem) day it was requested. */
+export function downloadFileName(reportType: ReportType, generatedAt: Date, format: ReportFileFormat): string {
+  const name = enumLabel("ReportType", reportType)
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "")
+    .replace(/\s+/g, "-");
+  return `${name}-${toBusinessDay(generatedAt) ?? generatedAt.toISOString().slice(0, 10)}.${format}`;
 }

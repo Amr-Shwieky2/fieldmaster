@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { CompensationType } from "@fieldmaster/shared-types";
+import { CompensationType, OrgRole } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
 import { isForbidden } from "@fieldmaster/i18n";
 import { EM_DASH } from "@fieldmaster/i18n";
@@ -20,7 +20,9 @@ export default function WorkersPage() {
   const t = useTranslations("workers");
   const tc = useTranslations("common");
   const label = useEnumLabel();
-  const { client } = useAuth();
+  const { client, session } = useAuth();
+  // Only an Owner reviews applications (decrypted ID and bank details); a Field Manager sees who is waiting.
+  const isOwner = session?.role === OrgRole.OWNER;
   const workersQuery = useQuery({ queryKey: ["workers"], queryFn: () => client.listWorkers() });
   const pendingQuery = useQuery({ queryKey: ["workers-pending"], queryFn: () => client.listPendingApproval() });
   const pending = pendingQuery.data ?? [];
@@ -28,7 +30,18 @@ export default function WorkersPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader
+        title={t("title")}
+        description={t("description")}
+        actions={
+          <Link
+            href="/workers/invitations"
+            className="inline-flex items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+          >
+            {t("inviteWorker")}
+          </Link>
+        }
+      />
 
       {/* The pending list only appears when there is something to review; a 403 hides it. */}
       {pendingQuery.isError && !isForbidden(pendingQuery.error) && (
@@ -46,6 +59,7 @@ export default function WorkersPage() {
         <Card>
           <CardHeader>
             <CardTitle>{t("pending.title", { count: pending.length })}</CardTitle>
+            {isOwner ? null : <p className="mt-1 text-sm text-slate-500">{t("pending.ownerReviews")}</p>}
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
@@ -57,14 +71,16 @@ export default function WorkersPage() {
                       <Phone value={p.phoneNumber} />
                     </p>
                   </div>
-                  <Link
-                    href={`/workers/${p.workerProfileId}/approve`}
-                    aria-label={t("pending.reviewLabel", { name: p.fullLegalName })}
-                    className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline"
-                  >
-                    {t("pending.review")}
-                    <ArrowEndIcon />
-                  </Link>
+                  {isOwner ? (
+                    <Link
+                      href={`/workers/${p.workerProfileId}/review`}
+                      aria-label={t("pending.reviewLabel", { name: p.fullLegalName })}
+                      className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline"
+                    >
+                      {t("pending.review")}
+                      <ArrowEndIcon />
+                    </Link>
+                  ) : null}
                 </li>
               ))}
             </ul>

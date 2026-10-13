@@ -130,6 +130,13 @@ for switching a Render test deployment to `staging` + `true`.
 | Error tracking | Sentry | Optional; unset = no-op |
 | Maps | Google Maps JS SDK | Not used in this build — admin-web uses Leaflet/OpenStreetMap instead (no key needed); see `technical-decisions.md` |
 
+Behind a proxy or load balancer, set `TRUST_PROXY` to the number of proxies
+in front of the API (`render.yaml` sets 1). Otherwise every client shares
+the proxy's address for rate limiting, including the public onboarding
+routes' limit (`ONBOARDING_RATE_LIMIT`, per IP). Bind a real malware scanner
+to the `MALWARE_SCANNER` provider (`apps/api/src/modules/files`) before
+accepting real uploads: the default records `NOT_SCANNED`.
+
 None of these are required to run `docker compose up -d && pnpm dev` — every
 one has a working local/dev adapter. See `.env.example` in `apps/api` and
 `apps/admin-web` for the complete variable list.

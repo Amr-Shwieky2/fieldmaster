@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { get as httpGet, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { INestApplication, RequestMethod } from "@nestjs/common";
@@ -5,7 +6,7 @@ import { METHOD_METADATA, PATH_METADATA, SSE_METADATA } from "@nestjs/common/con
 import { ModulesContainer } from "@nestjs/core";
 import { io, type Socket } from "socket.io-client";
 import { v7 as uuidv7 } from "uuid";
-import { CorrectionReason, NotificationType, TuranType } from "@fieldmaster/shared-types";
+import { CorrectionReason, FileAssetPurpose, GovernmentIdType, NotificationType, PRIVACY_NOTICE_VERSION, TuranType } from "@fieldmaster/shared-types";
 import { createTestApp, resetDatabase, request } from "./test-app";
 import { useEnv } from "./use-env";
 import {
@@ -18,6 +19,7 @@ import {
   createStandardShift,
 } from "./fixtures";
 import { PrismaService } from "../src/common/prisma/prisma.service";
+import { EncryptionService } from "../src/common/encryption/encryption.service";
 import { NotificationsService } from "../src/modules/notifications/notifications.service";
 import { calculatePayroll } from "./payroll-helpers";
 
@@ -28,8 +30,12 @@ import { calculatePayroll } from "./payroll-helpers";
  * Supervisor (a worker with an active assignment, Step 6), calls every GET
  * route the app exposes -- discovered from Nest's route metadata, so a new
  * route is scanned without anyone adding it here -- and fails with the route
- * and JSON path of every money or bank key in any response. The notification
- * WebSocket and SSE payloads a Field Manager receives are scanned the same way.
+ * and JSON path of every money, bank or identity-document key in any
+ * response. Since Step 8 it also searches every response for the actual
+ * values of the seeded ID numbers, bank details and invitation tokens (in any
+ * string, under any key) and reports where they are -- the paths only, never
+ * the values. The notification WebSocket and SSE payloads a Field Manager
+ * receives are scanned the same way.
  */
 
 const OWNER_PHONE = "+972500000001";
@@ -45,11 +51,22 @@ const NEARBY_LAT = 32.0858;
 
 const PROJECT_BUDGET_AGOROT = 50_000_000;
 
+/** Step 8: the Worker's identity document and bank account (an Owner-only review shows them decrypted). */
+const WORKER_ID_NUMBER = "203398789";
+const WORKER_BANK = { bankName: "Bank Hapoalim", branch: "612", account: "4512345901", holder: "Nadia Worker-Holder" };
+/** Step 8: a pending applicant who applied on the public onboarding page with a Palestinian ID. */
+const APPLICANT_PHONE = "+972599876500";
+const APPLICANT_ID_NUMBER = "412345678";
+const APPLICANT_BANK = { bankName: "Bank of Palestine", branch: "155", account: "5528301146", holder: "Huda Applicant-Holder" };
+/** The prefilled phone of the invitation nobody has used yet (the public page's GET route reads it). */
+const OPEN_INVITATION_PHONE = "+972599000111";
+
 /**
  * A key is forbidden if it ends in "Agorot" or "rate" (rate, hourlyRate,
- * dailyRate, overtimeRate, ...) or contains one of these words, case-insensitively.
+ * dailyRate, overtimeRate, ...) or contains one of these words, case-insensitively
+ * (Step 8: also identity-document numbers and account holders).
  */
-const FORBIDDEN_KEY_PARTS = ["budget", "bank", "accountnumber", "branch", "netpay", "grosspay", "estimatedcost", "amount"];
+const FORBIDDEN_KEY_PARTS = ["budget", "bank", "accountnumber", "branch", "netpay", "grosspay", "estimatedcost", "amount", "idnumber", "accountholder"];
 
 function isForbiddenKey(key: string): boolean {
   const lower = key.toLowerCase();
@@ -67,9 +84,27 @@ function findForbiddenKeys(value: unknown, path = "$"): string[] {
 }
 
 /**
+ * JSON paths of every string in `value` that contains one of `sensitiveValues`
+ * (an ID number, an account number, a token...), whatever its key: a value
+ * copied into a free-text field (a notification body, an audit summary) is
+ * found too. Only the paths are returned, so a failure never prints the values.
+ */
+function findSensitiveValues(value: unknown, sensitiveValues: readonly string[], path = "$"): string[] {
+  if (typeof value === "string") return sensitiveValues.some((sensitive) => value.includes(sensitive)) ? [path] : [];
+  if (Array.isArray(value)) return value.flatMap((item, index) => findSensitiveValues(item, sensitiveValues, `${path}[${index}]`));
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, nested]) => findSensitiveValues(nested, sensitiveValues, `${path}.${key}`));
+}
+
+/** An account number as it may be written with its branch. */
+function bankAccountForms(bank: { branch: string; account: string }): string[] {
+  return [bank.account, ...["", "-", "/", " "].map((separator) => `${bank.branch}${separator}${bank.account}`)];
+}
+
+/**
  * The only routes where a Worker legitimately receives money: their OWN. They
- * are skipped by the scan and checked separately below to contain only the
- * caller's own data.
+ * are skipped by the key scan (still searched for ID numbers and bank details)
+ * and checked separately below to contain only the caller's own data.
  */
 const WORKER_OWN_MONEY_ROUTES = new Set([
   // The Worker's own rate history; any other worker's id is 403.
@@ -91,7 +126,9 @@ const EXPECTED_NOT_FOUND = {
   // The same for their own salary statements (Step 7).
   manager: new Set(["GET /api/v1/payroll-periods/:yearMonth/my-payslip", "GET /api/v1/payroll-statements/me", "GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
   worker: new Set(["GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
-  supervisor: new Set<string>(),
+  // Step 8: a report is seen by an Owner, its requester and the worker it is about (the Worker above); for anyone
+  // else it does not exist, so nothing tells it exists.
+  supervisor: new Set(["GET /api/v1/reports/:id", "GET /api/v1/reports/:id/download", "GET /api/v1/reports/:id/verify"]),
 };
 
 interface GetRoute {
@@ -304,6 +341,78 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       },
     });
 
+    // Step 8: identity documents and bank details, encrypted the way onboarding stores them.
+    // The Worker's: the Owner's review (`/workers/:id/onboarding-review`) shows them decrypted.
+    const encryption = app.get(EncryptionService);
+    // Object storage is not reached (dummy credentials), so the file rows are created directly; no route reads the bytes.
+    const fileAssetRow = (purpose: FileAssetPurpose, links: { workerProfileId?: string; invitationId?: string }) =>
+      prisma.fileAsset.create({
+        data: {
+          id: uuidv7(),
+          organizationId,
+          purpose,
+          storageKey: `onboarding/${organizationId}/scanner/${uuidv7()}`,
+          contentType: "image/jpeg",
+          sizeBytes: 1024,
+          sha256: "0".repeat(64),
+          scanResult: "NOT_SCANNED",
+          ...links,
+        },
+      });
+    const workerIdDocument = await fileAssetRow(FileAssetPurpose.IDENTITY_DOCUMENT, { workerProfileId: worker.workerProfile.id });
+    await prisma.identityDocument.create({
+      data: {
+        id: uuidv7(),
+        workerProfileId: worker.workerProfile.id,
+        documentType: GovernmentIdType.ISRAELI_ID,
+        ...(await encryption.encrypt(WORKER_ID_NUMBER)),
+        fileAssetId: workerIdDocument.id,
+      },
+    });
+    await prisma.encryptedBankAccount.create({
+      data: {
+        id: uuidv7(),
+        workerProfileId: worker.workerProfile.id,
+        ...(await encryption.encrypt(
+          JSON.stringify({ bankName: WORKER_BANK.bankName, branchNumber: WORKER_BANK.branch, accountNumber: WORKER_BANK.account, accountHolderName: WORKER_BANK.holder }),
+        )),
+      },
+    });
+
+    // A pending applicant, through the real public application route. Field Managers get application notifications too,
+    // so theirs are scanned with one in them.
+    await request(http)
+      .patch("/api/v1/organizations/me/settings/notifications")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ preferences: [{ type: NotificationType.ONBOARDING_SUBMITTED, owners: true, fieldManagers: true }] })
+      .expect(200);
+    const usedInvitation = await request(http).post("/api/v1/onboarding-invitations").set("Authorization", `Bearer ${ownerToken}`).send({}).expect(201);
+    const applicantDocument = await fileAssetRow(FileAssetPurpose.IDENTITY_DOCUMENT, { invitationId: usedInvitation.body.invitationId });
+    await request(http)
+      .post(`/api/v1/onboarding/invitations/${usedInvitation.body.token}/redeem`)
+      .send({
+        phoneNumber: APPLICANT_PHONE,
+        fullLegalName: "Lina Applicant",
+        governmentIdType: GovernmentIdType.PALESTINIAN_ID,
+        governmentIdNumber: APPLICANT_ID_NUMBER,
+        identityDocumentAssetId: applicantDocument.id,
+        bankName: APPLICANT_BANK.bankName,
+        branchNumber: APPLICANT_BANK.branch,
+        accountNumber: APPLICANT_BANK.account,
+        accountHolderName: APPLICANT_BANK.holder,
+        consentAccepted: true,
+        privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
+      })
+      .expect(201);
+    const applicant = await prisma.workerProfile.findFirstOrThrow({ where: { organizationId, membership: { user: { phoneNumber: APPLICANT_PHONE } } } });
+    // An invitation nobody has used yet: the public page's GET route reads it.
+    const openInvitation = await request(http)
+      .post("/api/v1/onboarding-invitations")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ prefilledPhoneNumber: OPEN_INVITATION_PHONE })
+      .expect(201);
+    const invitationTokens: string[] = [usedInvitation.body.token, openInvitation.body.token];
+
     return {
       owner,
       manager,
@@ -313,8 +422,20 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       yearMonth,
       timeEntryId,
       calloutId,
+      applicantWorkerProfileId: applicant.id,
       supervisionId: supervision.body.id as string,
       tokens: { owner: ownerToken, manager: managerToken, worker: workerToken, otherWorker: otherWorkerToken, supervisor: supervisorToken },
+      /** What only the Owner's review may show: ID numbers, account numbers and holders, invitation tokens and their hashes. */
+      sensitiveValues: [
+        WORKER_ID_NUMBER,
+        ...bankAccountForms(WORKER_BANK),
+        WORKER_BANK.holder,
+        APPLICANT_ID_NUMBER,
+        ...bankAccountForms(APPLICANT_BANK),
+        APPLICANT_BANK.holder,
+        ...invitationTokens,
+        ...invitationTokens.map((token) => createHash("sha256").update(token).digest("hex")),
+      ],
       idsByResource: {
         shifts: shift.id,
         "time-entries": timeEntryId,
@@ -329,24 +450,33 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
         // Step 7: `/payroll-periods/:yearMonth/versions/:version` (and its `workers/:workerProfileId`, filled with the Worker above).
         versions: "1",
         ":yearMonth": yearMonth,
+        // Step 8: the public page reads `/onboarding/invitations/:token`; the Owner views the Worker's ID document.
+        invitations: openInvitation.body.token as string,
+        "file-assets": workerIdDocument.id,
       },
     };
   }
 
-  /** Calls every GET route as `accessToken`; returns each leaked key as "GET /route -> $.json.path". */
-  async function scanGetRoutes(accessToken: string, role: "manager" | "worker" | "supervisor", skip: Set<string>) {
+  /**
+   * Calls every GET route as `accessToken`; returns each leaked key as "GET /route -> $.json.path", and each place a
+   * sensitive value (ID number, bank detail, invitation token) was found the same way. `moneyExceptions` (a Worker's
+   * own pay) are only searched for the sensitive values: the money in them is the caller's own.
+   */
+  async function scanGetRoutes(accessToken: string, role: "manager" | "worker" | "supervisor", moneyExceptions: Set<string>) {
     const leaks: string[] = [];
+    const sensitiveValues: string[] = [];
     const unexpectedStatuses: string[] = [];
     const bodies = new Map<string, unknown>();
     for (const { route, path } of discoverGetRoutes(app, seed.idsByResource)) {
-      if (skip.has(route)) continue;
       const response = await request(app.getHttpServer()).get(path).set("Authorization", `Bearer ${accessToken}`);
+      for (const jsonPath of findSensitiveValues(response.body, seed.sensitiveValues)) sensitiveValues.push(`${route} -> ${jsonPath}`);
+      if (moneyExceptions.has(route)) continue;
       const allowed = response.status === 200 || response.status === 403 || (response.status === 404 && EXPECTED_NOT_FOUND[role].has(route));
       if (!allowed) unexpectedStatuses.push(`${route} -> ${response.status} ${JSON.stringify(response.body)}`);
       if (response.status === 200) bodies.set(route, response.body);
       for (const jsonPath of findForbiddenKeys(response.body)) leaks.push(`${route} -> ${jsonPath}`);
     }
-    return { leaks, unexpectedStatuses, bodies };
+    return { leaks, sensitiveValues, unexpectedStatuses, bodies };
   }
 
   beforeAll(async () => {
@@ -362,8 +492,20 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
   });
 
   it("finds money where it is stored (so an empty result below means no leak, not no data)", async () => {
-    const { leaks } = await scanGetRoutes(seed.tokens.owner, "manager", new Set());
+    const { leaks, sensitiveValues } = await scanGetRoutes(seed.tokens.owner, "manager", new Set());
     const ownerLeaks = leaks.join("\n");
+    // Step 8: the Owner's review of an application, decrypted -- found by key and by value...
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/workers\/:id\/onboarding-review -> \$\.governmentIdNumber$/m);
+    expect(ownerLeaks).toMatch(/^GET \/api\/v1\/workers\/:id\/onboarding-review -> \$\.bankAccount\.accountHolderName$/m);
+    expect(sensitiveValues).toEqual(
+      expect.arrayContaining([
+        "GET /api/v1/workers/:id/onboarding-review -> $.governmentIdNumber",
+        "GET /api/v1/workers/:id/onboarding-review -> $.bankAccount.accountNumber",
+        "GET /api/v1/workers/:id/onboarding-review -> $.bankAccount.accountHolderName",
+      ]),
+    );
+    // ... and nowhere else, not even in the Owner's other responses.
+    expect(sensitiveValues.filter((found) => !found.startsWith("GET /api/v1/workers/:id/onboarding-review -> "))).toEqual([]);
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/projects -> \$\[0\]\.budgetAgorot$/m);
     // Any index: the seeded emergency call-out's own shift (no project) now sorts first.
     expect(ownerLeaks).toMatch(/^GET \/api\/v1\/shifts -> \$\[\d+\]\.project\.budgetAgorot$/m);
@@ -394,11 +536,18 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     }
   }
 
-  it("a Field Manager gets no money or bank field from any GET route", async () => {
-    const { leaks, unexpectedStatuses, bodies } = await scanGetRoutes(seed.tokens.manager, "manager", new Set());
-    expect({ leaks, unexpectedStatuses }).toEqual({ leaks: [], unexpectedStatuses: [] });
+  it("a Field Manager gets no money, bank or ID-document field or value from any GET route", async () => {
+    const { leaks, sensitiveValues, unexpectedStatuses, bodies } = await scanGetRoutes(seed.tokens.manager, "manager", new Set());
+    expect({ leaks, sensitiveValues, unexpectedStatuses }).toEqual({ leaks: [], sensitiveValues: [], unexpectedStatuses: [] });
 
     expectRows(bodies, ["GET /api/v1/shifts", "GET /api/v1/forgotten-stamp-infractions", "GET /api/v1/projects", "GET /api/v1/workers", "GET /api/v1/notifications"]);
+    // Step 8: the onboarding routes were read with the applicant in them (so the value search had something to look at).
+    expectRows(bodies, ["GET /api/v1/onboarding-invitations", "GET /api/v1/workers/pending-approval"]);
+    expect(bodies.get("GET /api/v1/workers/pending-approval")).toContainEqual(expect.objectContaining({ workerProfileId: seed.applicantWorkerProfileId }));
+    expect(bodies.get("GET /api/v1/notifications")).toContainEqual(
+      expect.objectContaining({ type: NotificationType.ONBOARDING_SUBMITTED, dataJson: expect.objectContaining({ workerProfileId: seed.applicantWorkerProfileId }) }),
+    );
+    expect(bodies.get("GET /api/v1/onboarding/invitations/:token")).toMatchObject({ prefilledPhoneNumber: OPEN_INVITATION_PHONE });
     expect(bodies.get("GET /api/v1/shifts/:id")).toMatchObject({ id: seed.shift.id, project: { name: "Test Project" } });
     // Step 5 routes were read with real rows (the evidence has corrections with forgotten-stamp infractions).
     expect(bodies.get("GET /api/v1/time-entries/:id/evidence")).toMatchObject({ id: seed.timeEntryId, history: { corrections: [{ infraction: { monthlySequenceNumber: 1 } }, {}, {}] } });
@@ -410,18 +559,19 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     expect(bodies.get("GET /api/v1/organizations/me/settings")).toMatchObject({ canEdit: false, fixedRules: { standardDayMinutes: 540 } });
   });
 
-  it("a Worker gets no money or bank field from any GET route except their own pay (explicit exceptions)", async () => {
-    const { leaks, unexpectedStatuses, bodies } = await scanGetRoutes(seed.tokens.worker, "worker", WORKER_OWN_MONEY_ROUTES);
-    expect({ leaks, unexpectedStatuses }).toEqual({ leaks: [], unexpectedStatuses: [] });
+  it("a Worker gets no money, bank or ID-document field or value from any GET route except their own pay (explicit exceptions)", async () => {
+    const { leaks, sensitiveValues, unexpectedStatuses, bodies } = await scanGetRoutes(seed.tokens.worker, "worker", WORKER_OWN_MONEY_ROUTES);
+    // Not even the Worker's own ID number or bank details: only the Owner's review shows them.
+    expect({ leaks, sensitiveValues, unexpectedStatuses }).toEqual({ leaks: [], sensitiveValues: [], unexpectedStatuses: [] });
 
     expectRows(bodies, ["GET /api/v1/shifts", "GET /api/v1/time-entries", "GET /api/v1/notifications"]);
     expect(bodies.get("GET /api/v1/shifts/:id")).toMatchObject({ id: seed.shift.id, project: { name: "Test Project" } });
   });
 
-  it("a Temporary Supervisor gets no money or bank field from any GET route, including the supervised shift", async () => {
+  it("a Temporary Supervisor gets no money, bank or ID-document field or value from any GET route, including the supervised shift", async () => {
     // Their own pay is the Worker's exception above, so it is skipped the same way.
-    const { leaks, unexpectedStatuses, bodies } = await scanGetRoutes(seed.tokens.supervisor, "supervisor", WORKER_OWN_MONEY_ROUTES);
-    expect({ leaks, unexpectedStatuses }).toEqual({ leaks: [], unexpectedStatuses: [] });
+    const { leaks, sensitiveValues, unexpectedStatuses, bodies } = await scanGetRoutes(seed.tokens.supervisor, "supervisor", WORKER_OWN_MONEY_ROUTES);
+    expect({ leaks, sensitiveValues, unexpectedStatuses }).toEqual({ leaks: [], sensitiveValues: [], unexpectedStatuses: [] });
 
     // The supervisor routes were really read, with rows: the shift's three workers and the opened point.
     expectRows(bodies, ["GET /api/v1/temporary-supervisors/me"]);
