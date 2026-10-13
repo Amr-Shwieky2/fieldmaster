@@ -11,9 +11,9 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-const auth = vi.hoisted(() => ({ client: {} as Record<string, unknown> }));
+const auth = vi.hoisted(() => ({ client: {} as Record<string, unknown>, session: null as { role: string } | null }));
 vi.mock("@/lib/auth-context", () => ({
-  useAuth: () => ({ client: auth.client, session: null, isAuthenticated: true, isReady: true, login: () => {}, logout: () => {} }),
+  useAuth: () => ({ client: auth.client, session: auth.session, isAuthenticated: true, isReady: true, login: () => {}, logout: () => {} }),
 }));
 
 function setClient(client: { listWorkers: () => Promise<unknown>; listPendingApproval: () => Promise<unknown> }) {
@@ -25,6 +25,7 @@ describe("Workers list page", () => {
   beforeEach(() => {
     nav.replace.mockClear();
     auth.client = {};
+    auth.session = { role: "OWNER" };
   });
 
   it("renders the pending list, translated statuses and Western-digit money", async () => {
@@ -33,12 +34,16 @@ describe("Workers list page", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "العمال" })).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "بانتظار الموافقة (1)" })).toBeTruthy();
+    // Step 8: an Owner reviews the application (its documents and details) before approving.
     const review = screen.getByRole("link", { name: "مراجعة الطلب: Nadia Khoury" });
-    expect(review.getAttribute("href")).toBe("/workers/w-pending/approve");
+    expect(review.getAttribute("href")).toBe("/workers/w-pending/review");
+    expect(screen.queryByText("مراجعة هذه الطلبات والقرار بشأنها من صلاحيات المالك.")).toBeNull();
     expect(screen.getByText("+972500010009").closest("bdi")?.getAttribute("dir")).toBe("ltr");
 
     const table = await screen.findByRole("table", { name: "جميع العمال" });
-    const headers = within(table).getAllByRole("columnheader").map((th) => th.textContent);
+    const headers = within(table)
+      .getAllByRole("columnheader")
+      .map((th) => th.textContent);
     expect(headers).toEqual(["الاسم", "رقم الهاتف", "الحالة", "الأجر"]);
     expect(within(table).getByText("نشط")).toBeTruthy();
     expect(within(table).getByText("موقوف")).toBeTruthy();
@@ -52,6 +57,29 @@ describe("Workers list page", () => {
     expect(hourly.closest("td")?.textContent).toBe("₪ 1,234.50 للساعة");
     expect(within(table).getByRole("link", { name: "Eli Ramzani" }).getAttribute("href")).toBe("/workers/w-daily");
     expect(hasArabicIndicDigits(document.body.textContent)).toBe(false);
+  });
+
+  it("shows a Field Manager who is waiting for approval, without a link to the Owner's review", async () => {
+    auth.session = { role: "FIELD_MANAGER" };
+    setClient({ listWorkers: vi.fn().mockResolvedValue(MANAGER_WORKERS), listPendingApproval: vi.fn().mockResolvedValue(PENDING) });
+    renderWorkersPage(<WorkersPage />);
+
+    const pendingCard = (await screen.findByRole("heading", { name: "بانتظار الموافقة (1)" })).closest("div.rounded-lg") as HTMLElement;
+    expect(within(pendingCard).getByText("Nadia Khoury")).toBeTruthy();
+    expect(within(pendingCard).getByText("مراجعة هذه الطلبات والقرار بشأنها من صلاحيات المالك.")).toBeTruthy();
+    expect(within(pendingCard).queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("link", { name: /مراجعة الطلب/ })).toBeNull();
+  });
+
+  it("links an Owner and a Field Manager to the worker invitations", async () => {
+    for (const role of ["OWNER", "FIELD_MANAGER"]) {
+      auth.session = { role };
+      setClient({ listWorkers: vi.fn().mockResolvedValue([]), listPendingApproval: vi.fn().mockResolvedValue([]) });
+      const view = renderWorkersPage(<WorkersPage />);
+      expect(screen.getByRole("link", { name: "دعوة عامل" }).getAttribute("href")).toBe("/workers/invitations");
+      await screen.findByText("لا يوجد عمال بعد");
+      view.unmount();
+    }
   });
 
   it("shows an em dash instead of compensation for a Field Manager (the API omits it)", async () => {
@@ -93,7 +121,10 @@ describe("Workers list page", () => {
   });
 
   it("shows access denied when the API answers 403", async () => {
-    setClient({ listWorkers: vi.fn().mockRejectedValue(apiError(403, "FORBIDDEN")), listPendingApproval: vi.fn().mockRejectedValue(apiError(403, "FORBIDDEN")) });
+    setClient({
+      listWorkers: vi.fn().mockRejectedValue(apiError(403, "FORBIDDEN")),
+      listPendingApproval: vi.fn().mockRejectedValue(apiError(403, "FORBIDDEN")),
+    });
     renderWorkersPage(<WorkersPage />);
 
     expect(await screen.findByText("غير مصرّح بالوصول")).toBeTruthy();

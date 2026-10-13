@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
@@ -22,7 +23,13 @@ async function bootstrap() {
     throw error;
   }
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+
+  // Behind a proxy or load balancer (Render, an ALB) the rate limits must see the client's address, not the
+  // proxy's: TRUST_PROXY is the number of proxies in front of the API (Express's `trust proxy` hop count).
+  // Unset or 0: the connection's own address is used, and X-Forwarded-For is ignored (it could be forged).
+  const trustedProxies = Number(process.env.TRUST_PROXY ?? 0);
+  if (Number.isInteger(trustedProxies) && trustedProxies > 0) app.set("trust proxy", trustedProxies);
 
   app.use(helmet());
   app.enableCors({

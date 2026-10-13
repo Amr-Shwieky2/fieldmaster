@@ -15,6 +15,7 @@ import { OrganizationsModule } from "./modules/organizations/organizations.modul
 import { MembershipsModule } from "./modules/memberships/memberships.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { WorkersModule } from "./modules/workers/workers.module";
+import { FileAssetsModule } from "./modules/files/file-assets.module";
 import { SitesModule } from "./modules/sites/sites.module";
 import { ShiftsModule } from "./modules/shifts/shifts.module";
 import { AttendanceModule } from "./modules/attendance/attendance.module";
@@ -43,6 +44,7 @@ import { OperationsModule } from "./modules/operations/operations.module";
     MembershipsModule,
     NotificationsModule,
     WorkersModule,
+    FileAssetsModule,
     SitesModule,
     ShiftsModule,
     AttendanceModule,

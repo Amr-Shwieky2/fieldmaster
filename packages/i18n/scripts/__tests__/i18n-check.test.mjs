@@ -85,6 +85,21 @@ describe("API error codes", () => {
     expect(apiErrorCodes(sources)).toEqual(["ERROR", "GPS_ACCURACY_TOO_LOW", "NOT_FOUND", "OTP_RATE_LIMITED", "UNAUTHENTICATED"]);
   });
 
+  it("follows a filter code written as a ternary over several lines", () => {
+    const source = [
+      "      response.status(status).json({",
+      "        code:",
+      "          status === HttpStatus.UNAUTHORIZED",
+      '            ? "UNAUTHENTICATED"',
+      "            : status === HttpStatus.TOO_MANY_REQUESTS",
+      '              ? "RATE_LIMITED"',
+      '              : "ERROR",',
+      "        message,",
+      '        details: { reason: "NOT_A_CODE" },',
+    ].join("\n");
+    expect(apiErrorCodes([source])).toEqual(["ERROR", "RATE_LIMITED", "UNAUTHENTICATED"]);
+  });
+
   it("reports a code without an Arabic message", () => {
     expect(untranslatedErrorCodes(["NOT_FOUND", "BRAND_NEW"], { "errors.NOT_FOUND": "غير موجود" })).toEqual([
       "errors.BRAND_NEW: the API sends this code but ar.json has no message for it",

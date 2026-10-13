@@ -371,7 +371,7 @@ model IdentityDocument {
   workerProfileId String        @map("worker_profile_id") @db.Uuid
   worker          WorkerProfile @relation(fields: [workerProfileId], references: [id])
 
-  /// GovernmentIdType: ISRAELI_ID or PASSPORT.
+  /// GovernmentIdType: ISRAELI_ID, PALESTINIAN_ID or PASSPORT (plain text, no database constraint).
   documentType    String @map("document_type")
   /// The encrypted document number.
   ciphertext      Bytes  @map("ciphertext")

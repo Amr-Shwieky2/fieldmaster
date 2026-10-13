@@ -7,15 +7,15 @@ live dev database, then applied with `prisma migrate deploy` — this
 environment's non-interactive shell doesn't support `prisma migrate dev`;
 see `troubleshooting.md`).
 
-## Tables (41)
+## Tables (42)
 
 Organizations & RBAC: `organizations`, `organization_settings`, `users`,
 `organization_memberships`.
 
 Workers & sensitive data: `worker_profiles`, `encrypted_bank_accounts`,
-`identity_documents` (schema exists; nothing writes to it yet —
-see `technical-decisions.md`), `compensation_profiles`,
-`onboarding_invitations`.
+`identity_documents` (written by onboarding since Step 8: the encrypted
+document number and its uploaded file), `file_assets` (Step 8),
+`compensation_profiles`, `onboarding_invitations`.
 
 Devices & sessions: `user_devices`, `device_public_keys`,
 `refresh_token_families`, `otp_challenges`.
@@ -102,12 +102,46 @@ Payroll: `payroll_periods`, `payroll_items`, `payroll_adjustments`,
   recalculated, a crashed CALCULATING row, a finalized month without a
   snapshot).
 
+### Reports and onboarding (Step 8, migration `20261013180000_reports_onboarding`)
+
+- **`generated_reports`** keeps a report's background job and its files:
+  - `status` (`ReportStatus`: `QUEUED`, `RUNNING`, `READY`, `FAILED`;
+    default `READY` for reports generated before Step 8, which were
+    synchronous), `progress` (0-100), `idempotency_key`,
+    `error_code` / `error_message`, `started_at` / `finished_at`;
+  - `csv_storage_key` next to the PDF's `storage_key`, plus `pdf_sha256`,
+    `csv_sha256` (what `GET /reports/:id/verify` recomputes) and
+    `page_count`;
+  - `storage_key` and `sha256_hash` (the hash of the source data, printed
+    in the footer) are nullable, since a queued report has neither yet;
+  - new index (organization, generated_at) for the reports page.
+- **`file_assets`** (new): an uploaded file in private object storage.
+  - Columns: `purpose` (`FileAssetPurpose`: `IDENTITY_DOCUMENT`,
+    `PROFILE_PHOTO`), `storage_key` (unique), `content_type` (detected from
+    the content), `size_bytes`, `sha256` of the stored (metadata-stripped)
+    bytes, `scan_result` (the malware-scan hook: `NOT_SCANNED` until a
+    scanner is bound).
+  - The invitation it was uploaded with, and the worker profile once an
+    application uses it.
+  - Indexed by organization, invitation and worker profile. No file name
+    is stored.
+- **`identity_documents.file_asset_id`** (unique, `SET NULL`) replaces
+  `file_storage_key`, which held no data. `document_type` stays plain text:
+  `ISRAELI_ID`, `PALESTINIAN_ID` or `PASSPORT` (`GovernmentIdType`), so the
+  Palestinian ID needed no migration. The number itself is encrypted
+  (`ciphertext`, `iv`, `auth_tag`, `encryption_key_id`).
+- **`worker_profiles.profile_photo_asset_id`** (unique, `SET NULL`).
+- **`onboarding_invitations`:** `revoked_by` (a person's revocation; the
+  expiry sweep revokes without one, and those read as EXPIRED) and
+  `redeemed_worker_profile_id`. An invitation's status (`ACTIVE`, `USED`,
+  `EXPIRED`, `REVOKED`) is derived, never stored.
+
 Notifications: `notifications`, `notification_deliveries`.
 
 Platform: `audit_logs`, `idempotency_records`, `generated_reports`.
 
 Not present (deliberate scope cuts — see `IMPLEMENTATION_STATUS.md`):
-`file_assets`, `push_tokens`, `outbox_events`.
+`push_tokens`, `outbox_events`.
 
 ## Enum strategy
 

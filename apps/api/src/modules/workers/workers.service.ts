@@ -6,6 +6,7 @@ import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
+import { UUID_PATTERN } from "../../common/validation/patterns";
 import { serializeWorker } from "./worker-response.mapper";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { ApproveWorkerDto, RejectWorkerDto } from "./dto/approve-worker.dto";
@@ -67,10 +68,12 @@ export class WorkersService {
   }
 
   async approve(organizationId: string, workerProfileId: string, dto: ApproveWorkerDto, actor: AuthenticatedUser, correlationId: string) {
-    const wp = await this.prisma.workerProfile.findFirst({
-      where: { id: workerProfileId, organizationId },
-      include: { membership: { include: { user: true } } },
-    });
+    const wp = UUID_PATTERN.test(workerProfileId)
+      ? await this.prisma.workerProfile.findFirst({
+          where: { id: workerProfileId, organizationId },
+          include: { membership: { include: { user: true } } },
+        })
+      : null;
     if (!wp) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
     if (wp.membership.status !== AccountStatus.PENDING_APPROVAL) {
       throw new AppException(409, ErrorCodes.CONFLICT, "This worker is not pending approval.");
@@ -112,7 +115,7 @@ export class WorkersService {
   }
 
   async reject(organizationId: string, workerProfileId: string, dto: RejectWorkerDto, actor: AuthenticatedUser, correlationId: string) {
-    const wp = await this.prisma.workerProfile.findFirst({ where: { id: workerProfileId, organizationId } });
+    const wp = UUID_PATTERN.test(workerProfileId) ? await this.prisma.workerProfile.findFirst({ where: { id: workerProfileId, organizationId } }) : null;
     if (!wp) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
 
     await this.prisma.$transaction(async (tx) => {

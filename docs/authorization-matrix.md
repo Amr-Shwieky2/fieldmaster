@@ -160,6 +160,60 @@ its third role.
   reversing a forgotten-stamp deduction (Step 7), and a new calculation. The
   Owner reopens it with a reason to get a new working version.
 
+## Onboarding (Step 8)
+
+| Route | Permission | Owner | Field Manager | Worker |
+|---|---|---|---|---|
+| `POST /onboarding-invitations`, `GET /onboarding-invitations`, `DELETE /onboarding-invitations/:id` | `APPROVE_ONBOARDING` | ✅ (audited) | ✅ (audited) | 403 |
+| `GET /workers/pending-approval` | `APPROVE_ONBOARDING` | ✅ names and phones | ✅ names and phones | 403 |
+| `GET /workers/:id/onboarding-review` (ID number and bank details decrypted) | `VIEW_BANK_INFO` **(financial)** | ✅ (every view audited) | 403 | 403 |
+| `GET /file-assets/:id/view-url` (60 s signed URL of an ID document or photo) | `VIEW_BANK_INFO` **(financial)** | ✅ (every view audited) | 403 | 403 |
+| `POST /workers/:id/approve` (needs a compensation profile) | `APPROVE_ONBOARDING` + `MANAGE_COMPENSATION` **(financial)** | ✅ | 403 | 403 |
+| `POST /workers/:id/reject` (reason, not blank) | `APPROVE_ONBOARDING` | ✅ | ✅ | 403 |
+| `GET /onboarding/invitations/:token`, `POST …/:token/uploads`, `POST …/:token/redeem` | none (`@Public`): a usable link | ✅ | ✅ | ✅ |
+
+- **The public routes** need no session. Their only key is the link: one
+  guard checks it in constant time, and every unusable link (unknown,
+  malformed, used, expired, revoked) is the same 404. They are rate limited
+  per IP address and route.
+- **ID numbers and bank details** are only ever decrypted for the Owner's
+  review. They are not in any other response, log line, audit row or
+  notification, for any role, and not in the Owner's other responses
+  either. The leak scanner searches every GET response for the seeded
+  values; the onboarding tests capture the logs, audit rows and
+  notifications.
+- **The files themselves** are reachable only through the Owner's view URL.
+  Nothing returns a storage key.
+
+## Reports (Step 8)
+
+The routes carry no permission decorator: `report-access.ts` decides per
+report type and role, and a refusal is a 403 on the request.
+
+| Report | Owner | Field Manager | Worker |
+|---|---|---|---|
+| سجل حضور العامل (ledger) | financial copy | operational copy (separate template, no money) | their own ledger only, financial (their own pay) |
+| الحضور التشغيلي, مخالفات الموقع | operational (no money for anyone) | operational | 403 |
+| الساعات الإضافية, استدعاءات الطوارئ, نسيان التسجيل | financial copy | operational copy (forgotten stamps: counts, no amounts) | 403 |
+| الرواتب (from one stored payroll version) | financial | 403 | 403 |
+
+- **Two templates, not hidden sections:** each type with both copies has
+  its own loader and template per copy. The operational data has no money
+  fields at all, so there is nothing to hide (a unit test checks that the
+  two copies use different functions and that operational PDFs and CSVs
+  contain no ₪ and no amounts).
+- **Who sees a generated report:**
+  - in the list, the details, the download and the verify: an Owner, the
+    worker it is about, and whoever requested it;
+  - a requester who is neither an Owner nor its subject never sees a
+    financial copy (for example, one they requested as an Owner before
+    becoming a Field Manager);
+  - for anyone else every `/reports/:id*` route is a 404, so nothing tells
+    the report exists.
+- **Every request, download and verification is audited**, and so is the
+  generation (`REPORT_REQUESTED`, `REPORT_GENERATED`, `REPORT_DOWNLOADED`,
+  `REPORT_VERIFIED`).
+
 ## Defense in depth for financial data (spec section 6.2 / 23.5)
 
 A Field Manager must never see rates, earnings, deductions, or cost
@@ -187,10 +241,11 @@ figures. This is enforced independently at every layer, not once:
    two different message bodies from the same event: the Owner's includes
    an estimated cost (computed via the same `calculateShiftCompensation`
    payroll uses), the Field Manager's never does.
-5. **PDF reports** — `ReportsService` generates financial sections only
-   when the requester is an Owner or the report's subject worker; a Field
-   Manager's generated PDF has the same evidentiary content (timestamps,
-   GPS, approvals, summaries) minus every monetary figure.
+5. **PDF and CSV reports** (Step 8) — the financial copy of a report is
+   generated only for an Owner or the report's subject worker. A Field
+   Manager's copy comes from a separate loader and template without money
+   fields: the same evidence (timestamps, GPS, approvals, summaries) and
+   no monetary figure, in the PDF and in the CSV.
 6. **Frontend** — `apps/admin-web`'s `OwnerOnly` wrapper and role-aware nav
    hide financial routes/widgets client-side, but this is UX polish, not
    the security boundary — verified by

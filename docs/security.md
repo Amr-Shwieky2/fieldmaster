@@ -12,36 +12,92 @@
 - **XSS / output encoding**: React (admin-web) and NestJS's JSON
   serialization both encode by default; there is no `dangerouslySetInnerHTML`
   or raw HTML templating of user input anywhere in the app. PDF templates
-  (Playwright-rendered) escape all interpolated worker-supplied text.
+  (Playwright-rendered) escape all interpolated worker-supplied text (a
+  `markup` tag that only passes HTML it built itself). Report CSVs guard
+  every text cell against spreadsheet formula injection (a leading `=`, `+`,
+  `-`, `@`, tab or carriage return gets a `'`).
 - **Secure headers**: `helmet` is registered globally in `apps/api`.
 - **Rate limiting / brute force**: `@nestjs/throttler` global limit, plus a
   dedicated OTP request-rate limit and an OTP max-attempts counter
-  (`AuthService`).
+  (`AuthService`). The public onboarding routes have their own, lower limit
+  (Step 8, below).
 - **Session security**: refresh-token rotation with reuse detection
   (revokes the whole session family on reuse — see `api.md`), short-lived
   (15 min default) access tokens, Owner-triggered device revocation
   (`AuthService.revokeDevice`).
-- **Encryption at rest**: bank account details are envelope-encrypted
-  (AES-256-GCM) at the application layer (`EncryptionService`) — a local
-  key in development (`LOCAL_ENCRYPTION_KEY_BASE64`), real AWS KMS client
-  code for production (untested against a live AWS account here).
+- **Encryption at rest**: bank account details and identity-document
+  numbers (Step 8) are envelope-encrypted (AES-256-GCM) at the application
+  layer (`EncryptionService`) — a local key in development
+  (`LOCAL_ENCRYPTION_KEY_BASE64`), real AWS KMS client code for production
+  (untested against a live AWS account here).
 - **Encryption in transit**: TLS is a deployment-environment concern (the
   ALB/CloudFront layer in the Terraform module), not something the app
   itself terminates in this local-dev slice.
-- **Signed URLs**: PDF reports are uploaded to private S3/MinIO storage and
-  served via short-lived signed download URLs, never a public bucket path.
+- **Signed URLs**: PDF and CSV reports are uploaded to private S3/MinIO
+  storage and served via short-lived signed download URLs, never a public
+  bucket path. Identity documents and profile photos (Step 8) get a 60-second
+  inline URL, for an Owner only, and every view is audited.
 - **Idempotency**: see `api.md` — prevents duplicate-submission attacks on
   financially-relevant mutations (clock events, payroll calculation).
 
 ## What's explicitly not implemented
 
-Malware-scanning integration point, file-size/type validation (no file
-upload subsystem exists yet — see `technical-decisions.md`), CSRF
-protection (admin-web stores tokens in `localStorage`, not an httpOnly
+CSRF protection (admin-web stores tokens in `localStorage`, not an httpOnly
 cookie, so CSRF isn't the relevant threat model here — see
 `technical-decisions.md` for the trade-off), device attestation (Play
 Integrity/App Attest), and a transactional outbox for guaranteed-once event
-delivery.
+delivery. A real malware scanner is not bound yet: the scan hook exists
+(Step 8, below) and records `NOT_SCANNED` until a deployment provides one.
+
+## Uploads and the public onboarding page (Step 8)
+
+- **Invitation links:**
+  - A token is 32 random bytes; only its SHA-256 is stored, and the raw
+    token is returned once, to the manager who created the link.
+  - The three public routes run one guard before anything reads the body
+    (in particular before an upload is buffered). It always hashes the
+    input, looks it up by hash and compares the hashes with
+    `timingSafeEqual`, also when nothing was found.
+  - Unknown, malformed, used, expired and revoked links all get the same
+    `404 INVITATION_INVALID_OR_EXPIRED` with no details.
+  - The public routes are limited per IP address and route
+    (`ONBOARDING_RATE_LIMIT` requests per minute, default 10), and a link
+    can store at most 20 files.
+- **Upload checks:**
+  - The type comes from the file's first bytes (JPEG, PNG or `%PDF-`),
+    never from its name or the browser's claim, and must be allowed for
+    the purpose (an ID document: JPEG, PNG or PDF; a photo: JPEG or PNG).
+  - At most 10 MB; multer stops reading a larger body early, and the
+    answer is `413 FILE_TOO_LARGE`.
+  - Files live only in memory until they are stored.
+- **Metadata:**
+  - JPEG: Exif/XMP (APP1), IPTC (APP13), comments and the MPF index are
+    removed.
+  - PNG: text chunks, eXIf and tIME are removed.
+  - Anything after the end-of-image marker is dropped. The pixels are
+    unchanged.
+  - A file that only starts like an image is refused.
+- **Malware-scan hook:** every file passes the `MALWARE_SCANNER` provider
+  before it is stored. The default (development) binding records
+  `NOT_SCANNED`; an INFECTED verdict is `422 FILE_REJECTED` and nothing is
+  stored.
+- **Storage:** private bucket under
+  `onboarding/<organization>/<invitation>/<file>`, with the SHA-256 of the
+  stored bytes. File names are never stored or logged.
+- **The Owner's review:**
+  - `GET /workers/:id/onboarding-review` (ID number and bank details
+    decrypted) and `GET /file-assets/:id/view-url` need `VIEW_BANK_INFO`,
+    so they are Owner only.
+  - Both answer `Cache-Control: no-store`.
+  - Each call writes an audit row (`WORKER_SENSITIVE_DATA_VIEWED`,
+    `FILE_ASSET_VIEWED`) without the values.
+- **What is proved by tests:**
+  - `onboarding.e2e-spec.ts` captures the Nest logger, the console and
+    stdout/stderr, plus every audit row and notification. It asserts that
+    no ID number, account number, branch-and-account, invitation token,
+    uploaded file name or photo metadata appears in them.
+  - The leak scanner (below) searches every non-Owner GET response for the
+    same values.
 
 ## Sensitive logging
 
@@ -50,8 +106,11 @@ ever logged by the `ConsoleOtpProvider` (development adapter, explicitly
 designed to do this so local dev works without a real SMS provider) —
 production's `TwilioVerifyProvider` never logs the code, since Twilio
 Verify never returns it to the caller in the first place. Access/refresh
-tokens, bank account numbers, and government identifiers are never logged;
-`EncryptionService` never logs raw key material.
+tokens, invitation tokens, bank account numbers, government identifiers and
+uploaded file names are never logged (Step 8: proved by the onboarding
+tests, which capture every log line); `EncryptionService` never logs raw key
+material. Before Step 8 the invitation-creation path logged the raw token;
+that log line is gone.
 
 ## Financial isolation — automated proof, not just a claim
 
@@ -67,7 +126,7 @@ real running API and database, that:
   JSON body.
 
 `financial-leak-scanner.e2e-spec.ts` covers the whole surface rather than
-chosen routes: it signs in (dev login) as a Field Manager and as a Worker,
+chosen routes (and, since Step 8, identity documents as well as money): it signs in (dev login) as a Field Manager and as a Worker,
 calls every GET route discovered from Nest's route metadata with real seeded
 ids, and fails with the route and JSON path of every money or bank key
 (`*Agorot`, `*rate`, budget, bank, account number, branch, net/gross pay,
@@ -106,6 +165,26 @@ drill-down, the calculation run, and `GET /payroll-statements/me`.
   statement is the Worker's own item and that the response contains no other
   worker's id; the same month seen by a worker without pay in it has no
   statement at all.
+
+Step 8 added 6 GET routes (56 in all):
+- the invitation list and the public join page;
+- the Owner-only onboarding review and file view URL;
+- a report's details and its integrity check.
+
+The scanner now also does three new things:
+- **Searches for values, not only keys.** Its seed encrypts an ID number
+  and bank details for the Worker, and submits an application with a
+  Palestinian ID through the public route. It then searches every
+  response, for every role, for those ID numbers, account numbers, account
+  holders and both invitation tokens (and their hashes), under any key.
+- **Checks the Owner too.** In the Owner's own responses these values may
+  appear only in `GET /workers/:id/onboarding-review`.
+- **Flags two more key names:** `idnumber` and `accountholder`.
+
+The Field Manager's pass reads the pending application, the invitation
+list and an application notification, so the search has something to find.
+A report the Temporary Supervisor may not see answers 404 on all three
+`/reports/:id*` routes.
 
 **Finalized payroll cannot be changed, even directly in the database (Step
 7).** Triggers refuse any UPDATE or DELETE of a FINALIZED version, any

@@ -203,6 +203,7 @@ export type ReportStatus = (typeof ReportStatus)[keyof typeof ReportStatus];
 /** Step 8: the identity document a worker gives when joining. */
 export const GovernmentIdType = {
   ISRAELI_ID: "ISRAELI_ID",
+  PALESTINIAN_ID: "PALESTINIAN_ID",
   PASSPORT: "PASSPORT",
 } as const;
 export type GovernmentIdType = (typeof GovernmentIdType)[keyof typeof GovernmentIdType];

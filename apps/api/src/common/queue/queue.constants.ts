@@ -4,6 +4,8 @@ export const QUEUE_NAMES = {
   LONG_OPEN_ENTRIES: "long-open-entries",
   /** Step 7: one job per payroll calculation run (processor in PayrollModule). */
   PAYROLL_CALCULATION: "payroll-calculation",
+  /** Step 8: one job per generated report, PDF + CSV (processor in ReportsModule). */
+  REPORT_GENERATION: "report-generation",
 } as const;
 
 /**

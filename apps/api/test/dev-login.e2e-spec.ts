@@ -64,6 +64,9 @@ const EXPECTED_DECORATED_FINANCIAL_ROUTES = [
   // Step 5: Owner-only cost estimates of the attendance screens.
   "GET /api/v1/time-entries/:id/estimated-cost",
   "GET /api/v1/workers/:id/estimated-earnings",
+  // Step 8: the decrypted onboarding application (ID number, bank details) and identity-document view URLs.
+  "GET /api/v1/workers/:id/onboarding-review",
+  "GET /api/v1/file-assets/:id/view-url",
 ].sort();
 
 /**

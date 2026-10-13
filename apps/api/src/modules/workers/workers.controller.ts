@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Header, Param, Post } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -6,6 +6,7 @@ import { RequirePermissions } from "../../common/decorators/require-permissions.
 import { Permission } from "../../common/auth/permissions";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { WorkersService } from "./workers.service";
+import { OnboardingReviewService } from "./onboarding-review.service";
 import { ApproveWorkerDto, RejectWorkerDto } from "./dto/approve-worker.dto";
 import { CreateCompensationProfileDto } from "./dto/create-compensation-profile.dto";
 
@@ -13,7 +14,10 @@ import { CreateCompensationProfileDto } from "./dto/create-compensation-profile.
 @ApiTags("workers")
 @Controller("workers")
 export class WorkersController {
-  constructor(private readonly workersService: WorkersService) {}
+  constructor(
+    private readonly workersService: WorkersService,
+    private readonly onboardingReviewService: OnboardingReviewService,
+  ) {}
 
   @Get()
   @RequirePermissions(Permission.MANAGE_WORKERS)
@@ -31,6 +35,14 @@ export class WorkersController {
   @RequirePermissions(Permission.MANAGE_WORKERS)
   async getById(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.workersService.getById(user.organizationId, id, user);
+  }
+
+  /** Owner only (a financial permission): the application with its ID number and bank details decrypted; every view is audited. */
+  @Get(":id/onboarding-review")
+  @RequirePermissions(Permission.VIEW_BANK_INFO)
+  @Header("Cache-Control", "no-store")
+  async onboardingReview(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    return this.onboardingReviewService.getReview(user.organizationId, id, user, correlationId);
   }
 
   @Post(":id/approve")

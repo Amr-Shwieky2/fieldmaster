@@ -45,6 +45,19 @@ title/body text stay in English.
 
 Hourly workers are seeded at ₪55/hour, daily workers at ₪450/day.
 
+### A pending application (Step 8)
+
+| Name | Phone | ID type | Notes |
+|---|---|---|---|
+| ليث منصور | `+972599123456` | هوية فلسطينية | Applied through an invitation link: ID number, bank details and an ID image (a plain drawing, no real data) are waiting for an Owner's review on the workers page. Cannot sign in until approved. |
+
+The seed also creates onboarding invitations in every state (active with a
+prefilled phone, used, expired, revoked). Only a token's hash is stored, so
+their links cannot be opened: create a new invitation («دعوة عامل») on the
+workers page to get a working `/join/...` link. The ID image is stored in
+the local MinIO; if object storage is not running, the application is
+seeded without it.
+
 ## Two ways to log in
 
 ### 1. Test login (development / staging only)

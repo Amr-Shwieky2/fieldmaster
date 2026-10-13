@@ -3,7 +3,7 @@
 ## Running the suites
 
 ```bash
-docker compose up -d                  # tests need a real Postgres+PostGIS+Redis
+docker compose up -d                  # tests need a real Postgres+PostGIS, Redis and MinIO
 pnpm db:migrate                       # applies migrations to both fieldmaster and fieldmaster_test
 pnpm test                             # unit + component tests across every package
 pnpm --filter @fieldmaster/api test:e2e   # integration tests against a real database
@@ -11,14 +11,18 @@ pnpm --filter @fieldmaster/api test:e2e   # integration tests against a real dat
 
 `pnpm test` (root) runs, in parallel via Turborepo:
 
-- `packages/shared-validation` — 35 pure-function unit tests (Jest)
-- `apps/api` — 25 unit tests (Jest: RBAC, location validation, app
-  environment, notification money stripping)
-- `packages/i18n` — 69 tests (Vitest): the shared Arabic formatter (including a
+- `packages/shared-validation` — 103 pure-function unit tests (Jest),
+  including the identity-document rules of Step 8 (Israeli check digit, the
+  Palestinian ID's 9 digits, all zeros refused for every type)
+- `apps/api` — 99 unit tests (Jest: RBAC, location validation, app
+  environment, notification money stripping; Step 8: report access, filters,
+  hashing, CSV and templates, PDF rendering; upload type detection, metadata
+  stripping, invitation tokens and status)
+- `packages/i18n` — 82 tests (Vitest): the shared Arabic formatter (including a
   check that its built-in Israel time-zone rules match Intl for every hour of
   2024-2030), error-code mapping, enum labels, ICU validity of the shared
   messages and the translation-check library
-- `apps/admin-web` — 172 tests (Vitest + React Testing Library), all in
+- `apps/admin-web` — 697 tests (Vitest + React Testing Library), all in
   Arabic: every page, notification text, the admin messages and the
   financial-isolation guards
 - `apps/mobile` — 131 tests (Jest + jest-expo + React Native Testing Library),
@@ -28,8 +32,11 @@ pnpm --filter @fieldmaster/api test:e2e   # integration tests against a real dat
   arrow
 
 `apps/api`'s `test:e2e` (not part of `pnpm test` — it's slower and needs a
-live database) runs 39 integration tests (Jest + Supertest) against a real
-NestJS app instance and a dedicated `fieldmaster_test` Postgres database.
+live database) runs 148 integration tests (Jest + Supertest) against a real
+NestJS app instance, a dedicated `fieldmaster_test` Postgres database, Redis
+and MinIO (the upload and report tests store real files; CI starts a MinIO
+container for them). Run it with the machine awake: a sleep in the middle
+stalls the jobs and skews Docker's clock (MinIO then refuses signed requests).
 
 ## What's covered, by layer
 
@@ -77,13 +84,32 @@ Against a real running NestJS app + Postgres, covering (see
   counts, manual adjustments, the worker's own statements and the Owner
   dashboard. `test/payroll-helpers.ts` starts a calculation and waits for
   its job.
+- **Reports (Step 8, `reports.e2e-spec.ts`, 15 tests):** every type as
+  Owner, Field Manager and Worker. The PDF text is read in a child process
+  and must contain the Arabic labels, the report ID and the data hash; a
+  Field Manager's copy has no ₪. The CSV has a BOM, Arabic headers and
+  Western digits. Also tested: the same Idempotency-Key gives the same
+  report, a failed job, who sees which report (404 for the rest), and verify
+  detecting a file changed after generation.
+- **Onboarding (Step 8, `onboarding.e2e-spec.ts`, 13 tests):**
+  - the full flow (invitation, public page, uploads, application, Owner
+    review, approval, sign-in, dev quick login), and a Palestinian ID;
+  - expired, used, revoked, unknown and malformed links (one 404);
+  - files typed by content; oversized, wrong-type and malware-hook refusals,
+    with nothing stored;
+  - rate limits; audit rows without values;
+  - every log line, audit row and notification captured, and searched for
+    the ID numbers, bank details, tokens, file names and photo metadata.
+- **The leak scanner (Step 8):** 56 GET routes. It now also searches every
+  response for the seeded ID numbers, bank details and invitation tokens,
+  as values in any string, not only as keys.
 - **Offline sync** (5 tests, added this pass): full offline clock-in/out
   round trip using genuine Ed25519 signatures and the device timestamp as
   the authoritative business time; invalid-signature rejection creating no
   attendance record; unregistered-device rejection; duplicate-submission
   detection; Owner-revoked-key rejection
 
-### Admin web (`apps/admin-web`, 172 tests)
+### Admin web (`apps/admin-web`, 697 tests)
 
 The app is Arabic only, so every test renders the real `ar.json`
 (`src/test/render-with-intl.tsx`). Each page has tests for its content,
@@ -112,13 +138,13 @@ auth hook.
   database and a real Metro bundle build proving the mobile app's new
   dependencies resolve correctly.
 - **Security-specific test suite** (spec 34.4): cross-organization access,
-  expired/reused onboarding tokens, replayed clock events, and mock-location
-  detection are exercised indirectly by the integration tests above, but
-  there's no dedicated `security.e2e-spec.ts` enumerating every attack
-  listed in the spec.
-- **PDF report assertions**: PDF generation is implemented and was manually
-  verified (a real PDF generated against seeded data, downloaded via its
-  signed URL), but no automated test asserts on the PDF's content/hash.
+  replayed clock events and mock-location detection are exercised by the
+  integration tests above (expired, reused and revoked onboarding tokens
+  have their own tests since Step 8), but there's no dedicated
+  `security.e2e-spec.ts` enumerating every attack listed in the spec.
+- **Browser checks** of Step 8 (every report type as Owner and Field
+  Manager, the onboarding at phone size) were driven with headless
+  Playwright scripts against the dev servers, not a committed suite.
 
 ## Database setup for tests
 

@@ -4,12 +4,14 @@
  * organization, Owners/Field Managers/Workers, projects/sites/geofences,
  * a mix of shift types, attendance in every status, forgotten-stamp
  * infractions crossing the two-strike threshold, one emergency call-out,
- * a Temporary Supervisor assignment, and one finalized payroll period.
+ * a Temporary Supervisor assignment, one finalized payroll period, and
+ * onboarding invitations in every state with one pending application.
  *
  * Run with: pnpm --filter @fieldmaster/api db:seed
  */
 import { Prisma, PrismaClient } from "@prisma/client";
 import { createHash, randomBytes } from "node:crypto";
+import { deflateSync } from "node:zlib";
 import { v7 as uuidv7 } from "uuid";
 import {
   AccountStatus,
@@ -20,6 +22,8 @@ import {
   CorrectionReason,
   EmergencyAuthorizationSource,
   EventOrigin,
+  FileAssetPurpose,
+  GovernmentIdType,
   LocationValidationStatus,
   NotificationType,
   OrgRole,
@@ -27,6 +31,7 @@ import {
   PayrollAdjustmentType,
   PayrollCalculationState,
   PayrollPeriodStatus,
+  PRIVACY_NOTICE_VERSION,
   ShiftStatus,
   ShiftType,
   TaskCategory,
@@ -44,6 +49,7 @@ import {
 } from "@fieldmaster/shared-validation";
 
 import type { PrismaService } from "../src/common/prisma/prisma.service";
+import { FilesService } from "../src/common/files/files.service";
 import { PayrollInputsService } from "../src/modules/payroll/payroll-inputs.service";
 import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION } from "../src/modules/payroll/payroll-snapshot";
 
@@ -99,6 +105,47 @@ function encryptBankInfo(plaintext: string) {
   const cipher = createCipheriv("aes-256-gcm", LOCAL_ENCRYPTION_KEY, iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   return { ciphertext, iv, authTag: cipher.getAuthTag(), encryptionKeyId: "local:dev-key-v1" };
+}
+
+/** A plain drawing of an ID card (no real data, no metadata) as a PNG: the seeded applicant's identity document. */
+function sampleIdCardPng(): Buffer {
+  const width = 480;
+  const height = 300;
+  const stride = width * 3 + 1; // a filter byte (0) before each row of RGB pixels
+  const pixels = Buffer.alloc(height * stride);
+  const fill = (x0: number, y0: number, x1: number, y1: number, rgb: [number, number, number]) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) pixels.set(rgb, y * stride + 1 + x * 3);
+  };
+  fill(0, 0, width, height, [219, 234, 254]);
+  fill(0, 0, width, 52, [30, 58, 138]);
+  fill(330, 82, 450, 232, [148, 163, 184]); // the photo, on the right of a right-to-left card
+  for (let line = 0; line < 5; line++) fill(45 + line * 22, 92 + line * 30, 300, 102 + line * 30, [51, 65, 85]);
+
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const chunk = (type: string, data: Buffer) => {
+    const typeAndData = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    let crc = 0xffffffff;
+    for (const byte of typeAndData) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+    return Buffer.concat([length, typeAndData, checksum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8); // 8-bit RGB, no interlace
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(pixels)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
 async function main() {
@@ -399,6 +446,36 @@ async function main() {
   });
   await prisma.dailySummary.create({ data: { id: id(), timeEntryId: pendingEntry.id, text: "عمل إضافي لاستبدال لافتات مرورية تالفة.", taskCategory: TaskCategory.TRAFFIC_SIGN } });
 
+  // Clock-ins the server refused (evidence since Step 5; the site violations report since Step 8), with the values
+  // the API records: the pending entry's worker tried from ~400 m outside the geofence, then with a weak GPS fix,
+  // before clocking in; another worker's phone clock was 9 minutes behind the server.
+  const pendingSite = sites[7 % sites.length];
+  const deviationShift = standardShifts[2];
+  await prisma.rejectedClockAttempt.createMany({
+    data: [
+      {
+        id: id(), organizationId: org.id, workerProfileId: workers[7].profile.id, shiftId: pendingShift.id, timeEntryId: pendingEntry.id,
+        eventType: ClockEventType.CLOCK_IN, origin: EventOrigin.ONLINE, code: "GEOFENCE_OUTSIDE_ALLOWED_RADIUS",
+        deviceTimestamp: new Date(pendingClockIn.getTime() - 6 * 60_000), serverReceivedAt: new Date(pendingClockIn.getTime() - 6 * 60_000), deviationSeconds: 2,
+        latitude: pendingSite.site.latitude + 0.0036, longitude: pendingSite.site.longitude, accuracyMeters: 12,
+        distanceMeters: 401, allowedRadiusMeters: pendingSite.geofence.radiusMeters, requiredAccuracyMeters: pendingSite.geofence.minAccuracyMeters,
+      },
+      {
+        id: id(), organizationId: org.id, workerProfileId: workers[7].profile.id, shiftId: pendingShift.id, timeEntryId: pendingEntry.id,
+        eventType: ClockEventType.CLOCK_IN, origin: EventOrigin.ONLINE, code: "GPS_ACCURACY_TOO_LOW",
+        deviceTimestamp: new Date(pendingClockIn.getTime() - 3 * 60_000), serverReceivedAt: new Date(pendingClockIn.getTime() - 3 * 60_000), deviationSeconds: 1,
+        latitude: pendingSite.site.latitude + 0.0004, longitude: pendingSite.site.longitude, accuracyMeters: 120,
+        distanceMeters: 45, allowedRadiusMeters: pendingSite.geofence.radiusMeters, requiredAccuracyMeters: pendingSite.geofence.minAccuracyMeters,
+      },
+      {
+        id: id(), organizationId: org.id, workerProfileId: workers[2 % workers.length].profile.id, shiftId: deviationShift.id,
+        eventType: ClockEventType.CLOCK_IN, origin: EventOrigin.ONLINE, code: "DEVICE_TIME_DEVIATION_EXCEEDED",
+        deviceTimestamp: new Date(deviationShift.scheduledStart.getTime() - 13 * 60_000), serverReceivedAt: new Date(deviationShift.scheduledStart.getTime() - 4 * 60_000),
+        deviationSeconds: 540, latitude: sites[2 % sites.length].site.latitude, longitude: sites[2 % sites.length].site.longitude, accuracyMeters: 10,
+      },
+    ],
+  });
+
   // Rejected entry
   const rejectedShift = standardShifts[0];
   const rejectedClockIn = daysAgo(5);
@@ -579,6 +656,68 @@ async function main() {
     ],
   });
 
+  // A pending application, as the public join page leaves it: the Owner's review page
+  // (/workers/<id>/review) shows the decrypted Palestinian ID number, bank details and ID image.
+  console.log("Creating a pending onboarding application...");
+  const applicantName = "ليث منصور";
+  const applicantUser = await prisma.user.create({
+    data: { id: id(), phoneNumber: "+972599123456", fullLegalName: applicantName, preferredName: "ليث", preferredLanguage: "ar", status: AccountStatus.PENDING_APPROVAL },
+  });
+  const applicantMembership = await prisma.organizationMembership.create({
+    data: { id: id(), organizationId: org.id, userId: applicantUser.id, role: OrgRole.WORKER, isTimeTrackable: true, status: AccountStatus.PENDING_APPROVAL },
+  });
+  const appliedAt = new Date(Date.now() - 3 * hourMs);
+  const applicantProfile = await prisma.workerProfile.create({
+    data: {
+      id: id(),
+      membershipId: applicantMembership.id,
+      organizationId: org.id,
+      governmentIdType: GovernmentIdType.PALESTINIAN_ID,
+      consentAcceptedAt: appliedAt,
+      privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
+    },
+  });
+  const applicantInvitationId = id();
+  await prisma.onboardingInvitation.create({
+    data: {
+      id: applicantInvitationId, organizationId: org.id, tokenHash: seedTokenHash(), prefilledPhoneNumber: applicantUser.phoneNumber,
+      expiresAt: new Date(Date.now() + 60 * hourMs), createdBy: owner1User.id, usedAt: appliedAt, redeemedWorkerProfileId: applicantProfile.id,
+    },
+  });
+  // The ID image goes to the local MinIO (docker compose); without it the application is still seeded, without an image.
+  let identityFileAssetId: string | null = null;
+  try {
+    const files = new FilesService();
+    await files.onModuleInit();
+    const image = sampleIdCardPng();
+    const fileAssetId = id();
+    const storageKey = `onboarding/${org.id}/${applicantInvitationId}/${fileAssetId}`;
+    await files.putObject(storageKey, image, "image/png");
+    await prisma.fileAsset.create({
+      data: {
+        id: fileAssetId, organizationId: org.id, purpose: FileAssetPurpose.IDENTITY_DOCUMENT, storageKey, contentType: "image/png",
+        sizeBytes: image.length, sha256: createHash("sha256").update(image).digest("hex"), scanResult: "NOT_SCANNED",
+        invitationId: applicantInvitationId, workerProfileId: applicantProfile.id,
+      },
+    });
+    identityFileAssetId = fileAssetId;
+  } catch (error) {
+    console.warn(`Object storage unreachable (${(error as Error).message}): the pending application is seeded without its ID image.`);
+  }
+  // Encrypted with the same local key and format as EncryptionService (and the bank details above).
+  const applicantIdNumber = encryptBankInfo("412345678");
+  await prisma.identityDocument.create({
+    data: {
+      id: id(), workerProfileId: applicantProfile.id, documentType: GovernmentIdType.PALESTINIAN_ID, fileAssetId: identityFileAssetId,
+      ciphertext: applicantIdNumber.ciphertext, iv: applicantIdNumber.iv, authTag: applicantIdNumber.authTag, encryptionKeyId: applicantIdNumber.encryptionKeyId,
+    },
+  });
+  const applicantBank = encryptBankInfo(JSON.stringify({ bankName: "بنك فلسطين", branchNumber: "455", accountNumber: "300123456", accountHolderName: applicantName }));
+  await prisma.encryptedBankAccount.create({
+    data: { id: id(), workerProfileId: applicantProfile.id, ciphertext: applicantBank.ciphertext, iv: applicantBank.iv, authTag: applicantBank.authTag, encryptionKeyId: applicantBank.encryptionKeyId },
+  });
+  await recordAudit(org.id, applicantUser.id, "ONBOARDING_SUBMITTED", "WorkerProfile", applicantProfile.id);
+
   // ── Notifications ─────────────────────────────────────────────────────
   // Same shape as the API writes them: English title/body (still read as-is
   // by the mobile app) plus data_json with the raw values the admin web
@@ -608,6 +747,18 @@ async function main() {
     await prisma.notification.create({
       data: { id: id(), organizationId: org.id, recipientUserId, type, title, body, dataJson: data, ...options },
     });
+  }
+
+  // The pending application: Owners are told (names only, never an ID number or bank detail).
+  for (const owner of [owner1User, owner2User]) {
+    await seedNotification(
+      owner.id,
+      "ONBOARDING_SUBMITTED",
+      "New worker application",
+      `${applicantName} submitted an onboarding application awaiting your review.`,
+      { workerProfileId: applicantProfile.id, workerName: applicantName },
+      { createdAt: appliedAt },
+    );
   }
 
   // Emergency call-out ended: Owners see the estimated cost, Field Managers do not.

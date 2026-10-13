@@ -61,7 +61,8 @@ export function arabicOnlyProblems(flat, allowed = NON_ARABIC_ALLOWED) {
 /**
  * Error codes the API can send, read from its source: the `ErrorCodes`
  * object, string codes passed straight to `new AppException(status, "CODE", ...)`,
- * and the codes the exception filter assigns (`code: ... "CODE" ...`).
+ * and the codes the exception filter assigns (`code: ... "CODE" ...`, also
+ * when the value is a ternary chain formatted over several lines).
  */
 export function apiErrorCodes(sources) {
   const codes = new Set();
@@ -69,9 +70,15 @@ export function apiErrorCodes(sources) {
     const block = /export const ErrorCodes = \{([\s\S]*?)\}/.exec(source);
     if (block) for (const match of block[1].matchAll(/:\s*"([A-Z][A-Z0-9_]+)"/g)) codes.add(match[1]);
     for (const match of source.matchAll(/new AppException\(\s*[^,()]+,\s*"([A-Z][A-Z0-9_]+)"/g)) codes.add(match[1]);
-    for (const line of source.split("\n")) {
-      if (!/^\s*code:/.test(line)) continue;
-      for (const match of line.matchAll(/"([A-Z][A-Z0-9_]+)"/g)) codes.add(match[1]);
+    const lines = source.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^\s*code:/.test(lines[i])) continue;
+      let value = lines[i];
+      // `code:` alone on its line: the value starts on the next one ...
+      if (/^\s*code:\s*$/.test(value) && i + 1 < lines.length) value += lines[++i];
+      // ... and a formatted ternary continues on lines starting with `?` or `:`.
+      while (i + 1 < lines.length && /^\s*[?:]/.test(lines[i + 1])) value += lines[++i];
+      for (const match of value.matchAll(/"([A-Z][A-Z0-9_]+)"/g)) codes.add(match[1]);
     }
   }
   return [...codes].sort();
