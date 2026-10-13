@@ -29,6 +29,7 @@ import { OfflineSyncModule } from "./modules/offline-sync/offline-sync.module";
 import { HealthModule } from "./modules/health/health.module";
 import { DevToolsModule } from "./modules/dev-tools/dev-tools.module";
 import { OperationsModule } from "./modules/operations/operations.module";
+import { AttachmentsModule } from "./modules/attachments/attachments.module";
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { OperationsModule } from "./modules/operations/operations.module";
     HealthModule,
     DevToolsModule,
     OperationsModule,
+    AttachmentsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

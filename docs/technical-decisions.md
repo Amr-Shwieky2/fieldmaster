@@ -1568,3 +1568,203 @@ default).
 - **An ID document shown in a new tab:** the tab is opened during the
   click, cut off from the page (`opener = null`), then sent to the URL. It
   is closed again if the API refuses.
+
+## Step 9: the mobile worker app
+
+The worker's app in full (home, shift details with a map, clock-in/out with
+photos and a voice summary, emergencies, history, salary, notifications, the
+temporary supervisor, account states), its device security, and the small
+API additions it needs. The schema change is one additive migration,
+`20261014090000_mobile_worker_app`.
+
+### Photos and voice notes: uploaded first, claimed by the clock event
+
+- **Chosen:** the app uploads each file with `POST /attachments` (private
+  storage, the Step 8 checks: type by content, 10 MB, image metadata
+  removed, the malware-scan hook) and sends the ids with the clock-in or
+  clock-out.
+  - The clock event claims them in its own transaction with a conditional
+    update ("this worker's, not attached yet"), so a file is never on two
+    entries and a race loses with `UPLOAD_NOT_FOUND`.
+  - Until it is claimed, a file belongs to the uploading worker. At most 50
+    unattached uploads per worker bound what a stolen session could store.
+- **Not chosen: files inside the clock request** (multipart clock events).
+  A large photo would hold the clock event — and its server time — hostage
+  to a slow upload, and the existing JSON endpoints, idempotency and
+  offline signing would all change.
+- **Offline:** files need the network. An offline clock-out takes a typed
+  summary only; the offline queue never holds photos or audio.
+
+### Voice summaries: a transcription interface, the worker has the last word
+
+- `TranscriptionService` is an interface behind an injection token:
+  - **`mock`** (development, staging, tests) returns a fixed Arabic
+    sentence; it is refused when `APP_ENV=production`;
+  - **`none`** (the production default) answers `503
+    TRANSCRIPTION_UNAVAILABLE`, and the app asks for a typed summary;
+  - a real provider is a new adapter.
+- The worker sees the transcript and edits it before sending. The summary
+  stored is what was sent; the raw transcript is kept beside it.
+- Transcripts are never logged.
+
+### Mock location: three states, never "certain" on iOS
+
+- The phone reports `DETECTED`, `NOT_DETECTED` (Android's `mocked` flag) or
+  `UNAVAILABLE` (iOS and the web: the platform cannot tell).
+  - DETECTED is the existing mock-location refusal (no rule changed).
+  - UNAVAILABLE never refuses and is never shown as "verified".
+- Simple movement heuristics (an impossible speed between fixes, zero
+  accuracy, a frozen position) travel as `locationSignals`. They are
+  recorded for review, never a refusal on their own.
+- Offline events may carry `mockLocationState` inside the signed payload.
+  An event without it canonicalizes exactly as before, so old signatures
+  still verify.
+
+### Push: Expo's service, Arabic text, ids only
+
+- **Chosen:** Expo's push service (`PUSH_PROVIDER=expo`) behind the
+  existing push adapter; the default `log` sends nothing.
+  - One BullMQ job per notification, so a clock-in never waits for
+    delivery.
+  - Each outcome is a `notification_deliveries` row. An unregistered
+    device's token is cleared.
+  - The member's own preferences decide push per type; in-app
+    notifications are always kept.
+- **Not chosen: Firebase Admin directly.** It would need two credential
+  sets (APNs and FCM) on the API; Expo's service holds them for the Expo
+  project.
+- **Content:** the notification is stored with English text for the
+  admin web's own rendering. The phone shows the push text as is, so it is
+  Arabic: the type's shared label and a generic «عرض التفاصيل».
+- **Payload:** only ids for the deep link (`timeEntryId`, `shiftId`, …).
+  Never another person's name, and never an amount (a lock screen is not
+  private).
+
+### Account states are told only to someone who proved the phone number
+
+Requesting a code and entering a wrong code look the same for every
+number. Only after a correct code does an account without an active
+membership learn why: `ACCOUNT_PENDING_APPROVAL`, `ACCOUNT_SUSPENDED` or
+`ACCOUNT_REJECTED`. The app then shows a clear Arabic screen and nothing
+else. A session that is suspended while in use keeps today's answer (`401`);
+the app learns the state at its next sign-in.
+
+### A revoked device key needs a new sign-in
+
+- An Owner's revocation marks the key: offline events signed with it are
+  rejected with `DEVICE_KEY_REVOKED` (a key that was never registered keeps
+  `DEVICE_KEY_NOT_REGISTERED`). The app then clears its queue state, its
+  key and its session.
+- A new key for that device is accepted only from a session created after
+  the revocation. A stolen session from before it cannot re-enable the
+  device, even through a token refresh.
+
+### The worker's own pay: two routes, own data only
+
+- `GET /time-entries/:id/my-pay` answers for the caller's own entry only;
+  anyone else's is 404. A month with a finalized version answers from that
+  version's stored per-entry results (`finalized: true`); otherwise the
+  same engine with the profile in effect that day. No amount is given
+  before approval.
+- `GET /payroll-statements/me/current` is the open month as an estimate,
+  from approved entries (pending ones counted, not paid). Once the month
+  is finalized it answers 409, and the month comes from
+  `/payroll-statements/me`, i.e. only from the finalized version.
+- Both are listed in the leak scanner as the only Worker-own-money
+  exceptions besides Step 7's two, with own-data checks.
+
+### A worker's shift view without co-workers
+
+Before Step 9, a worker's `GET /shifts/:id` carried every assignment with
+the co-worker's user row: name and phone number. A worker now gets only
+their own assignment, on the list and the detail. The leak scanner checks
+no co-worker's profile id, phone or name is in either. Managers and the
+temporary supervisor's own view are unchanged.
+
+### End-to-end tests use one connection per request
+
+Supertest starts and stops a listener on the same server object for each
+request, and since Node 19 client connections are kept alive by default.
+Twice (in Step 8 and in Step 9, on two different POST routes) a request
+came back with a 200 it could not have produced. Neither could be
+reproduced in a dozen runs. A response read on a reused connection is the
+likely cause, though it is not proven. `test/env.setup.js` turns
+keep-alive off for the tests' client, which rules that cause out; the
+API's own answers are untouched.
+
+### The offline queue: tweetnacl `secretbox`, not SQLCipher
+
+- **Chosen:** the queue stays one JSON document in AsyncStorage, sealed with
+  tweetnacl `secretbox` (XSalsa20-Poly1305) under a random 32-byte key kept
+  only in the Keychain/Keystore, with a fresh nonce on every write.
+  - Tweetnacl is the audited library the app already uses for the Ed25519
+    event signatures, so the same code runs on Hermes, the web and Jest.
+  - The queue is small (the waiting events plus at most 100 resolved
+    ones), so re-sealing it on each change is cheap.
+- **Not chosen: SQLCipher (expo-sqlite).** It needs a config plugin and a
+  custom native build, so it would not run in Expo Go (how the app is first
+  tried on a phone). expo-sqlite's web backend needs cross-origin isolation
+  headers the web stand-in does not have, and a database adds nothing a
+  sealed document does not do here.
+- **Failure handling:**
+  - Tampered bytes or a wrong key: the bytes are moved aside and the worker
+    is told.
+  - A missing key: the unreadable records are dropped, and the worker is
+    told how many.
+  - A Keychain that is momentarily unreadable: nothing changes and it is
+    retried.
+
+### Maps: Leaflet in a WebView, no API key
+
+- **Chosen:** the shift map (and the supervisor's) is Leaflet with
+  OpenStreetMap tiles, in a WebView on the phone and an iframe on the web.
+  - The page is built once.
+  - Every change (the site, temporary points, the worker's position) is
+    posted to it and drawn in place.
+  - The view is fitted from the data, never from a layer, and only once the
+    frame has a size (an early fit crashed Leaflet).
+  - Offline, the map says it needs a connection. The distance («أنت على
+    بعد X م من الموقع») is computed on the phone and works without it.
+- **Not chosen: react-native-maps.** On Android it needs a Google Maps API
+  key in every standalone build (an APK without one shows a blank map), and
+  it has no web support.
+
+### Sessions refresh instead of ending at the first 401
+
+Before Step 9 the app dropped the session at the first 401, about 15
+minutes after sign-in. Now the API client is wrapped:
+- An expired access token is refreshed (`POST /auth/refresh`) and the call
+  retried once.
+- Concurrent failures share one refresh, because the API revokes the whole
+  session family when a refresh token is reused.
+- A call that started before a refresh simply retries with the new token.
+
+### The app hides shifts that have already ended
+
+The API accepts a clock-in to any PUBLISHED shift the worker is assigned to,
+whatever its time. A ten-day-old seeded shift became the "next shift" and
+could be clocked into from the old screen. No business rule changes in this
+step, so the app hides shifts whose end has passed (unless the shift is
+ACTIVE). Whether the API should refuse such a clock-in is a rule question
+left for a later step.
+
+### Location: one reading with its mock state
+
+`location.ts` returns the position with its accuracy, the
+`mockLocationState` (Android's flag, UNAVAILABLE elsewhere) and the
+heuristic `locationSignals`. The same reading is used by clock-in/out (online
+and offline) and the supervisor's temporary point.
+
+On an Android emulator, Maestro's `setLocation` goes through a mock-location
+provider, which the app correctly reports as DETECTED (and the server
+refuses). The Maestro flows set the emulator's position with
+`adb emu geo fix` instead, and one flow checks the refusal.
+
+### Android cleartext only for builds pointed at plain HTTP
+
+Release builds (the `preview` APK) refuse `http://` on Android. Testing
+against a computer on the LAN needs it, production must not.
+`apps/mobile/app.config.js` adds `expo-build-properties`
+(`android.usesCleartextTraffic`) only when `EXPO_PUBLIC_API_URL` starts with
+`http://`, so a build with an `https://` API keeps Android's default.
+`app.json` stays the base config, where `eas init` writes the projectId.

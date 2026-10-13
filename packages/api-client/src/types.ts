@@ -8,11 +8,14 @@ import type {
   CompensationType,
   CorrectionReason,
   FileAssetPurpose,
+  OnboardingFilePurpose,
   GovernmentIdType,
   InvitationStatus,
   EmergencyAuthorizationSource,
   EventOrigin,
   LocationValidationStatus,
+  MockLocationState,
+  DevicePlatform,
   NotificationType,
   OfflineSyncEventStatus,
   OrgRole,
@@ -27,6 +30,7 @@ import type {
   ShiftStatus,
   ShiftType,
   ShiftWorkerPresence,
+  SummarySource,
   TaskCategory,
   TemporaryPointStatus,
   TemporarySupervisorState,
@@ -97,6 +101,8 @@ export interface Site {
   latitude: number;
   longitude: number;
   defaultGeofenceRadiusMeters: number;
+  /** Step 9: shown on the worker's shift screen (GET /shifts/:id). */
+  instructions?: string | null;
   geofences?: Geofence[];
 }
 
@@ -128,7 +134,10 @@ export interface Shift {
   project?: Project | null;
   /** Only on GET /shifts/:id. */
   geofence?: Geofence | null;
+  /** Only on GET /shifts/:id. For a Worker: only the points usable right now (active, not expired); managers get every point. */
   temporaryCheckInPoints?: TemporaryCheckInPoint[];
+  /** Step 9, only on GET /shifts/:id: the shift manager's full name. */
+  managerName?: string | null;
 }
 
 export interface TimeEntry {
@@ -166,13 +175,31 @@ export interface ClockEvent {
   longitude: number;
   accuracyMeters: number;
   mockLocationSuspected: boolean;
+  /** Step 9: what the phone reported (null on events before Step 9 or when it did not say). */
+  mockLocationState?: MockLocationState | null;
+  /** Step 9: movement heuristics recorded with the event (never a refusal on their own). */
+  locationSignals?: string[];
   distanceFromSiteMeters: number | null;
   locationValidationStatus: string;
 }
 
-/** Response of POST /clock-events/clock-in. */
+/**
+ * Response of POST /clock-events/clock-in. The receipt (Step 9): `clockEvent.id`
+ * is the reference, with `serverReceivedAt` and `deviceTimestamp`;
+ * `timeEntry.shift` carries the shift (id, title, ...).
+ */
 export interface ClockInResult {
   timeEntry: TimeEntry;
+  clockEvent: ClockEvent;
+}
+
+/**
+ * Response of POST /clock-events/clock-out: the closed entry (as before Step 9)
+ * with its shift and, for the receipt, the clock-out event (`clockEvent.id` is
+ * the reference, with `serverReceivedAt` and `deviceTimestamp`).
+ */
+export interface ClockOutResult extends TimeEntry {
+  shift: Shift;
   clockEvent: ClockEvent;
 }
 
@@ -758,7 +785,7 @@ export interface PublicInvitation {
   expiresAt: string;
   privacyNoticeVersion: string;
   maxUploadBytes: number;
-  allowedContentTypes: Record<FileAssetPurpose, string[]>;
+  allowedContentTypes: Record<OnboardingFilePurpose, string[]>;
 }
 
 /** `POST /onboarding/invitations/:token/uploads` (public, multipart: `file`, `purpose`). */
@@ -1368,4 +1395,162 @@ export interface MemberDevice {
   lastActiveAt: string | null;
   key: { status: DeviceKeyStatus; registeredAt: string | null; revokedAt: string | null };
   sessions: MemberSession[];
+}
+
+// ── Step 9: the mobile worker app ─────────────────────────────────────────
+
+/** `PUT /devices/me`: the signed-in device registers itself (on every sign-in and app start; an upsert). */
+export interface RegisterDeviceInput {
+  /** The app's stable install id (the one sent at sign-in). */
+  deviceId: string;
+  platform: DevicePlatform;
+  osVersion: string | null;
+  appVersion: string | null;
+  /** An Expo push token ("ExponentPushToken[...]"), or null when push is not available or not allowed. */
+  pushToken: string | null;
+  /** What the attestation adapter could tell (dev: "DEV_MOCK"; real devices without an attestation module: "UNAVAILABLE"). */
+  attestationState?: string;
+}
+
+export interface RegisteredDevice {
+  deviceId: string;
+  platform: DevicePlatform;
+  /** The device's offline-signing key: ACTIVE, REVOKED by an Owner, or NONE yet. */
+  keyStatus: DeviceKeyStatus;
+  registeredAt: string;
+}
+
+/** A file in a React Native FormData (a local `file://` or `content://` uri), or a browser Blob/File. */
+export type UploadableFile = Blob | { uri: string; name: string; type: string };
+
+/** `POST /attachments` (multipart `purpose` + `file`): an attendance photo or a voice summary, private, for the caller only. */
+export interface UploadedAttachment {
+  fileAssetId: string;
+  purpose: FileAssetPurpose;
+  /** Detected from the file's content. */
+  contentType: string;
+  sizeBytes: number;
+}
+
+/** `POST /attachments/:id/transcription`: the voice summary as Arabic text, for the worker to check and edit before sending. */
+export interface VoiceTranscription {
+  fileAssetId: string;
+  text: string;
+  /** "mock" in development (a fixed Arabic sentence), otherwise the configured provider. */
+  provider: string;
+  language: "ar";
+}
+
+/**
+ * Step 9 fields of POST /clock-events/clock-in and /clock-out (beside the
+ * existing location, device and summary fields). Photos and the voice note
+ * are uploaded first with `POST /attachments`, then referenced here; they
+ * must be the caller's own, unused uploads.
+ */
+export interface ClockEventAttachmentFields {
+  /** At most MAX_ATTENDANCE_PHOTOS ATTENDANCE_PHOTO uploads. */
+  photoAssetIds?: string[];
+  /** What the phone could tell about a fake location (Android's flag; iOS and web: UNAVAILABLE). */
+  mockLocationState?: MockLocationState;
+  /** Simple movement heuristics that looked suspicious (e.g. "IMPOSSIBLE_SPEED", "ZERO_ACCURACY"); recorded for review, never a refusal on their own. */
+  locationSignals?: string[];
+}
+
+/** Clock-out only: the summary is typed, or recorded and transcribed (then possibly edited). Text or a voice note is required. */
+export interface ClockOutSummaryFields {
+  summaryText?: string;
+  summarySource?: SummarySource;
+  /** A VOICE_SUMMARY upload of the caller. */
+  voiceNoteAssetId?: string;
+  /** The transcript as the service returned it (before the worker's edits), kept with the summary. */
+  transcription?: string;
+  followUpRequired?: boolean;
+}
+
+/** `GET /emergency-callouts/eligibility`: whether the caller may start an emergency call-out right now, and why not. */
+export interface EmergencyEligibility {
+  eligible: boolean;
+  /** Why not (an API error code such as "EMERGENCY_NOT_ELIGIBLE" or "ACTIVE_TIME_ENTRY_EXISTS"); null when eligible. */
+  reason: string | null;
+  /** The Turan assignment that makes the caller eligible (or would, if active). */
+  turanAssignment: TuranAssignment | null;
+  /** A call-out already running for the caller (the app shows its timer instead of the start button). */
+  activeCallout: { calloutId: string; timeEntryId: string; actualStartClick: string; compensatedStart: string } | null;
+}
+
+/** `GET /time-entries/:id/my-pay`: the caller's own pay for one APPROVED entry (404 for anyone else's entry). */
+export interface MyEntryPay {
+  timeEntryId: string;
+  /** False until the entry is approved: no amount is computed before. */
+  approved: boolean;
+  compensationType: CompensationType | null;
+  regularMinutes: number;
+  overtimeMinutes: number;
+  /** Emergency call-outs: the paid minutes include the −60 / +15 compensation. */
+  compensatedMinutes: number | null;
+  baseAgorot: number | null;
+  overtimeAgorot: number | null;
+  totalAgorot: number | null;
+  /** True when the entry's month is finalized (the amount is the finalized one). */
+  finalized: boolean;
+}
+
+/** `GET /payroll-statements/me/current`: the open month as a labeled estimate ("تقدير — غير نهائي"), from approved entries only. */
+export interface CurrentSalaryEstimate extends SalaryStatement {
+  isEstimate: true;
+  /** Always "APPROVED_ENTRIES_ONLY": pending entries are counted in `pendingEntries`, never paid. */
+  basis: "APPROVED_ENTRIES_ONLY";
+  calculatedAt: string;
+}
+
+/** The caller's own notification preferences (`GET/PATCH /notifications/preferences`): in-app always; push per type. */
+export interface MyNotificationPreferences {
+  /** One line per notification type the caller can receive. */
+  preferences: { type: NotificationType; push: boolean }[];
+}
+
+/** The worker's own entry detail additions (GET /time-entries/:id for the caller's own entry, Step 9). No money. */
+export interface MyTimeEntryCorrection {
+  field: string;
+  oldValue: string | null;
+  newValue: string;
+  reason: CorrectionReason;
+  note: string | null;
+  correctedAt: string;
+  correctedByName: string | null;
+}
+
+export interface MyTimeEntryDetail extends TimeEntry {
+  /** Step 9: the manager's reason when the entry was rejected. */
+  rejectedReason?: string | null;
+  corrections: MyTimeEntryCorrection[];
+  summary: {
+    text: string | null;
+    taskCategory: TaskCategory;
+    followUpRequired: boolean;
+    summarySource: SummarySource | null;
+    hasVoiceNote: boolean;
+  } | null;
+  photoCount: number;
+}
+
+/**
+ * Step 9: the `data` of a push notification (Expo). Only what the app needs
+ * to open the right screen: the in-app notification's id and type, and the
+ * ids of the records it is about. Never a name, an amount or a reason (a push
+ * can show on a locked screen; the in-app notification has the details).
+ * The title is the type's Arabic label and the body a generic «عرض التفاصيل».
+ */
+export interface PushNotificationData {
+  notificationId: string;
+  type: NotificationType;
+  timeEntryId?: string;
+  shiftId?: string;
+  calloutId?: string;
+  /** A temporary-supervisor assignment (TEMPORARY_SUPERVISOR_ISSUE_REPORTED). */
+  assignmentId?: string;
+  /** A Turan assignment (TURAN_ASSIGNMENT_CREATED / _CHANGED about a Turan; a shift assignment carries shiftId instead). */
+  turanAssignmentId?: string;
+  /** YYYY-MM. */
+  yearMonth?: string;
 }

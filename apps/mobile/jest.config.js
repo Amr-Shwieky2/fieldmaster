@@ -19,6 +19,10 @@ module.exports = {
     "^react$": "<rootDir>/node_modules/react",
     "^react/(.*)$": "<rootDir>/node_modules/react/$1",
   },
+  // The first test of a screen file also loads its modules (Expo, React Native, the messages). Alone that takes
+  // 1-3 s, but under `pnpm test` (every package's tests at once, and CI's runner) it passed 5 s: a slow machine,
+  // not a slow screen. Assertions are untouched.
+  testTimeout: 15_000,
   clearMocks: true,
   // Only spies and replaceProperty. Never resetMocks: it wipes the NetInfo mock's return values.
   restoreMocks: true,

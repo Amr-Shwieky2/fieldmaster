@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Patch, Query, Sse, UnauthorizedException, type MessageEvent } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Sse, UnauthorizedException, type MessageEvent } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { EMPTY, Observable, fromEvent, interval, merge } from "rxjs";
@@ -9,6 +9,7 @@ import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { NotificationsService, NOTIFICATION_CREATED_EVENT, type NotificationCreatedEvent } from "./notifications.service";
 import { RealtimeAuthService } from "./realtime-auth.service";
 import { OPERATIONS_CHANGED_EVENT, SESSIONS_ENDED_EVENT, type OperationsChangedEvent, type SessionsEndedEvent } from "./realtime-events";
+import { UpdateNotificationPreferencesDto } from "./dto/update-notification-preferences.dto";
 
 /** How often an SSE connection gets a `ping` event, so a client can tell a live connection from a dead one. */
 const SSE_HEARTBEAT_MS = 25_000;
@@ -26,6 +27,26 @@ export class NotificationsController {
   @Get()
   async list(@CurrentUser() user: AuthenticatedUser) {
     return this.notificationsService.listForUser(user.organizationId, user.sub);
+  }
+
+  // Step 9 (declared before the `:id` routes): the caller's own push switches, and "mark all as read".
+
+  /** One line per notification type the caller can receive: `{ type, push }` (push on unless turned off). */
+  @Get("preferences")
+  async myPreferences(@CurrentUser() user: AuthenticatedUser) {
+    return this.notificationsService.myPreferences(user);
+  }
+
+  /** Changes the listed switches (others keep theirs); answers the whole list. In-app notifications are always kept. */
+  @Patch("preferences")
+  async updateMyPreferences(@Body() dto: UpdateNotificationPreferencesDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.notificationsService.updateMyPreferences(user, dto.preferences);
+  }
+
+  @Post("read-all")
+  @HttpCode(HttpStatus.OK)
+  async markAllRead(@CurrentUser() user: AuthenticatedUser) {
+    return this.notificationsService.markAllRead(user.organizationId, user.sub);
   }
 
   @Patch(":id/read")

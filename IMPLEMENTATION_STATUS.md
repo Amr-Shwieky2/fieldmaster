@@ -1,5 +1,187 @@
 # FieldMaster — Implementation Status
 
+## Step 9 of 10 — the complete mobile worker app (2026-10-13)
+
+Scope: `apps/mobile` and the small API additions it needs. Arabic only, RTL,
+the same i18n checks and the shared `@fieldmaster/i18n`. No business rule
+changed. Step 9 was started before Step 8's PR (#15) was merged, so it is
+built on top of it. The schema change is one additive migration,
+`20261014090000_mobile_worker_app`. Design and reasoning:
+`docs/technical-decisions.md` ("Step 9: …"); phone testing:
+`docs/mobile-device-testing.md`.
+
+**Screens:**
+- **Home:** the status, the next shift, the current Turan, start/end work,
+  the emergency button only when eligible, an offline banner, the
+  pending-sync count, the unread-notifications badge, recent attendance,
+  and a supervisor card only while the assignment is active. Shifts that
+  have already ended are hidden: the API accepts a clock-in to any
+  published assigned shift, whatever its time.
+- **Shift details:** title, project, site, times, check-in method, the
+  manager, site instructions, a map (Leaflet in a WebView: the geofence
+  circle, active temporary points, the worker's position) and a live
+  «أنت على بعد X م من الموقع» while the screen is open.
+- **Clock-in / clock-out:** the existing flows, plus up to 5 photos
+  (camera or gallery, compressed, uploaded privately).
+  - Clock-out adds the follow-up switch and a typed **or** voice summary:
+    record → upload → transcribe (a mock in development: a fixed Arabic
+    sentence; `none` in production) → the worker edits → send.
+  - Every success shows a receipt: the action, server and phone time, the
+    shift, the sync state and the reference id.
+  - Offline: a typed summary only, signed and queued.
+- **Emergency:** eligibility, a start confirmation explaining «+60 دقيقة
+  قبل البدء», a live timer, an end with a mandatory summary explaining
+  «+15 دقيقة للعودة», and the breakdown (actual and compensated start and
+  end, the total).
+- **History:** entries by month with status badges. The detail shows the
+  times, the location result, corrections with their reasons, the summary
+  and the photo count, plus the worker's own pay once the entry is
+  approved («نهائي» from a finalized version, «تقدير» otherwise).
+- **My salary:**
+  - finalized months only from finalized versions (gross, base, overtime,
+    adjustments, forgotten-stamp deductions, net, status);
+  - the current month as «تقدير — غير نهائي»;
+  - the statement PDF (the Step 8 ledger of that month).
+- **Notifications:** read/unread, mark one or all, deep links, push
+  preferences.
+- **Temporary supervisor:** only while the assignment is active. The
+  shift's workers and their status, a temporary point opened at the current
+  location, and «الإبلاغ عن مشكلة».
+- **Account states:** pending approval, rejected, suspended, and «يلزم
+  تسجيل الدخول من جديد» after a revoked key. These screens show nothing
+  else.
+
+**API additions:**
+- **Devices and files:** `PUT /devices/me`; `POST /attachments` and
+  `/attachments/:id/transcription`.
+- **Clock events:** photos, `mockLocationState` and `locationSignals` on
+  clock events; the voice summary on clock-out.
+- **New routes:** `GET /emergency-callouts/eligibility`; the worker's own
+  entry detail, `?month=` and `/my-pay`; `GET
+  /payroll-statements/me/current`; notification preferences and read-all.
+- **Behaviour:** Expo push (`PUSH_PROVIDER`); account states told only
+  after a correct code; `DEVICE_KEY_REVOKED`, with a new key accepted only
+  from a newer session.
+- **A privacy fix:** a worker's shift list and detail no longer carry
+  co-workers' names and phone numbers. See `docs/api.md`.
+
+**Security on the phone:**
+- Tokens, the signing key, the queue key and the install id are kept only
+  in the Keychain/Keystore (no AsyncStorage path on native, tested).
+- The offline queue is encrypted (tweetnacl `secretbox`).
+- Device registration happens on sign-in and app start (platform, OS / app
+  version, push token, attestation state).
+- The session refresh is single-flight.
+- Mock location: Android's flag is sent; iOS sends UNAVAILABLE with the
+  heuristics.
+- The attestation adapter reports `DEV_MOCK` / `UNAVAILABLE`.
+- Three offline-queue bugs were fixed on the way: an event lost during a
+  sync, events stuck `SYNCING` after the app was killed, and events sent
+  before the key was registered.
+
+**Builds:**
+- `apps/mobile/eas.json` has `development` (dev client, APK), `preview`
+  (APK) and `production` profiles.
+- `app.config.js` allows Android cleartext only for builds pointed at an
+  `http://` API (a phone testing against a computer on the LAN).
+- `EXPO_PUBLIC_API_URL` sets the API.
+- `docs/mobile-device-testing.md` covers the EAS commands, installing the
+  APK, the iPhone with Expo Go, and what Expo Go cannot do (remote push
+  since SDK 53, the app's own native config, attestation).
+
+**What was verified, and how:**
+- **Web target (headless Chromium at phone size, GPS mocked at the seeded
+  site, the real API on port 3010):**
+  - sign-in and home;
+  - shift details («داخل نطاق الموقع», the map);
+  - clock-in → receipt;
+  - clock-out: an empty summary refused, then a typed summary, a photo and
+    follow-up → receipt. In the database: TYPED, follow-up true, one JPEG
+    of 5,004 bytes without metadata;
+  - history and an entry's detail; salary with «تقدير — غير نهائي»;
+    notifications;
+  - the Night Turan emergency: 18:10 actual start → 17:10 compensated,
+    18:10 actual end → 18:25 compensated, 1 h 15 m in total;
+  - an offline clock-in: the receipt «بانتظار المزامنة» with
+    «يُحدَّد عند المزامنة», then synced (origin OFFLINE, signature
+    VERIFIED);
+  - the supervisor opened a temporary point;
+  - the pending applicant and a suspended worker got their screens.
+- **Not at all on a phone, emulator or simulator** (none on this machine):
+  - the Android mock flag;
+  - the native WebView;
+  - the camera, gallery and microphone;
+  - push;
+  - the Keychain/Keystore;
+  - EAS builds;
+  - the Maestro flows (written, not run).
+
+  Voice recording was tested only with Jest (headless Chromium never grants
+  the microphone).
+
+**Found on the way:**
+- **Co-workers' data:** a worker could read co-workers' phone numbers
+  through `GET /shifts/:id` (fixed, and checked by the scanner).
+- **A rule question, left unchanged:** the API accepts a clock-in to a long
+  past shift.
+- **Audit-log ties:** audit rows created in the same millisecond can make
+  `/audit-logs/verify` report a valid chain as broken, and concurrent
+  writes can fork it. This predates Step 9 and is proposed as a separate
+  task.
+- **A test-only flake:** twice, a test POST came back with a stray 200. The
+  e2e client now uses one connection per request; the API is unchanged.
+
+**Tests** (runtime counts):
+
+| | Before Step 9 | After |
+|---|---|---|
+| shared-validation | 103 | 103 |
+| @fieldmaster/i18n | 82 | 85 |
+| admin-web | 697 | 697 |
+| API unit | 99 | 128 |
+| mobile | 131 | 496 |
+| API e2e | 148 | 176 |
+| **Total** | **1,260** | **1,685** |
+
+- **New:**
+  - mobile: 365 tests in all, across new screen, component and library
+    tests and the extended Home, ClockIn, ClockOut, History, Login and
+    OfflineQueue tests;
+  - API unit: 29;
+  - `mobile-worker.e2e-spec.ts`: 28;
+  - i18n: 3 enum-label tests.
+- **Changed, not weakened:**
+  - **mobile:** Home's `listTimeEntries` call takes no status (one call
+    gives the open entry and recent attendance). ClockOut gets the shift
+    title. Request bodies include the contract's new fields. The summary
+    error names typed or voice. Receipts list their reference id as data.
+    Mocks gained the new context functions. The test timeout is 15 s (the
+    first test of a file loads its modules).
+  - **API e2e:**
+    - `offline-sync` and `users-devices`: DEVICE_KEY_REVOKED for a revoked
+      key;
+    - `users-devices` and `auth-and-rbac`: ACCOUNT_SUSPENDED after a
+      suspension (was NO_ACTIVE_MEMBERSHIP or 404), with no session
+      created;
+    - `onboarding`: the public page's two upload purposes;
+    - the leak scanner: the two new own-pay routes as exceptions with
+      own-data checks, expected 404s, and the co-workers check.
+  - **i18n:** the enum test ignores exported lists of values (they are not
+    enums).
+- **Removed:** none.
+
+**Financial isolation:** the leak scanner reads 60 GET routes as Field
+Manager, Worker and Temporary Supervisor:
+- no money or identity key;
+- none of the seeded ID numbers, bank details or tokens;
+- no co-worker's id, phone or name in a worker's shifts.
+
+The worker's own pay routes (`my-payslip`, `/payroll-statements/me`,
+`/me/current`, `/time-entries/:id/my-pay`) are the only exceptions, and
+contain only the worker's own data.
+
+---
+
 ## Step 8 of 10 — Arabic PDF reports, operational reports, complete worker onboarding (2026-10-13)
 
 Scope: API, admin web and the public onboarding page. The mobile app is
@@ -1412,14 +1594,19 @@ single division-then-round, never chained float arithmetic.
 Covered above; also: project `budgetAgorot` is stripped from every non-Owner
 response (tested).
 
-## 19. Anti-tampering — ✅ (server time, mock-location), ⬜ (device attestation)
+## 19. Anti-tampering — ✅ (server time, mock-location), 🟡 (device attestation: adapter only)
 
 Server-authoritative time and mock-location blocking are implemented as
-above. Play Integrity / App Attest / DeviceCheck device-attestation calls
-are **not implemented** — they require a mobile app and platform SDKs that
-don't exist in this backend-only slice. The schema has columns for them
-(`attestationState`, `riskState`) so a mobile client can populate them later
-without a migration.
+above. Since Step 9:
+- **Mock location:** the app sends a mock-location state. It is DETECTED or
+  NOT_DETECTED on Android (the platform flag; DETECTED is refused) and
+  UNAVAILABLE on iOS and the web, never "certain".
+- **Movement heuristics** (impossible speed, zero accuracy, a frozen
+  position) are recorded with the clock event for review.
+- **Device attestation** is an adapter interface (`DEV_MOCK` in
+  development, `UNAVAILABLE` otherwise). Play Integrity / App Attest calls
+  are **not implemented**; the state is sent with the device registration
+  (`attestationState`).
 
 ## 20. Offline attendance — ✅ (backend), 🟡 (mobile)
 
@@ -1530,9 +1717,14 @@ Manager notifications never do — tested for clock-out and emergency-end).
 - ✅ BullMQ-backed background jobs now actually run against the Redis
   container (see section 30) — this doesn't retry notification delivery
   specifically, but proves the Redis/BullMQ wiring the spec calls for is real.
-- **Not implemented**: real push delivery (Firebase adapter is a documented
-  stub selected only when `FIREBASE_PROJECT_ID` is set, but was never
-  exercised against a live project).
+- ✅ Step 9: push through Expo's push service (`PUSH_PROVIDER=expo`; the
+  default `log` sends nothing).
+  - One BullMQ job per notification, with a delivery row for each outcome.
+  - Each member's own preferences decide push per type; in-app
+    notifications are always kept.
+  - Arabic text (the type's label), ids-only data for deep links.
+  - Never exercised against a live Expo project: that needs the app built
+    with EAS and push credentials (see `docs/mobile-device-testing.md`).
 
 ## 25. PDF and CSV reports — ✅ (Step 8)
 
@@ -1657,7 +1849,21 @@ direct `fetch()` against the API always succeeded. This was diagnosed as a
 tool-environment quirk, not an application bug -- it doesn't affect real
 users or real browsers.
 
-## 27. Mobile app — 🟡
+## 27. Mobile app — ✅ (Step 9; tried on the web target, not yet on a phone)
+
+Step 9 completed the worker app (the details are in its section at the
+top):
+- **Screens:** home, shift details with the map and live distance,
+  clock-in/out with photos, a voice summary and a receipt, the emergency
+  call-out, history with each entry's corrections and pay, my salary
+  (finalized months and a labeled estimate, the statement PDF),
+  notifications with deep links and preferences, the temporary supervisor,
+  and account states.
+- **Security:** an encrypted offline queue, secrets only in the
+  Keychain/Keystore, device registration and revoked-key handling, push.
+- **Builds:** EAS profiles. Builds, push and the camera/microphone were not
+  tried on a real device here (no Android SDK, no Xcode). The original
+  notes follow.
 
 A working Expo (React Native, SDK 57) worker app in `apps/mobile` — an
 explicit substitute for the spec-named "bare React Native workflow" (see

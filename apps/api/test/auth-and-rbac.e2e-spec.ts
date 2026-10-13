@@ -91,10 +91,14 @@ describe("Auth + RBAC + financial isolation (e2e)", () => {
     await prisma.user.update({ where: { phoneNumber: "+972500000001" }, data: { status: "SUSPENDED" } });
 
     await request(app.getHttpServer()).post("/api/v1/auth/otp/request").send({ phoneNumber: "+972500000001" }).expect(204);
-    await request(app.getHttpServer())
+    const response = await request(app.getHttpServer())
       .post("/api/v1/auth/otp/verify")
       .send({ phoneNumber: "+972500000001", code: "000000", deviceId: "d1", platform: "WEB" })
-      .expect(404);
+      .expect(403);
+    // Step 9: after a correct code the answer names the state (it was a bare 404 before); no session is created.
+    expect(response.body.code).toBe("ACCOUNT_SUSPENDED");
+    expect(response.body.accessToken).toBeUndefined();
+    expect(await prisma.refreshTokenFamily.count()).toBe(0);
   });
 
   describe("Multi-organization sign-in", () => {

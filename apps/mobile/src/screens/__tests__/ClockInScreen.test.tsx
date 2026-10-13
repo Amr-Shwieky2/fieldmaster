@@ -1,15 +1,18 @@
 import * as Location from "expo-location";
+import * as ImagePicker from "expo-image-picker";
+import { ImageManipulator } from "expo-image-manipulator";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { Linking } from "react-native";
-import { act, fireEvent, screen } from "@testing-library/react-native";
+import { Linking, Platform } from "react-native";
+import { act, fireEvent, screen, within } from "@testing-library/react-native";
 import { ApiRequestError, NetworkError } from "@fieldmaster/api-client";
 import ar from "../../i18n/messages";
 import { useAuth } from "../../lib/auth-context";
 import { getDeviceId } from "../../lib/device-id";
+import { resetLocationHistory } from "../../lib/location";
 import { useOfflineSync } from "../../lib/offline-sync-context";
 import type { RootStackParamList } from "../../navigation/types";
 import { ClockInScreen } from "../ClockInScreen";
-import { deferred, doubleTap, expectArabicOnly, fill, freezeDate, renderInArabic } from "./clock-screens-test-utils";
+import { deferred, doubleTap, expectArabicOnly, fill, freezeDate, receiptReference, renderInArabic } from "./clock-screens-test-utils";
 
 jest.mock("../../lib/auth-context", () => ({ useAuth: jest.fn() }));
 jest.mock("../../lib/offline-sync-context", () => ({ useOfflineSync: jest.fn() }));
@@ -21,6 +24,9 @@ jest.mock("expo-location", () => ({
   getCurrentPositionAsync: jest.fn(),
   hasServicesEnabledAsync: jest.fn(),
 }));
+// Step 9 photos: the gallery and the compression are fakes the photo tests drive.
+jest.mock("expo-image-picker", () => ({ ...jest.requireActual("expo-image-picker"), launchImageLibraryAsync: jest.fn(), requestCameraPermissionsAsync: jest.fn() }));
+jest.mock("expo-image-manipulator", () => ({ ...jest.requireActual("expo-image-manipulator"), ImageManipulator: { manipulate: jest.fn() } }));
 
 type Navigation = NativeStackScreenProps<RootStackParamList, "ClockIn">["navigation"];
 
@@ -67,6 +73,7 @@ beforeEach(() => {
   jest.mocked(Location.getCurrentPositionAsync).mockResolvedValue(POSITION);
   jest.mocked(Location.hasServicesEnabledAsync).mockResolvedValue(true);
   jest.mocked(Linking.openSettings).mockResolvedValue(undefined);
+  resetLocationHistory();
 });
 
 afterEach(() => {
@@ -115,6 +122,9 @@ function expectedOnlinePayload(now: number) {
       locationProvider: "expo-location",
       mockLocationSuspected: false,
       origin: "ONLINE",
+      // Step 9: iOS (the test platform) cannot tell a mocked location: UNAVAILABLE, never "not detected".
+      mockLocationState: "UNAVAILABLE",
+      locationSignals: [],
     },
   };
 }
@@ -163,7 +173,8 @@ describe("ClockInScreen (Arabic, RTL)", () => {
     expect(screen.getByText("بدأ دوامك الساعة 10:31.")).toBeOnTheScreen();
     expect(screen.getByText(fill(ar.clockIn.successBody, { time: "10:31" }))).toBeOnTheScreen();
     expect(screen.getByText(SHIFT_TITLE)).toBeOnTheScreen();
-    expectArabicOnly();
+    expect(receiptReference()).toBe("ce-1");
+    expectArabicOnly([receiptReference()]);
 
     // The receipt stays until the worker taps the button: no silent navigation.
     expect(navigation.popTo).not.toHaveBeenCalled();
@@ -183,7 +194,7 @@ describe("ClockInScreen (Arabic, RTL)", () => {
     await fireEvent.press(actionButton());
 
     expect(await screen.findByText(fill(ar.clockIn.successBody, { time: "00:30" }))).toBeOnTheScreen();
-    expectArabicOnly();
+    expectArabicOnly([receiptReference()]);
   });
 
   it("shows what it is doing while locating and submitting, and blocks cancel and the connection banner", async () => {
@@ -352,7 +363,7 @@ describe("ClockInScreen (Arabic, RTL)", () => {
     expect(screen.getByText(fill(ar.clockIn.successBody, { time: "10:30" }))).toBeOnTheScreen();
     expect(screen.queryByText(GEOFENCE_TEXT)).not.toBeOnTheScreen();
     expect(clockIn).toHaveBeenCalledTimes(2);
-    expectArabicOnly();
+    expectArabicOnly([receiptReference()]);
   });
 
   it("shows an Arabic server message for an API error code the app does not know", async () => {
@@ -367,7 +378,7 @@ describe("ClockInScreen (Arabic, RTL)", () => {
     expectArabicOnly();
   });
 
-  it("offline: queues the signed clock-in exactly as before and shows a saved-on-phone receipt with the time", async () => {
+  it("offline: queues the signed clock-in as before (plus the phone's mock-location state) and shows a saved-on-phone receipt with the time", async () => {
     const now = freezeDate(NOW);
     clockIn.mockRejectedValue(new NetworkError(new TypeError("Network request failed")));
     await renderScreen();
@@ -388,11 +399,14 @@ describe("ClockInScreen (Arabic, RTL)", () => {
       altitude: undefined,
       locationProvider: "expo-location",
       mockLocationSuspected: false,
+      // Step 9: signed with the event (the server verifies it); the movement signals are not part of a queued event.
+      mockLocationState: "UNAVAILABLE",
     });
     expect(screen.getByText(ar.clockIn.queuedBody)).toBeOnTheScreen();
     expect(screen.getByText("وقت التسجيل: 10:30")).toBeOnTheScreen();
     expect(screen.getByText(fill(ar.clockIn.queuedAt, { time: "10:30" }))).toBeOnTheScreen();
-    expectArabicOnly();
+    expect(receiptReference()).toBe(key);
+    expectArabicOnly([receiptReference()]);
 
     expect(navigation.popTo).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByRole("button", { name: ar.clockIn.backHome }));
@@ -435,5 +449,221 @@ describe("ClockInScreen (Arabic, RTL)", () => {
 
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
     expect(clockIn).not.toHaveBeenCalled();
+  });
+});
+
+// ── Step 9: photos, what the phone could tell about the location, and the receipt ──
+
+describe("ClockInScreen: photos, location signals and the receipt (Step 9)", () => {
+  let uploadAttachment: jest.Mock;
+  let compressed: number;
+
+  beforeEach(() => {
+    compressed = 0;
+    uploadAttachment = jest.fn(async (_purpose: string, _file: unknown, name: string) => ({ fileAssetId: `asset-${name}`, purpose: "ATTENDANCE_PHOTO", contentType: "image/jpeg", sizeBytes: 300_000 }));
+    jest.mocked(useAuth).mockImplementation(() => ({ client: { clockIn, uploadAttachment } }) as unknown as ReturnType<typeof useAuth>);
+    jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
+      canceled: false,
+      assets: [
+        { uri: "file:///picker/a.jpg", width: 4032, height: 3024 },
+        { uri: "file:///picker/b.jpg", width: 3024, height: 4032 },
+      ],
+    });
+    jest.mocked(ImageManipulator.manipulate).mockImplementation(() => {
+      const context = {
+        resize: jest.fn(),
+        renderAsync: jest.fn(async () => ({ saveAsync: jest.fn(async () => ({ uri: `file:///cache/photo-${++compressed}.jpg`, width: 1600, height: 1200 })), release: jest.fn() })),
+        release: jest.fn(),
+      };
+      context.resize.mockReturnValue(context);
+      return context as never;
+    });
+  });
+
+  async function addTwoPhotos() {
+    await fireEvent.press(screen.getByRole("button", { name: ar.photos.pickFromGallery }));
+    expect(await screen.findByText(fill(ar.photos.count, { count: "2", max: "5" }))).toBeOnTheScreen();
+  }
+
+  it("uploads the compressed photos first (ATTENDANCE_PHOTO), then clocks in with their ids", async () => {
+    const now = freezeDate(NOW);
+    clockIn.mockResolvedValue({ timeEntry: { clockInAt: NOW }, clockEvent: { id: "ce-1" } });
+    await renderScreen();
+    await addTwoPhotos();
+
+    await fireEvent.press(actionButton());
+
+    expect(await screen.findByRole("header", { name: ar.clockIn.successTitle })).toBeOnTheScreen();
+    expect(uploadAttachment.mock.calls).toEqual([
+      ["ATTENDANCE_PHOTO", { uri: "file:///cache/photo-1.jpg", name: "photo-1.jpg", type: "image/jpeg" }, "photo-1.jpg"],
+      ["ATTENDANCE_PHOTO", { uri: "file:///cache/photo-2.jpg", name: "photo-2.jpg", type: "image/jpeg" }, "photo-2.jpg"],
+    ]);
+    const { key, body } = expectedOnlinePayload(now);
+    expect(clockIn).toHaveBeenCalledWith({ ...body, photoAssetIds: ["asset-photo-1.jpg", "asset-photo-2.jpg"] }, key);
+    // The photos went before the clock-in.
+    expect(uploadAttachment.mock.invocationCallOrder[1]).toBeLessThan(clockIn.mock.invocationCallOrder[0]);
+  });
+
+  it("shows the upload progress while the photos are sent", async () => {
+    const upload = deferred<unknown>();
+    uploadAttachment.mockReturnValueOnce(upload.promise);
+    clockIn.mockResolvedValue({ timeEntry: { clockInAt: NOW } });
+    await renderScreen();
+    await addTwoPhotos();
+
+    // fireEvent.press resolves when the handler's promise does, so it is awaited at the end.
+    const pressing = fireEvent.press(actionButton());
+    const busy = await screen.findByRole("button", { name: fill(ar.clock.uploadingPhotos, { current: "1", total: "2" }) });
+    expect(busy).toBeDisabled();
+    expect(screen.getByText("جارٍ رفع الصور (1 من 2)…")).toBeOnTheScreen();
+    expect(screen.getByRole("button", { name: ar.photos.pickFromGallery })).toBeDisabled();
+    expectArabicOnly();
+
+    await act(async () => upload.resolve({ fileAssetId: "asset-1" }));
+    await pressing;
+    expect(await screen.findByRole("header", { name: ar.clockIn.successTitle })).toBeOnTheScreen();
+  });
+
+  it("stops on a refused photo with the Arabic reason, and the retry never uploads a photo twice", async () => {
+    uploadAttachment
+      .mockImplementationOnce(async () => ({ fileAssetId: "asset-1" }))
+      .mockRejectedValueOnce(new ApiRequestError(413, { statusCode: 413, code: "FILE_TOO_LARGE", message: "File too large", correlationId: "c" }));
+    clockIn.mockResolvedValue({ timeEntry: { clockInAt: NOW } });
+    await renderScreen();
+    await addTwoPhotos();
+
+    await fireEvent.press(actionButton());
+    expect(await screen.findByText(ar.errors.FILE_TOO_LARGE)).toBeOnTheScreen();
+    expect(clockIn).not.toHaveBeenCalled();
+    expect(queueOfflineEvent).not.toHaveBeenCalled();
+
+    await fireEvent.press(actionButton());
+    expect(await screen.findByRole("header", { name: ar.clockIn.successTitle })).toBeOnTheScreen();
+    // Photo 1 kept its id from the first attempt; only photo 2 was sent again.
+    expect(uploadAttachment).toHaveBeenCalledTimes(3);
+    expect(uploadAttachment.mock.calls[2][2]).toBe("photo-2.jpg");
+    expect(clockIn.mock.calls[0][0]).toMatchObject({ photoAssetIds: ["asset-1", "asset-photo-2.jpg"] });
+  });
+
+  it("offline during the upload: saves the clock-in on the phone without the photos (files are never queued) and says so", async () => {
+    const now = freezeDate(NOW);
+    uploadAttachment.mockRejectedValue(new NetworkError(new TypeError("Network request failed")));
+    await renderScreen();
+    await addTwoPhotos();
+
+    await fireEvent.press(actionButton());
+
+    expect(await screen.findByRole("header", { name: ar.clockIn.queuedTitle })).toBeOnTheScreen();
+    expect(clockIn).not.toHaveBeenCalled();
+    // The signed event: no photo ids (files are never queued).
+    expect(queueOfflineEvent).toHaveBeenCalledWith({
+      clientEventId: `clockin-shift-1-${now}`,
+      eventType: "CLOCK_IN",
+      shiftId: "shift-1",
+      deviceTimestamp: NOW,
+      latitude: 32.0853,
+      longitude: 34.7818,
+      accuracyMeters: 8,
+      altitude: undefined,
+      locationProvider: "expo-location",
+      mockLocationSuspected: false,
+      mockLocationState: "UNAVAILABLE",
+    });
+    expect(screen.getByText(ar.clock.photosNotSent)).toBeOnTheScreen();
+    expectArabicOnly([receiptReference()]);
+  });
+
+  it("offline from the start: adding photos is switched off with an Arabic notice", async () => {
+    syncState = { isOnline: false, pendingCount: 0 };
+    await renderScreen();
+    expect(screen.getByText(ar.photos.offline)).toBeOnTheScreen();
+    expect(screen.getByRole("button", { name: ar.photos.pickFromGallery })).toBeDisabled();
+    expect(screen.getByRole("button", { name: ar.photos.takePhoto })).toBeDisabled();
+  });
+
+  it("Android: a location the phone reports as mocked is sent as DETECTED (the server's rule decides)", async () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    jest.mocked(Location.getCurrentPositionAsync).mockResolvedValue({ ...POSITION, mocked: true });
+    clockIn.mockRejectedValue(new ApiRequestError(403, { statusCode: 403, code: "MOCK_LOCATION_BLOCKED", message: "Mock location", correlationId: "c" }));
+    await renderScreen();
+
+    await fireEvent.press(actionButton());
+
+    expect(await screen.findByText(ar.errors.MOCK_LOCATION_BLOCKED)).toBeOnTheScreen();
+    expect(clockIn.mock.calls[0][0]).toMatchObject({ mockLocationState: "DETECTED", mockLocationSuspected: true, locationSignals: [] });
+  });
+
+  it("Android: a real location is NOT_DETECTED; iOS is UNAVAILABLE (never claimed as real)", async () => {
+    clockIn.mockRejectedValue(GEOFENCE_ERROR());
+    jest.replaceProperty(Platform, "OS", "android");
+    await renderScreen();
+    await fireEvent.press(actionButton());
+    await screen.findByText(GEOFENCE_TEXT);
+    expect(clockIn.mock.calls[0][0]).toMatchObject({ mockLocationState: "NOT_DETECTED", mockLocationSuspected: false });
+
+    jest.replaceProperty(Platform, "OS", "ios");
+    await fireEvent.press(actionButton());
+    await screen.findByText(GEOFENCE_TEXT);
+    expect(clockIn.mock.calls[1][0]).toMatchObject({ mockLocationState: "UNAVAILABLE", mockLocationSuspected: false });
+  });
+
+  it("sends the movement signals the phone saw between two attempts, as signals only", async () => {
+    clockIn.mockRejectedValueOnce(GEOFENCE_ERROR()).mockResolvedValueOnce({ timeEntry: { clockInAt: NOW } });
+    jest.mocked(Location.getCurrentPositionAsync)
+      .mockResolvedValueOnce({ ...POSITION, timestamp: 1_000 })
+      // A minute later, 55 km away, claiming perfect accuracy.
+      .mockResolvedValueOnce({ ...POSITION, coords: { ...POSITION.coords, latitude: 32.58, accuracy: 0 }, timestamp: 61_000 });
+    await renderScreen();
+
+    await fireEvent.press(actionButton());
+    await screen.findByText(GEOFENCE_TEXT);
+    await fireEvent.press(actionButton());
+
+    expect(await screen.findByRole("header", { name: ar.clockIn.successTitle })).toBeOnTheScreen();
+    expect(clockIn.mock.calls[0][0]).toMatchObject({ locationSignals: [] });
+    expect(clockIn.mock.calls[1][0]).toMatchObject({ locationSignals: ["ZERO_ACCURACY", "IMPOSSIBLE_SPEED"], mockLocationState: "UNAVAILABLE" });
+  });
+
+  it("the receipt shows the action, the server and phone times (Asia/Jerusalem), the sync state and the clock event id", async () => {
+    freezeDate(NOW);
+    clockIn.mockResolvedValue({ timeEntry: { id: "te-1", clockInAt: "2026-01-15T08:30:02.000Z" }, clockEvent: { id: "0199c5a2-7c1d-7a3e-9a52-3f6c2d1e8b40" } });
+    await renderScreen();
+    await fireEvent.press(actionButton());
+    await screen.findByRole("header", { name: ar.clockIn.successTitle });
+
+    const value = (testID: string) => {
+      const texts = within(screen.getByTestId(testID)).getAllByText(/./);
+      return texts[texts.length - 1].props.children as string;
+    };
+    expect(value("receipt-action")).toBe("بدء الدوام");
+    expect(value("receipt-server-time")).toBe("15 يناير 2026 في 10:30");
+    expect(value("receipt-device-time")).toBe("15 يناير 2026 في 10:30");
+    expect(value("receipt-sync-state")).toBe("تمت المزامنة");
+    expect(receiptReference()).toBe("0199c5a2-7c1d-7a3e-9a52-3f6c2d1e8b40");
+    expect(screen.getByTestId("receipt-shift")).toHaveTextContent(SHIFT_TITLE);
+  });
+
+  it("acts only as the signed-in worker: no worker id is ever sent, only the caller's own endpoints are used", async () => {
+    clockIn.mockResolvedValue({ timeEntry: { clockInAt: NOW } });
+    await renderScreen();
+    await addTwoPhotos();
+    await fireEvent.press(actionButton());
+    await screen.findByRole("header", { name: ar.clockIn.successTitle });
+
+    expect(JSON.stringify([...clockIn.mock.calls, ...uploadAttachment.mock.calls])).not.toContain("workerProfileId");
+    expect(Object.keys(jest.mocked(useAuth).mock.results[0].value.client)).toEqual(["clockIn", "uploadAttachment"]);
+  });
+
+  it("the queued receipt says it waits for sync, with no server time yet and the client event id", async () => {
+    const now = freezeDate(NOW);
+    clockIn.mockRejectedValue(new NetworkError(new TypeError("Network request failed")));
+    await renderScreen();
+    await fireEvent.press(actionButton());
+    await screen.findByRole("header", { name: ar.clockIn.queuedTitle });
+
+    expect(within(screen.getByTestId("receipt-sync-state")).getByText("بانتظار المزامنة")).toBeOnTheScreen();
+    expect(within(screen.getByTestId("receipt-server-time")).getByText(ar.receipt.serverTimePending)).toBeOnTheScreen();
+    expect(receiptReference()).toBe(`clockin-shift-1-${now}`);
+    expect(screen.queryByText(ar.clock.photosNotSent)).not.toBeOnTheScreen();
   });
 });

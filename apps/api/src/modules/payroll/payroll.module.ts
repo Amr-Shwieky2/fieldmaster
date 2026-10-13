@@ -7,12 +7,12 @@ import { PayrollAdjustmentsService } from "./payroll-adjustments.service";
 import { FinancialDashboardService } from "./financial-dashboard.service";
 import { SalaryStatementsService } from "./salary-statements.service";
 import { PayrollController } from "./payroll.controller";
-import { PayrollStatementsController } from "./payroll-statements.controller";
+import { MyEntryPayController, PayrollStatementsController } from "./payroll-statements.controller";
 import { AttendanceCostService } from "./attendance-cost.service";
 import { AttendanceCostController } from "./attendance-cost.controller";
 
 @Module({
-  controllers: [PayrollController, PayrollStatementsController, AttendanceCostController],
+  controllers: [PayrollController, PayrollStatementsController, MyEntryPayController, AttendanceCostController],
   providers: [
     PayrollCalculationService,
     PayrollCalculationProcessor,

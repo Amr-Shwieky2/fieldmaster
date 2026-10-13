@@ -1,7 +1,5 @@
-import { Platform } from "react-native";
-import * as SecureStore from "expo-secure-store";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { OrgRole } from "@fieldmaster/shared-types";
+import { deleteSecureItem, getSecureItem, SECURE_KEYS, setSecureItem } from "./secure-storage";
 
 export interface StoredSession {
   accessToken: string;
@@ -11,44 +9,28 @@ export interface StoredSession {
   workerProfileId: string | null;
 }
 
-const KEY = "fieldmaster.session";
-
 /**
- * Tokens live in the iOS Keychain / Android Keystore via expo-secure-store
- * (spec section 7.2 -- "never store authentication tokens in plain
- * AsyncStorage"). This is the one piece of native-security spec language
- * this slice actually satisfies for real; full device attestation /
- * mock-location detection is not implemented -- see technical-decisions.md.
- *
- * expo-secure-store has no web implementation (its web module is a stub),
- * so the web target -- used only as a stand-in for iOS Simulator
- * verification in this environment -- falls back to AsyncStorage there.
- * Real device builds (iOS/Android) always use the Keychain/Keystore path.
+ * The session (short-lived access token + rotating refresh token) lives only
+ * in the iOS Keychain / Android Keystore via expo-secure-store (spec 7.2:
+ * "never store authentication tokens in plain AsyncStorage"). The web target,
+ * a development stand-in only, keeps it in AsyncStorage: see secure-storage.ts.
  */
-const isWeb = Platform.OS === "web";
-
 export const sessionStore = {
   async load(): Promise<StoredSession | null> {
-    const raw = isWeb ? await AsyncStorage.getItem(KEY) : await SecureStore.getItemAsync(KEY);
+    const raw = await getSecureItem(SECURE_KEYS.session);
     if (!raw) return null;
     try {
-      return JSON.parse(raw) as StoredSession;
+      const parsed = JSON.parse(raw) as Partial<StoredSession> | null;
+      if (!parsed || typeof parsed.accessToken !== "string" || typeof parsed.refreshToken !== "string") return null;
+      return parsed as StoredSession;
     } catch {
       return null;
     }
   },
   async save(session: StoredSession): Promise<void> {
-    if (isWeb) {
-      await AsyncStorage.setItem(KEY, JSON.stringify(session));
-    } else {
-      await SecureStore.setItemAsync(KEY, JSON.stringify(session));
-    }
+    await setSecureItem(SECURE_KEYS.session, JSON.stringify(session));
   },
   async clear(): Promise<void> {
-    if (isWeb) {
-      await AsyncStorage.removeItem(KEY);
-    } else {
-      await SecureStore.deleteItemAsync(KEY);
-    }
+    await deleteSecureItem(SECURE_KEYS.session);
   },
 };

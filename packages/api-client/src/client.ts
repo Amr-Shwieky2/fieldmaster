@@ -5,6 +5,7 @@ import type {
   AuditLogEntry,
   AuthSession,
   ClockInResult,
+  ClockOutResult,
   DevLoginUser,
   EmergencyCalloutEndResult,
   EmergencyCalloutFilters,
@@ -58,8 +59,18 @@ import type {
   SupervisedShift,
   TemporarySupervisorListItem,
   WorkdaySettings,
+  RegisterDeviceInput,
+  RegisteredDevice,
+  UploadableFile,
+  UploadedAttachment,
+  VoiceTranscription,
+  EmergencyEligibility,
+  MyEntryPay,
+  CurrentSalaryEstimate,
+  MyNotificationPreferences,
+  MyTimeEntryDetail,
 } from "./types";
-import type { FileAssetPurpose, NotificationType, OrgRole } from "@fieldmaster/shared-types";
+import type { NotificationType, OnboardingFilePurpose, OrgRole } from "@fieldmaster/shared-types";
 
 /** `?a=1&b=x,y` from the defined values (arrays joined with commas); "" when there are none. */
 function queryString(params: Record<string, string | number | string[] | undefined>): string {
@@ -233,7 +244,7 @@ export class FieldMasterClient {
   getPublicInvitation(token: string) {
     return this.request<PublicInvitation>("GET", `/onboarding/invitations/${encodeURIComponent(token)}`);
   }
-  uploadOnboardingFile(token: string, purpose: FileAssetPurpose, file: Blob, fileName: string) {
+  uploadOnboardingFile(token: string, purpose: OnboardingFilePurpose, file: Blob, fileName: string) {
     const form = new FormData();
     form.append("purpose", purpose);
     form.append("file", file, fileName);
@@ -384,7 +395,8 @@ export class FieldMasterClient {
   applyFullDayCredit(id: string, reason: string) {
     return this.request<TimeEntry>("POST", `/time-entries/${id}/full-day-credit`, { reason });
   }
-  listTimeEntries(filters?: { workerProfileId?: string; status?: string }) {
+  /** `month` (YYYY-MM, Step 9): the entries of one business month. */
+  listTimeEntries(filters?: { workerProfileId?: string; status?: string; month?: string; businessDate?: string }) {
     const qs = new URLSearchParams(filters as Record<string, string>).toString();
     return this.request<TimeEntry[]>("GET", `/time-entries${qs ? `?${qs}` : ""}`);
   }
@@ -429,8 +441,9 @@ export class FieldMasterClient {
       "Idempotency-Key": idempotencyKey,
     });
   }
+  /** The API answers with the closed entry, its shift and the clock-out event (Step 9: the receipt). */
   clockOut(input: Record<string, unknown>, idempotencyKey: string) {
-    return this.request<TimeEntry>("POST", "/clock-events/clock-out", input, { "Idempotency-Key": idempotencyKey });
+    return this.request<ClockOutResult>("POST", "/clock-events/clock-out", input, { "Idempotency-Key": idempotencyKey });
   }
 
   // ── Devices / offline sync ──────────────────────────────────────────
@@ -555,5 +568,48 @@ export class FieldMasterClient {
   }
   verifyReport(id: string) {
     return this.request<ReportVerification>("GET", `/reports/${id}/verify`);
+  }
+  // ── Step 9: the mobile worker app ───────────────────────────────────
+  /** Registers (upserts) the signed-in device: platform, OS and app version, push token. Call on sign-in and app start. */
+  registerDevice(input: RegisterDeviceInput) {
+    return this.request<RegisteredDevice>("PUT", "/devices/me", input);
+  }
+  /** Uploads an attendance photo or a voice summary (private; only the uploader can attach it). */
+  uploadAttachment(purpose: "ATTENDANCE_PHOTO" | "VOICE_SUMMARY", file: UploadableFile, fileName: string) {
+    const form = new FormData();
+    form.append("purpose", purpose);
+    if (typeof Blob !== "undefined" && file instanceof Blob) form.append("file", file, fileName);
+    // React Native's FormData takes a `{ uri, name, type }` object for a local file.
+    else form.append("file", file as unknown as Blob);
+    return this.requestForm<UploadedAttachment>("/attachments", form);
+  }
+  /** Transcribes the caller's own voice summary (Arabic); the worker edits the text before sending it. */
+  transcribeVoiceNote(fileAssetId: string) {
+    return this.request<VoiceTranscription>("POST", `/attachments/${fileAssetId}/transcription`);
+  }
+  /** Whether the caller may start an emergency call-out now (and the one already running, if any). */
+  getEmergencyEligibility() {
+    return this.request<EmergencyEligibility>("GET", "/emergency-callouts/eligibility");
+  }
+  /** The caller's own entry with its corrections (and their reasons) and summary; no money. */
+  getMyTimeEntry(id: string) {
+    return this.request<MyTimeEntryDetail>("GET", `/time-entries/${id}`);
+  }
+  /** The caller's own pay for one approved entry (Worker-own money; 404 for anyone else's entry). */
+  getMyEntryPay(timeEntryId: string) {
+    return this.request<MyEntryPay>("GET", `/time-entries/${timeEntryId}/my-pay`);
+  }
+  /** The current open month as a labeled estimate from approved entries only (the caller's own). */
+  getMyCurrentSalaryEstimate() {
+    return this.request<CurrentSalaryEstimate>("GET", "/payroll-statements/me/current");
+  }
+  getMyNotificationPreferences() {
+    return this.request<MyNotificationPreferences>("GET", "/notifications/preferences");
+  }
+  updateMyNotificationPreferences(input: MyNotificationPreferences) {
+    return this.request<MyNotificationPreferences>("PATCH", "/notifications/preferences", input);
+  }
+  markAllNotificationsRead() {
+    return this.request<{ updated: number }>("POST", "/notifications/read-all");
   }
 }

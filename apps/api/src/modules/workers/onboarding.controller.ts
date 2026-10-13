@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from "@nestjs/swagger";
-import { FileAssetPurpose } from "@fieldmaster/shared-types";
+import { ONBOARDING_FILE_PURPOSES } from "@fieldmaster/shared-types";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { Public } from "../../common/decorators/public.decorator";
@@ -77,7 +77,7 @@ export class OnboardingController {
     schema: {
       type: "object",
       required: ["purpose", "file"],
-      properties: { purpose: { type: "string", enum: Object.values(FileAssetPurpose) }, file: { type: "string", format: "binary" } },
+      properties: { purpose: { type: "string", enum: [...ONBOARDING_FILE_PURPOSES] }, file: { type: "string", format: "binary" } },
     },
   })
   @Post("onboarding/invitations/:token/uploads")

@@ -14,25 +14,35 @@ pnpm --filter @fieldmaster/api test:e2e   # integration tests against a real dat
 - `packages/shared-validation` — 103 pure-function unit tests (Jest),
   including the identity-document rules of Step 8 (Israeli check digit, the
   Palestinian ID's 9 digits, all zeros refused for every type)
-- `apps/api` — 99 unit tests (Jest: RBAC, location validation, app
+- `apps/api` — 128 unit tests (Jest: RBAC, location validation, app
   environment, notification money stripping; Step 8: report access, filters,
   hashing, CSV and templates, PDF rendering; upload type detection, metadata
-  stripping, invitation tokens and status)
-- `packages/i18n` — 82 tests (Vitest): the shared Arabic formatter (including a
+  stripping, invitation tokens and status; Step 9: audio type detection,
+  transcription config, the push provider and its content, notification
+  preferences, the offline canonical form)
+- `packages/i18n` — 85 tests (Vitest): the shared Arabic formatter (including a
   check that its built-in Israel time-zone rules match Intl for every hour of
   2024-2030), error-code mapping, enum labels, ICU validity of the shared
   messages and the translation-check library
 - `apps/admin-web` — 697 tests (Vitest + React Testing Library), all in
   Arabic: every page, notification text, the admin messages and the
   financial-isolation guards
-- `apps/mobile` — 131 tests (Jest + jest-expo + React Native Testing Library),
-  all in Arabic: every screen and state (login with test mode, home, clock-in
-  and clock-out with success / offline receipts and the geofence error with
-  numbers, history, offline queue), the RTL bootstrap and the mirrored back
-  arrow
+- `apps/mobile` — 496 tests (Jest + jest-expo + React Native Testing Library),
+  all in Arabic.
+  - Every screen and state: loading, empty, error from the API code,
+    offline, Western digits, no other worker's data.
+  - Step 9 adds: the shift map and live distance, photos, the voice
+    summary, receipts, the emergency texts and breakdown, history and pay,
+    salary and its estimate label, notifications and deep links, the
+    supervisor, account states.
+  - The library: the encrypted queue (tamper, wrong key, migration), the
+    Keychain/Keystore-only storage, the session refresh, the revoked key,
+    device registration, push.
+  - The first test of a file may take longer than 5 s under `pnpm test`
+    (every package at once), so the timeout is 15 s.
 
 `apps/api`'s `test:e2e` (not part of `pnpm test` — it's slower and needs a
-live database) runs 148 integration tests (Jest + Supertest) against a real
+live database) runs 176 integration tests (Jest + Supertest) against a real
 NestJS app instance, a dedicated `fieldmaster_test` Postgres database, Redis
 and MinIO (the upload and report tests store real files; CI starts a MinIO
 container for them). Run it with the machine awake: a sleep in the middle
@@ -100,7 +110,13 @@ Against a real running NestJS app + Postgres, covering (see
   - rate limits; audit rows without values;
   - every log line, audit row and notification captured, and searched for
     the ID numbers, bank details, tokens, file names and photo metadata.
-- **The leak scanner (Step 8):** 56 GET routes. It now also searches every
+- **Mobile worker API (Step 9, `mobile-worker.e2e-spec.ts`, 28 tests):**
+  device registration, attachments and transcription, the new clock fields
+  (DETECTED refused, UNAVAILABLE accepted, photos and voice notes claimed
+  once), eligibility, the worker's own entry and pay, the current-month
+  estimate, notification preferences and push (a spied provider, no money
+  or names), account states after a valid code, revoked keys.
+- **The leak scanner (Step 8, 60 GET routes since Step 9):** It now also searches every
   response for the seeded ID numbers, bank details and invitation tokens,
   as values in any string, not only as keys.
 - **Offline sync** (5 tests, added this pass): full offline clock-in/out
@@ -143,8 +159,14 @@ auth hook.
   have their own tests since Step 8), but there's no dedicated
   `security.e2e-spec.ts` enumerating every attack listed in the spec.
 - **Browser checks** of Step 8 (every report type as Owner and Field
-  Manager, the onboarding at phone size) were driven with headless
-  Playwright scripts against the dev servers, not a committed suite.
+  Manager, the onboarding at phone size) and of Step 9 (the mobile app's web
+  target against the real API) were driven with headless Playwright scripts
+  against the dev servers, not a committed suite.
+- **Mobile E2E on a device:** the Maestro flows in `apps/mobile/.maestro/`
+  (sign-in, clock-in inside the geofence, the mandatory summary, clock-out,
+  offline then sync, the Night Turan emergency) are written but were not run
+  here: there is no emulator, simulator or Maestro on the development
+  machine. See `apps/mobile/.maestro/README.md`.
 
 ## Database setup for tests
 

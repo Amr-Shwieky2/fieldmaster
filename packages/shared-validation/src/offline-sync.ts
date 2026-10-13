@@ -13,6 +13,12 @@ export interface OfflineEventSignablePayload {
   altitude?: number | null;
   locationProvider?: string | null;
   mockLocationSuspected?: boolean;
+  /**
+   * Step 9 (optional): MockLocationState as the phone reported it. Like every
+   * optional field, leave it out (undefined) when there is none: an event
+   * without it canonicalizes exactly as before Step 9.
+   */
+  mockLocationState?: string | null;
   appVersion?: string | null;
   summaryText?: string | null;
   voiceNoteUrl?: string | null;

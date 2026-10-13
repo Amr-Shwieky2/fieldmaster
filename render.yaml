@@ -95,13 +95,19 @@ services:
       - key: CORS_ORIGINS
         sync: false
 
+      # --- Push and voice transcription (Step 9) ---
+      # log: push stays in the API log (no text, no token). Switch to expo once
+      # the mobile app is built with EAS and its push credentials are set in
+      # the Expo project (see docs/mobile-device-testing.md).
+      - key: PUSH_PROVIDER
+        value: log
+      - key: EXPO_ACCESS_TOKEN
+        sync: false
+      # none: the app asks for a typed summary (mock is refused in production).
+      - key: TRANSCRIPTION_PROVIDER
+        value: none
+
       # --- Optional, leave unset to use dev/no-op adapters ---
-      - key: FIREBASE_PROJECT_ID
-        value: ""
-      - key: FIREBASE_CLIENT_EMAIL
-        value: ""
-      - key: FIREBASE_PRIVATE_KEY
-        value: ""
       - key: GOOGLE_MAPS_API_KEY
         value: ""
       - key: SENTRY_DSN

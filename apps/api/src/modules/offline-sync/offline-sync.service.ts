@@ -157,6 +157,8 @@ export class OfflineSyncService {
       altitude: event.altitude,
       locationProvider: event.locationProvider,
       mockLocationSuspected: event.mockLocationSuspected,
+      // Step 9: undefined when the device did not send it, so events without it verify exactly as before.
+      mockLocationState: event.mockLocationState,
       appVersion: event.appVersion,
       summaryText: event.summaryText,
       voiceNoteUrl: event.voiceNoteUrl,
@@ -185,10 +187,12 @@ export class OfflineSyncService {
         },
       });
 
-    // 1. Device must have a live registered signing key.
+    // 1. Device must have a live registered signing key. Step 9: a key an Owner revoked is told apart from a
+    // missing one (DEVICE_KEY_REVOKED: the app clears its queue and the worker signs in again).
     if (!deviceKey || deviceKey.revokedAt) {
-      await persist(OfflineSyncEventStatus.REJECTED, { signatureValid: false, rejectionReason: ErrorCodes.DEVICE_KEY_NOT_REGISTERED });
-      return { clientEventId: event.clientEventId, status: OfflineSyncEventStatus.REJECTED, reason: ErrorCodes.DEVICE_KEY_NOT_REGISTERED };
+      const reason = deviceKey ? ErrorCodes.DEVICE_KEY_REVOKED : ErrorCodes.DEVICE_KEY_NOT_REGISTERED;
+      await persist(OfflineSyncEventStatus.REJECTED, { signatureValid: false, rejectionReason: reason });
+      return { clientEventId: event.clientEventId, status: OfflineSyncEventStatus.REJECTED, reason };
     }
 
     // 2. Signature must verify -- this is what makes the event trustworthy
@@ -232,6 +236,7 @@ export class OfflineSyncService {
       altitude: event.altitude,
       locationProvider: event.locationProvider,
       mockLocationSuspected: event.mockLocationSuspected,
+      mockLocationState: event.mockLocationState,
       origin: EventOrigin.OFFLINE,
       appVersion: event.appVersion,
     };

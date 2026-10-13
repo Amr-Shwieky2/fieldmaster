@@ -6,6 +6,8 @@ export const QUEUE_NAMES = {
   PAYROLL_CALCULATION: "payroll-calculation",
   /** Step 8: one job per generated report, PDF + CSV (processor in ReportsModule). */
   REPORT_GENERATION: "report-generation",
+  /** Step 9: one job per notification, its push to the recipient's devices (processor in NotificationsModule). */
+  PUSH_DELIVERY: "push-delivery",
 } as const;
 
 /**

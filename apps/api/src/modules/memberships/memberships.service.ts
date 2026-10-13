@@ -9,16 +9,13 @@ import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
 import { parseDurationMs } from "../auth/duration.util";
 import { RealtimeEventsService } from "../notifications/realtime-events";
-import { DevicesService } from "../devices/devices.service";
+import { DeviceKeyStatus, DevicesService } from "../devices/devices.service";
 import type { CreateMembershipDto } from "./dto/create-membership.dto";
 import type { ChangeMemberRoleDto, MemberActionReasonDto, SetTimeTrackingDto } from "./dto/member-actions.dto";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 
 type PrismaTx = Prisma.TransactionClient;
 type MemberRow = OrganizationMembership & { user: User; workerProfile: { id: string } | null };
-
-/** A key's state for the devices list. */
-export const DeviceKeyStatus = { NONE: "NONE", ACTIVE: "ACTIVE", REVOKED: "REVOKED" } as const;
 
 /**
  * Members, roles and devices (spec section 7, Step 6 users page; Owners

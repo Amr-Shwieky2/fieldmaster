@@ -149,6 +149,10 @@ enum ReportStatus {
 enum FileAssetPurpose {
   IDENTITY_DOCUMENT
   PROFILE_PHOTO
+  /// Step 9: a photo taken at clock-in or clock-out in the mobile app.
+  ATTENDANCE_PHOTO
+  /// Step 9: a recorded daily summary (audio) in the mobile app.
+  VOICE_SUMMARY
 }
 
 /// Step 7: where a background payroll calculation stands.
@@ -283,15 +287,17 @@ model User {
 }
 
 model OrganizationMembership {
-  id              String        @id @db.Uuid
-  organizationId  String        @map("organization_id") @db.Uuid
-  userId          String        @map("user_id") @db.Uuid
-  role            OrgRole
-  isTimeTrackable Boolean       @default(false) @map("is_time_trackable")
-  status          AccountStatus @default(ACTIVE)
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
-  archivedAt      DateTime?     @map("archived_at")
+  id                      String        @id @db.Uuid
+  organizationId          String        @map("organization_id") @db.Uuid
+  userId                  String        @map("user_id") @db.Uuid
+  role                    OrgRole
+  isTimeTrackable         Boolean       @default(false) @map("is_time_trackable")
+  status                  AccountStatus @default(ACTIVE)
+  /// Step 9: the member's own push preferences ({ [NotificationType]: { push: boolean } }); in-app notifications are always kept.
+  notificationPreferences Json          @default("{}") @map("notification_preferences")
+  createdAt               DateTime      @default(now()) @map("created_at")
+  updatedAt               DateTime      @updatedAt @map("updated_at")
+  archivedAt              DateTime?     @map("archived_at")
 
   organization         Organization         @relation(fields: [organizationId], references: [id])
   user                 User                 @relation(fields: [userId], references: [id])
@@ -405,15 +411,21 @@ model FileAsset {
   scanResult      String           @map("scan_result")
   /// The public onboarding upload it came from (before the application links it to a worker).
   invitationId    String?          @map("invitation_id") @db.Uuid
+  /// The worker it belongs to: set by an onboarding application, or at upload for a signed-in worker's attachment (Step 9).
   workerProfileId String?          @map("worker_profile_id") @db.Uuid
+  /// Step 9: the time entry an attendance photo or voice summary was attached to (null until a clock-in/out uses it).
+  timeEntryId     String?          @map("time_entry_id") @db.Uuid
+  timeEntry       TimeEntry?       @relation("TimeEntryAttachments", fields: [timeEntryId], references: [id], onDelete: SetNull)
   createdAt       DateTime         @default(now()) @map("created_at")
 
   identityDocument IdentityDocument? @relation("IdentityDocumentFile")
   profilePhotoOf   WorkerProfile?    @relation("WorkerProfilePhoto")
+  voiceSummaryOf   DailySummary?     @relation("DailySummaryVoiceNote")
 
   @@index([organizationId])
   @@index([invitationId])
   @@index([workerProfileId])
+  @@index([timeEntryId])
   @@map("file_assets")
 }
 
@@ -919,6 +931,8 @@ model TimeEntry {
   clockEvents               ClockEvent[]
   unpaidBreaks              UnpaidBreak[]
   dailySummary              DailySummary?
+  /// Step 9: attendance photos and the voice summary attached to this entry.
+  attachments               FileAsset[]                @relation("TimeEntryAttachments")
   approvals                 AttendanceApproval[]
   corrections               ManualTimeCorrection[]
   forgottenStampInfractions ForgottenStampInfraction[]
@@ -947,10 +961,14 @@ model ClockEvent {
 
   latitude              Float
   longitude             Float
-  accuracyMeters        Float   @map("accuracy_meters")
+  accuracyMeters        Float    @map("accuracy_meters")
   altitude              Float?
-  locationProvider      String? @map("location_provider")
-  mockLocationSuspected Boolean @default(false) @map("mock_location_suspected")
+  locationProvider      String?  @map("location_provider")
+  mockLocationSuspected Boolean  @default(false) @map("mock_location_suspected")
+  /// Step 9: what the phone could tell about a fake location (MockLocationState: DETECTED, NOT_DETECTED, UNAVAILABLE); null before Step 9.
+  mockLocationState     String?  @map("mock_location_state")
+  /// Step 9: movement heuristics that looked suspicious on the phone (recorded for review, never a refusal on their own).
+  locationSignals       String[] @default([]) @map("location_signals")
 
   distanceFromSiteMeters   Float?                   @map("distance_from_site_meters")
   locationValidationStatus LocationValidationStatus @default(UNAVAILABLE) @map("location_validation_status")
@@ -1004,6 +1022,8 @@ model RejectedClockAttempt {
   longitude             Float
   accuracyMeters        Float   @map("accuracy_meters")
   mockLocationSuspected Boolean @default(false) @map("mock_location_suspected")
+  /// Step 9: MockLocationState as the phone reported it (null before Step 9).
+  mockLocationState     String? @map("mock_location_state")
 
   distanceMeters          Float?                 @map("distance_meters")
   allowedRadiusMeters     Int?                   @map("allowed_radius_meters")
@@ -1044,6 +1064,12 @@ model DailySummary {
 
   text                String?
   voiceNoteUrl        String?      @map("voice_note_url")
+  /// Step 9: the recorded summary (a private VOICE_SUMMARY file); `text` holds the transcript as the worker sent it.
+  voiceNoteAssetId    String?      @unique @map("voice_note_asset_id") @db.Uuid
+  voiceNoteAsset      FileAsset?   @relation("DailySummaryVoiceNote", fields: [voiceNoteAssetId], references: [id], onDelete: SetNull)
+  /// Step 9: SummarySource (TYPED or VOICE); null before Step 9.
+  summarySource       String?      @map("summary_source")
+  /// The transcript as the transcription service returned it (before the worker's edits).
   transcription       String?
   taskCategory        TaskCategory @map("task_category")
   materialsUsed       String?      @map("materials_used")

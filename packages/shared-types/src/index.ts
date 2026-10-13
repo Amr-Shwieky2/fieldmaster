@@ -217,12 +217,21 @@ export const InvitationStatus = {
 } as const;
 export type InvitationStatus = (typeof InvitationStatus)[keyof typeof InvitationStatus];
 
-/** Step 8: what an uploaded file is for. */
+/** Step 8: what an uploaded file is for. Step 9: attendance photos and voice summaries from the mobile app. */
 export const FileAssetPurpose = {
   IDENTITY_DOCUMENT: "IDENTITY_DOCUMENT",
   PROFILE_PHOTO: "PROFILE_PHOTO",
+  ATTENDANCE_PHOTO: "ATTENDANCE_PHOTO",
+  VOICE_SUMMARY: "VOICE_SUMMARY",
 } as const;
 export type FileAssetPurpose = (typeof FileAssetPurpose)[keyof typeof FileAssetPurpose];
+
+/** The purposes the public onboarding page may upload (never attendance photos or voice notes). */
+export const ONBOARDING_FILE_PURPOSES = [FileAssetPurpose.IDENTITY_DOCUMENT, FileAssetPurpose.PROFILE_PHOTO] as const;
+export type OnboardingFilePurpose = (typeof ONBOARDING_FILE_PURPOSES)[number];
+/** The purposes a signed-in worker uploads from the mobile app (`POST /attachments`). */
+export const ATTACHMENT_FILE_PURPOSES = [FileAssetPurpose.ATTENDANCE_PHOTO, FileAssetPurpose.VOICE_SUMMARY] as const;
+export type AttachmentFilePurpose = (typeof ATTACHMENT_FILE_PURPOSES)[number];
 
 export const ApprovalAction = {
   APPROVE: "APPROVE",
@@ -359,7 +368,45 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const UPLOAD_CONTENT_TYPES = {
   IDENTITY_DOCUMENT: ["image/jpeg", "image/png", "application/pdf"],
   PROFILE_PHOTO: ["image/jpeg", "image/png"],
+  // Step 9 (the mobile app, signed-in workers): photos compressed on the phone, and recorded audio
+  // (AAC in an MP4 container on iOS/Android; WebM/Ogg from the web target's MediaRecorder; WAV and MP3 accepted).
+  ATTENDANCE_PHOTO: ["image/jpeg", "image/png"],
+  VOICE_SUMMARY: ["audio/mp4", "audio/webm", "audio/ogg", "audio/wav", "audio/mpeg"],
 } as const;
+
+/** Step 9: photos one clock-in or clock-out may carry. */
+export const MAX_ATTENDANCE_PHOTOS = 5;
+/** Step 9: the longest voice summary the app records (the API refuses nothing on length; the size limit applies). */
+export const MAX_VOICE_SUMMARY_SECONDS = 180;
+
+/**
+ * Step 9: what the phone could tell about a mocked (fake GPS) location.
+ * DETECTED: the platform said so (Android's `mocked` flag) -- the existing
+ * mock-location rule applies. NOT_DETECTED: the platform can tell and said
+ * no (Android). UNAVAILABLE: the platform cannot tell (iOS, the web): never
+ * read as "certainly real".
+ */
+export const MockLocationState = {
+  DETECTED: "DETECTED",
+  NOT_DETECTED: "NOT_DETECTED",
+  UNAVAILABLE: "UNAVAILABLE",
+} as const;
+export type MockLocationState = (typeof MockLocationState)[keyof typeof MockLocationState];
+
+/** Step 9: how a daily summary was given: typed, or recorded and transcribed (the worker may edit the transcript). */
+export const SummarySource = {
+  TYPED: "TYPED",
+  VOICE: "VOICE",
+} as const;
+export type SummarySource = (typeof SummarySource)[keyof typeof SummarySource];
+
+/** Step 9: the platform a device registers with (the same values the sign-in endpoints take). */
+export const DevicePlatform = {
+  IOS: "IOS",
+  ANDROID: "ANDROID",
+  WEB: "WEB",
+} as const;
+export type DevicePlatform = (typeof DevicePlatform)[keyof typeof DevicePlatform];
 
 /** Step 8: the version of the privacy notice shown on the onboarding page (stored with the consent). */
 export const PRIVACY_NOTICE_VERSION = "2026-10";

@@ -1,0 +1,17 @@
+# Puts the phone at the seeded site «تقاطع تل أبيب المركزي» (32.0853, 34.7818;
+# geofence 150 m, minimum accuracy 50 m).
+# - iOS simulator: Maestro sets the simulator's location (iOS cannot flag a
+#   location as mocked, so the app reports UNAVAILABLE, as on a real iPhone).
+# - Android: nothing here. Maestro's setLocation on Android is a mock location
+#   provider: the app reports DETECTED and the server refuses it (flow 05 checks
+#   exactly that). Set the emulator's own GPS before the run instead:
+#   `adb emu geo fix 34.7818 32.0853` (longitude first; see README.md).
+appId: com.fieldmaster.mobile
+---
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - setLocation:
+          latitude: 32.0853
+          longitude: 34.7818

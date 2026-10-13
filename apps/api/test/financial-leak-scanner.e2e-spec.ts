@@ -113,6 +113,10 @@ const WORKER_OWN_MONEY_ROUTES = new Set([
   "GET /api/v1/payroll-periods/:yearMonth/my-payslip",
   // Step 7: the Worker's own salary statements (finalized versions + a labeled estimate); no worker id either.
   "GET /api/v1/payroll-statements/me",
+  // Step 9 (mobile app): the open month's labeled estimate (no worker id), and the pay of one of the caller's own
+  // approved entries (anyone else's entry is 404).
+  "GET /api/v1/payroll-statements/me/current",
+  "GET /api/v1/time-entries/:id/my-pay",
 ]);
 
 /**
@@ -124,11 +128,24 @@ const EXPECTED_NOT_FOUND = {
   // A Field Manager who is not time-trackable has no worker profile, so no payslip.
   // A temporary supervisor assignment exists only for its own supervisor: everyone else gets 404.
   // The same for their own salary statements (Step 7).
-  manager: new Set(["GET /api/v1/payroll-periods/:yearMonth/my-payslip", "GET /api/v1/payroll-statements/me", "GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
+  manager: new Set([
+    "GET /api/v1/payroll-periods/:yearMonth/my-payslip",
+    "GET /api/v1/payroll-statements/me",
+    "GET /api/v1/temporary-supervisors/:assignmentId/shift",
+    // Step 9: the Worker-own pay routes (no worker profile; the seeded entry is the Worker's, not theirs).
+    "GET /api/v1/payroll-statements/me/current",
+    "GET /api/v1/time-entries/:id/my-pay",
+  ]),
   worker: new Set(["GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
   // Step 8: a report is seen by an Owner, its requester and the worker it is about (the Worker above); for anyone
   // else it does not exist, so nothing tells it exists.
-  supervisor: new Set(["GET /api/v1/reports/:id", "GET /api/v1/reports/:id/download", "GET /api/v1/reports/:id/verify"]),
+  supervisor: new Set([
+    "GET /api/v1/reports/:id",
+    "GET /api/v1/reports/:id/download",
+    "GET /api/v1/reports/:id/verify",
+    // Step 9: another worker's time entry does not exist for them (it was 403).
+    "GET /api/v1/time-entries/:id",
+  ]),
 };
 
 interface GetRoute {
@@ -423,6 +440,7 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       timeEntryId,
       calloutId,
       applicantWorkerProfileId: applicant.id,
+      supervisorWorkerProfileId: supervisor.workerProfile.id,
       supervisionId: supervision.body.id as string,
       tokens: { owner: ownerToken, manager: managerToken, worker: workerToken, otherWorker: otherWorkerToken, supervisor: supervisorToken },
       /** What only the Owner's review may show: ID numbers, account numbers and holders, invitation tokens and their hashes. */
@@ -566,6 +584,15 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
 
     expectRows(bodies, ["GET /api/v1/shifts", "GET /api/v1/time-entries", "GET /api/v1/notifications"]);
     expect(bodies.get("GET /api/v1/shifts/:id")).toMatchObject({ id: seed.shift.id, project: { name: "Test Project" } });
+
+    // Step 9: the shift (list and detail) carries the Worker's own assignment only -- no co-worker's profile id, phone or name.
+    expect(bodies.get("GET /api/v1/shifts/:id")).toMatchObject({ assignments: [{ workerProfileId: seed.worker.workerProfile.id }] });
+    for (const route of ["GET /api/v1/shifts", "GET /api/v1/shifts/:id"]) {
+      const json = JSON.stringify(bodies.get(route));
+      for (const other of [seed.otherWorker.workerProfile.id, seed.supervisorWorkerProfileId, OTHER_WORKER_PHONE, SUPERVISOR_PHONE, "Rami Worker", "Sami Supervisor"]) {
+        expect({ route, found: json.includes(other) ? other : null }).toEqual({ route, found: null });
+      }
+    }
   });
 
   it("a Temporary Supervisor gets no money, bank or ID-document field or value from any GET route, including the supervised shift", async () => {
@@ -611,6 +638,18 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     const otherStatements = await request(http).get("/api/v1/payroll-statements/me").set("Authorization", `Bearer ${seed.tokens.otherWorker}`).expect(200);
     expect(otherStatements.body.statements).toEqual([]);
     expect(JSON.stringify(otherStatements.body)).not.toContain(workerProfileId);
+
+    // Step 9: the pay of one entry -- the Worker's own entry only; for the other Worker it does not exist.
+    const ownPay = await request(http).get(`/api/v1/time-entries/${seed.timeEntryId}/my-pay`).set("Authorization", auth).expect(200);
+    expect(ownPay.body).toMatchObject({ timeEntryId: seed.timeEntryId, approved: true });
+    expect(ownPay.body.totalAgorot).toEqual(expect.any(Number));
+    await request(http).get(`/api/v1/time-entries/${seed.timeEntryId}/my-pay`).set("Authorization", `Bearer ${seed.tokens.otherWorker}`).expect(404);
+    // The open month's estimate takes no worker id: the scanner's month is finalized, so both Workers get the same 409
+    // (the finalized figures are in /payroll-statements/me), never someone else's figures.
+    for (const token of [seed.tokens.worker, seed.tokens.otherWorker]) {
+      const current = await request(http).get("/api/v1/payroll-statements/me/current").set("Authorization", `Bearer ${token}`).expect(409);
+      expect(current.body.code).toBe("PAYROLL_PERIOD_FINALIZED");
+    }
   });
 
   it("a Field Manager's WebSocket and SSE notification payloads carry no money", async () => {

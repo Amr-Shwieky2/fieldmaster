@@ -51,7 +51,27 @@
           ]
         }
       ],
-      "expo-splash-screen"
+      "expo-splash-screen",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "يحتاج FieldMaster إلى الصور لإرفاق صور العمل عند بدء الدوام أو إنهائه.",
+          "cameraPermission": "يحتاج FieldMaster إلى الكاميرا لالتقاط صور العمل عند بدء الدوام أو إنهائه.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "يحتاج FieldMaster إلى الميكروفون لتسجيل ملخص العمل اليومي بصوتك."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1d4ed8"
+        }
+      ]
     ],
     "extra": {
       "supportsRTL": true,

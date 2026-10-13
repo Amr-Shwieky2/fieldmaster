@@ -34,6 +34,7 @@ function parseRedisUrl(url: string) {
       { name: QUEUE_NAMES.LONG_OPEN_ENTRIES },
       { name: QUEUE_NAMES.PAYROLL_CALCULATION },
       { name: QUEUE_NAMES.REPORT_GENERATION },
+      { name: QUEUE_NAMES.PUSH_DELIVERY },
     ),
   ],
   providers: [ExpireTemporaryCheckInPointsProcessor, ExpireOnboardingInvitationsProcessor],

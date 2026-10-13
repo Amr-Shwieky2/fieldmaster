@@ -12,8 +12,13 @@ function failOnIntlError(error: Error): void {
   throw error;
 }
 
+/** `ui` inside the real Arabic IntlRoot; also for `rerender`, which replaces the whole tree. */
+export function inArabic(ui: ReactElement) {
+  return <IntlRoot onError={failOnIntlError}>{ui}</IntlRoot>;
+}
+
 export function renderInArabic(ui: ReactElement) {
-  return render(<IntlRoot onError={failOnIntlError}>{ui}</IntlRoot>);
+  return render(inArabic(ui));
 }
 
 /** Fills an ICU message's plain `{name}` arguments, the way use-intl renders them. */
@@ -59,6 +64,16 @@ export function expectArabicOnly(data: string[] = []): void {
   // The same rules as Text-level queries (when no Latin user data is on screen).
   if (data.length === 0) expect(screen.queryAllByText(/[A-Za-z]{2,}/)).toHaveLength(0);
   expect(screen.queryAllByText(/[٠-٩۰-۹]/)).toHaveLength(0);
+}
+
+/**
+ * The reference shown on a clock receipt: the clock event id, or the client event id while queued. It is an
+ * identifier (Latin letters and digits), shown inside a left-to-right isolate (LtrText adds one mark before
+ * and one after); tests pass it to `expectArabicOnly` as data.
+ */
+export function receiptReference(): string {
+  const text = screen.getByTestId("receipt-reference-id").props.children as string;
+  return text.slice(1, -1);
 }
 
 type HostElement = ReturnType<typeof screen.getByRole>;

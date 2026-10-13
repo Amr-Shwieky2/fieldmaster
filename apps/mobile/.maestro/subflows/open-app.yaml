@@ -1,0 +1,25 @@
+# Starts the app from a clean state (signed out, empty offline queue) with
+# every permission granted (location, camera, microphone, notifications), so
+# no system dialog stops a flow.
+# With a development build (expo-dev-client), pass the Metro URL and the app
+# opens that bundle instead of the dev launcher:
+#   maestro test -e DEV_SERVER_URL=http://10.0.2.2:8081 apps/mobile/.maestro/
+appId: com.fieldmaster.mobile
+env:
+  DEV_SERVER_URL: ${DEV_SERVER_URL || ''}
+---
+# iOS keeps the Keychain (the session) when the app's data is cleared.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - clearKeychain
+- launchApp:
+    clearState: true
+    permissions:
+      all: allow
+- runFlow:
+    when:
+      true: ${DEV_SERVER_URL != ''}
+    commands:
+      - openLink: "fieldmaster://expo-development-client/?url=${encodeURIComponent(DEV_SERVER_URL)}"

@@ -184,7 +184,12 @@
     "FILE_REJECTED": "رُفض الملف بعد فحصه. ارفع ملفاً آخر.",
     "UPLOAD_NOT_FOUND": "لم نجد الملف المرفوع. ارفعه مرة أخرى.",
     "INVITATION_ALREADY_USED": "استُخدمت هذه الدعوة، فلا يمكن إلغاؤها.",
-    "REPORT_NOT_READY": "التقرير لم يجهز بعد. انتظر حتى ينتهي إنشاؤه."
+    "REPORT_NOT_READY": "التقرير لم يجهز بعد. انتظر حتى ينتهي إنشاؤه.",
+    "ACCOUNT_PENDING_APPROVAL": "طلب انضمامك قيد المراجعة لدى صاحب العمل. يمكنك تسجيل الدخول بعد الموافقة عليه.",
+    "ACCOUNT_REJECTED": "لم تتم الموافقة على طلب انضمامك. للاستفسار، تواصل مع صاحب العمل.",
+    "ACCOUNT_SUSPENDED": "حسابك موقوف حاليًا. للاستفسار، تواصل مع صاحب العمل.",
+    "DEVICE_KEY_REVOKED": "أُلغي تفويض هذا الجهاز. سجّل الدخول من جديد للمتابعة.",
+    "TRANSCRIPTION_UNAVAILABLE": "تعذّر تحويل التسجيل الصوتي إلى نص الآن. اكتب الملخص بدلًا منه أو حاول لاحقًا."
   },
   "enums": {
     "OrgRole": {
@@ -335,7 +340,23 @@
     },
     "FileAssetPurpose": {
       "IDENTITY_DOCUMENT": "صورة الهوية",
-      "PROFILE_PHOTO": "الصورة الشخصية"
+      "PROFILE_PHOTO": "الصورة الشخصية",
+      "ATTENDANCE_PHOTO": "صورة من موقع العمل",
+      "VOICE_SUMMARY": "ملخص صوتي"
+    },
+    "MockLocationState": {
+      "DETECTED": "موقع وهمي مكتشف",
+      "NOT_DETECTED": "لم يُكتشف موقع وهمي",
+      "UNAVAILABLE": "لا يمكن التحقق على هذا الجهاز"
+    },
+    "SummarySource": {
+      "TYPED": "ملخص مكتوب",
+      "VOICE": "ملخص صوتي"
+    },
+    "DevicePlatform": {
+      "IOS": "آيفون (iOS)",
+      "ANDROID": "أندرويد",
+      "WEB": "متصفح الويب"
     },
     "ApprovalAction": {
       "APPROVE": "موافقة",

@@ -26,7 +26,10 @@ Everything is under `/api/v1`. Implemented route groups:
 /shifts/:id/temporary-supervisors  assign / list (managers); /shifts/temporary-check-in-points open / close
 /operations            /live: the live operations snapshot (Owner, Field Manager; no money)
 /clock-events           clock-in / clock-out (online)
-/devices                Ed25519 public-key registration for offline signing
+/devices                Ed25519 public-key registration for offline signing; PUT /me registers the signed-in
+                        device (platform, OS / app version, push token), Step 9
+/attachments            Step 9: attendance photos and voice summaries from the mobile app (private);
+                        /:id/transcription
 /offline-sync           batched offline clock-event submission
 /time-entries           attendance detail, approvals, corrections; /:id/evidence (detail page);
                         /:id/estimated-cost (Owner only)
@@ -171,6 +174,78 @@ emergency call-out DTO has. See `authorization-matrix.md`.
     «صفحة N من M», the report ID and the SHA-256 of the report's data.
   - CSV: UTF-8 with a BOM, Arabic headers, Western digits; amounts as plain
     numbers in shekels with two decimals, in financial copies only.
+
+## The mobile worker app (Step 9)
+
+- **Device:** `PUT /devices/me { deviceId, platform: IOS|ANDROID|WEB,
+  osVersion, appVersion, pushToken, attestationState? }` answers
+  `{ deviceId, platform, keyStatus: NONE|ACTIVE|REVOKED, registeredAt }`.
+  - It is an upsert for the caller's (user, device). A field left out keeps
+    its value; `null` clears it.
+  - A push token (`ExponentPushToken[…]`) lives on one device row only.
+  - `POST /auth/logout` clears the device's push token.
+- **Attachments:** `POST /attachments` (multipart `purpose` =
+  `ATTENDANCE_PHOTO` | `VOICE_SUMMARY`, `file`), for members with a worker
+  profile.
+  - Answers `{ fileAssetId, purpose, contentType, sizeBytes }`.
+  - The type comes from the content: photos JPEG/PNG (metadata removed);
+    voice MP4/M4A, WebM, Ogg, WAV or MP3.
+  - Refusals: `413 FILE_TOO_LARGE` (10 MB), `415 FILE_TYPE_NOT_ALLOWED`,
+    `422 FILE_REJECTED`, `429 RATE_LIMITED` (50 uploads not yet attached).
+  - `POST /attachments/:id/transcription` (the caller's own voice summary)
+    answers `{ text, provider, language: "ar" }`, or
+    `503 TRANSCRIPTION_UNAVAILABLE` (`TRANSCRIPTION_PROVIDER=none`, the
+    production default).
+- **Clock-in / clock-out** also take:
+  - `photoAssetIds` (up to 5 of the caller's unused photo uploads),
+    `mockLocationState` (DETECTED / NOT_DETECTED / UNAVAILABLE) and
+    `locationSignals` (recorded, never a refusal);
+  - clock-out only: `summarySource` (TYPED / VOICE), `voiceNoteAssetId` and
+    `transcription`.
+
+  Rules and errors:
+  - DETECTED is refused like `mockLocationSuspected` (`403
+    MOCK_LOCATION_BLOCKED`).
+  - A text summary or a voice note is still required (`400
+    SUMMARY_REQUIRED`).
+  - A foreign, used or unknown upload is `400 UPLOAD_NOT_FOUND`
+    (`details.field`).
+  - Both answers carry the receipt: the clock event (reference id, server
+    and device times), the shift and the entry.
+- **Emergency:** `GET /emergency-callouts/eligibility` answers `{ eligible,
+  reason, turanAssignment, activeCallout }` with the same checks as
+  `start`, without creating anything.
+- **The worker's own entries:**
+  - `GET /time-entries?month=YYYY-MM`.
+  - `GET /time-entries/:id`, for one's own entry: corrections with reason
+    and name, the summary and the photo count; another worker's entry is
+    404.
+  - `GET /time-entries/:id/my-pay`: one's own entry only. No amount until
+    it is approved. A finalized month's figures come from its finalized
+    version.
+- **Salary:** `GET /payroll-statements/me/current` gives the open month as
+  an estimate (`basis: APPROVED_ENTRIES_ONLY`, `pendingEntries`). Once the
+  month has a finalized version it is `409 PAYROLL_PERIOD_FINALIZED`, and
+  the month is then in `/payroll-statements/me`.
+- **Notifications:**
+  - `GET/PATCH /notifications/preferences` (`{ preferences: [{ type, push
+    }] }`, the types the caller's role receives; push on by default).
+  - `POST /notifications/read-all`.
+  - Push follows the preferences. In-app notifications are always kept.
+- **Sign-in states:** after a correct code, an account without an active
+  membership gets `403 ACCOUNT_PENDING_APPROVAL`, `ACCOUNT_SUSPENDED` or
+  `ACCOUNT_REJECTED`. Requesting a code, or a wrong code, looks the same
+  for every number.
+- **Revoked device keys:**
+  - An offline event signed with a revoked key is rejected with
+    `DEVICE_KEY_REVOKED`.
+  - A new key for that device is accepted only from a session that started
+    after the revocation.
+- **Shift detail for a worker** (`GET /shifts/:id`): project, site (with
+  instructions and position), geofence, check-in method, the manager's
+  name, and only the temporary points usable now. Only the worker's own
+  assignment is included, never co-workers' names or phone numbers (the
+  list `GET /shifts` likewise).
 
 ## Real-time
 

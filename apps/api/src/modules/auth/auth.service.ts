@@ -7,7 +7,7 @@ import type { OrganizationMembership, User } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
-import { AppException } from "../../common/errors/app-exception";
+import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { APP_ENVIRONMENT, type AppEnvironment } from "../../common/config/app-environment";
 import { LoginMethod, TEST_MODE_SESSION_ENDED_MESSAGE, isTestModeLoginMethod } from "../../common/auth/login-method";
 import { OTP_PROVIDER } from "./otp-providers/otp-provider.token";
@@ -128,17 +128,20 @@ export class AuthService {
     }
 
     const user = await this.prisma.user.findUnique({ where: { phoneNumber: dto.phoneNumber } });
-    if (!user || user.status !== AccountStatus.ACTIVE) {
+    if (!user) {
       throw new NotFoundException("No active account found for this phone number.");
     }
 
-    const memberships = await this.prisma.organizationMembership.findMany({
-      where: { userId: user.id, status: AccountStatus.ACTIVE, archivedAt: null },
-    });
+    const memberships =
+      user.status === AccountStatus.ACTIVE
+        ? await this.prisma.organizationMembership.findMany({ where: { userId: user.id, status: AccountStatus.ACTIVE, archivedAt: null } })
+        : [];
 
     let membership = memberships[0];
     if (memberships.length === 0) {
-      throw new AppException(403, "NO_ACTIVE_MEMBERSHIP", "This account has no active organization membership.");
+      // Step 9: only now, after a correct code, may the answer say why: the code proves the caller holds the phone.
+      // Requesting a code behaves the same for every number, so the account's state is never revealed before.
+      await this.refuseInactiveAccount(user);
     }
     if (memberships.length > 1) {
       if (!dto.organizationId) {
@@ -169,6 +172,37 @@ export class AuthService {
     // it ends as soon as dev login is turned off (see refresh/JwtAuthGuard).
     const loginMethod = challenge.provider === "DEV_FIXED" ? LoginMethod.DEV_FIXED_OTP : LoginMethod.OTP;
     return this.startSession(user, membership, dto, loginMethod);
+  }
+
+  /**
+   * Sign-in for a user without an ACTIVE membership, after a correct code
+   * (Step 9). The app shows the specific state instead of a generic failure:
+   * - ACCOUNT_PENDING_APPROVAL: an application still waiting for the Owner's
+   *   decision (a pending membership, or a pending user);
+   * - ACCOUNT_SUSPENDED: a suspended membership (or user);
+   * - ACCOUNT_REJECTED: an application the Owner rejected (or a rejected user).
+   * The memberships decide first, in that order (a rejected applicant's user
+   * row stays PENDING_APPROVAL: only the membership is rejected), then the
+   * user's own status. Anything else keeps the earlier answers: 404 for a user
+   * that is not active, 403 NO_ACTIVE_MEMBERSHIP otherwise (e.g. an archived
+   * membership).
+   */
+  private async refuseInactiveAccount(user: User): Promise<never> {
+    const memberships = await this.prisma.organizationMembership.findMany({ where: { userId: user.id, archivedAt: null }, select: { status: true } });
+    const states: [AccountStatus, string, string][] = [
+      [AccountStatus.PENDING_APPROVAL, ErrorCodes.ACCOUNT_PENDING_APPROVAL, "Your application is waiting for the employer's approval."],
+      [AccountStatus.SUSPENDED, ErrorCodes.ACCOUNT_SUSPENDED, "This account is suspended."],
+      [AccountStatus.REJECTED, ErrorCodes.ACCOUNT_REJECTED, "Your application was not approved."],
+    ];
+    for (const statusesOf of [memberships.map((m) => m.status as string), [user.status as string]]) {
+      for (const [status, code, message] of states) {
+        if (statusesOf.includes(status)) throw new AppException(403, code, message);
+      }
+    }
+    if (user.status !== AccountStatus.ACTIVE) {
+      throw new NotFoundException("No active account found for this phone number.");
+    }
+    throw new AppException(403, "NO_ACTIVE_MEMBERSHIP", "This account has no active organization membership.");
   }
 
   /** Test mode only (guarded by DevLoginEnabledGuard): every active member, Owners first. */
@@ -358,6 +392,10 @@ export class AuthService {
     const [familyId] = refreshToken.split(":");
     if (!familyId) return;
     await this.revokeFamily(familyId, "LOGOUT");
+    // Step 9: a signed-out phone receives no more pushes for this user; the app registers its token
+    // again (PUT /devices/me) at the next sign-in.
+    const family = await this.prisma.refreshTokenFamily.findUnique({ where: { id: familyId }, select: { deviceId: true } });
+    if (family) await this.prisma.userDevice.updateMany({ where: { id: family.deviceId }, data: { pushToken: null } });
   }
 
   async revokeDevice(deviceId: string): Promise<void> {

@@ -136,6 +136,28 @@ Payroll: `payroll_periods`, `payroll_items`, `payroll_adjustments`,
   `redeemed_worker_profile_id`. An invitation's status (`ACTIVE`, `USED`,
   `EXPIRED`, `REVOKED`) is derived, never stored.
 
+### The mobile worker app (Step 9, migration `20261014090000_mobile_worker_app`)
+
+Additive only:
+- `FileAssetPurpose` gains `ATTENDANCE_PHOTO` and `VOICE_SUMMARY`.
+  `file_assets.time_entry_id` (`SET NULL`, indexed) links them to the entry
+  whose clock-in or clock-out used them. Until then they belong to the
+  uploading worker (`worker_profile_id`).
+- `daily_summaries`:
+  - `voice_note_asset_id` (unique, `SET NULL`): the recorded summary;
+  - `summary_source`: TYPED or VOICE;
+  - `text` keeps the summary as sent, and `transcription` the transcript as
+    the service returned it.
+- `clock_events.mock_location_state` (DETECTED / NOT_DETECTED /
+  UNAVAILABLE, as the phone reported it) and `location_signals` (movement
+  heuristics, recorded for review); also
+  `rejected_clock_attempts.mock_location_state`. They are null or empty
+  before Step 9.
+- `organization_memberships.notification_preferences` (JSONB, default
+  `{}`): the member's own push switches per notification type.
+- Push deliveries are rows in the existing `notification_deliveries`
+  (channel `PUSH_LOG` / `PUSH_EXPO`, status DELIVERED / SKIPPED / FAILED).
+
 Notifications: `notifications`, `notification_deliveries`.
 
 Platform: `audit_logs`, `idempotency_records`, `generated_reports`.

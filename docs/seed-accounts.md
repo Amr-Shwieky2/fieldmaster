@@ -45,6 +45,19 @@ title/body text stay in English.
 
 Hourly workers are seeded at ₪55/hour, daily workers at ₪450/day.
 
+### A working day today (Step 9)
+
+Created relative to the time `pnpm db:seed` runs, so the mobile app has
+something to do right after seeding (on the same day):
+
+| What | Who | Notes |
+|---|---|---|
+| A standard shift at «تقاطع تل أبيب المركزي» (32.0853, 34.7818; geofence 150 m) | خالد ناصر, باسل عازر, كريم حمدان | Started 1 hour before seeding, ends 8 hours after: clock in inside the geofence. |
+| Temporary supervisor on that shift | باسل عازر `+972500010004` | Active, may open temporary check-in points. |
+| Night Turan covering now | محمود جبارين `+972500010002` | The emergency button shows on his home screen. |
+
+`docs/mobile-device-testing.md` explains how to try these on a phone.
+
 ### A pending application (Step 8)
 
 | Name | Phone | ID type | Notes |

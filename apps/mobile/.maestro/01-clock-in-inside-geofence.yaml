@@ -1,0 +1,76 @@
+# خالد ناصر starts today's shift inside the geofence of «تقاطع تل أبيب المركزي».
+# Checks: the dev quick login; Home before the shift (not on shift, the next
+# shift); the shift details with the live «داخل نطاق الموقع»; clock-in; the
+# receipt (synced, with a reference); Home on shift.
+appId: com.fieldmaster.mobile
+name: 01-clock-in-inside-geofence
+tags:
+  - work-flow
+---
+- runFlow: subflows/site-location.yaml
+- runFlow:
+    file: subflows/login.yaml
+    env:
+      NAME: "خالد ناصر"
+
+# Home: not on shift yet, today's shift is the next one.
+- extendedWaitUntil:
+    visible:
+      id: "home-status-off-shift"
+    timeout: 30000
+- assertVisible: "لم تبدأ الدوام بعد."
+- assertVisible:
+    id: "home-next-shift"
+- assertVisible: "الوردية القادمة"
+
+# Shift details: the map and the live distance (the phone is at the site).
+- tapOn:
+    id: "home-next-shift-details"
+- extendedWaitUntil:
+    visible:
+      id: "shift-title"
+    timeout: 30000
+- assertVisible: "تفاصيل الوردية"
+- extendedWaitUntil:
+    visible: "داخل نطاق الموقع"
+    timeout: 60000
+- tapOn: "رجوع"
+
+# Clock-in.
+- extendedWaitUntil:
+    visible:
+      id: "home-next-shift-clock-in"
+    timeout: 30000
+- tapOn:
+    id: "home-next-shift-clock-in"
+- scrollUntilVisible:
+    element:
+      id: "clock-in-submit"
+    direction: DOWN
+- tapOn:
+    id: "clock-in-submit"
+
+# The receipt.
+- extendedWaitUntil:
+    visible:
+      id: "clock-receipt"
+    timeout: 60000
+- assertVisible: "تم بدء الدوام"
+- assertVisible: "تمت المزامنة"
+- assertVisible:
+    id: "receipt-reference-id"
+- scrollUntilVisible:
+    element:
+      id: "receipt-done"
+    direction: DOWN
+- tapOn:
+    id: "receipt-done"
+
+# Home: on shift, with the clock-out button.
+- extendedWaitUntil:
+    visible:
+      id: "home-status-on-shift"
+    timeout: 30000
+- assertVisible: "أنت في الدوام الآن"
+- assertVisible:
+    id: "home-clock-out"

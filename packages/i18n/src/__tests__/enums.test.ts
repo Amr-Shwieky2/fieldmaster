@@ -7,8 +7,10 @@ import { ENUM_NAMES, getEnumLabel, MISSING_LABEL, type EnumTranslator } from "..
 
 type Labels = Record<string, Record<string, string>>;
 
+// An enum is an object of string values (`as const`); a list of some of its values (e.g. ONBOARDING_FILE_PURPOSES) is not.
 const enumObjects = Object.entries(sharedTypes).filter(
-  ([name, value]) => /^[A-Z]/.test(name) && typeof value === "object" && value !== null && Object.values(value).every((v) => typeof v === "string"),
+  ([name, value]) =>
+    /^[A-Z]/.test(name) && typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every((v) => typeof v === "string"),
 ) as [string, Record<string, string>][];
 
 describe("enum labels", () => {

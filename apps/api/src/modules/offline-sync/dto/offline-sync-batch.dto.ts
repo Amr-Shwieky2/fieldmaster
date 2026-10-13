@@ -14,7 +14,7 @@ import {
   Min,
   ValidateNested,
 } from "class-validator";
-import { ClockEventType, TaskCategory } from "@fieldmaster/shared-types";
+import { ClockEventType, MockLocationState, TaskCategory } from "@fieldmaster/shared-types";
 
 export class OfflineSyncEventInputDto {
   @ApiProperty({ description: "Client-generated unique ID for this event (per device)." })
@@ -66,6 +66,14 @@ export class OfflineSyncEventInputDto {
   @IsOptional()
   @IsBoolean()
   mockLocationSuspected?: boolean;
+
+  @ApiPropertyOptional({
+    enum: Object.values(MockLocationState),
+    description: "Step 9 (signed like every other field; omit it when the phone has none). DETECTED is refused like mockLocationSuspected: true.",
+  })
+  @IsOptional()
+  @IsIn(Object.values(MockLocationState))
+  mockLocationState?: MockLocationState;
 
   @ApiPropertyOptional()
   @IsOptional()

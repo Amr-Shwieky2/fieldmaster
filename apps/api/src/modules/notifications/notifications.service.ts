@@ -4,7 +4,11 @@ import type { Prisma, Notification } from "@prisma/client";
 import { AccountStatus, OrgRole, type NotificationType } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { generateId } from "../../common/ids";
+import { AppException, ErrorCodes } from "../../common/errors/app-exception";
+import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { hasFinancialData, withoutFinancialData } from "./notification-data";
+import { readPushPreferences, receivableNotificationTypes, withPushPreferences } from "./notification-preferences";
+import { PushDeliveryService } from "./push/push-delivery.service";
 
 export interface NotifyInput {
   organizationId: string;
@@ -22,10 +26,16 @@ export interface NotificationCreatedEvent {
   notification: Notification;
 }
 
+/** `GET/PATCH /notifications/preferences` (the contract's `MyNotificationPreferences`). */
+export interface MyNotificationPreferences {
+  preferences: { type: NotificationType; push: boolean }[];
+}
+
 /**
- * Persists an in-app notification and "delivers" it. Push delivery uses a
- * dev adapter (logs the payload) unless Firebase credentials are configured
- * -- see IMPLEMENTATION_STATUS.md for what's wired vs. stubbed. Every
+ * Persists an in-app notification and delivers it. Push (Step 9) is a
+ * background job per notification (PushDeliveryService: PUSH_PROVIDER `log`
+ * in development, `expo` for real devices) that follows the recipient's own
+ * push preferences; the in-app notification is always created. Every
  * notification also emits `notification.created`, which the WebSocket
  * gateway and SSE stream both subscribe to for real-time delivery; clients
  * that don't hold a live connection can still poll GET /notifications.
@@ -37,6 +47,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly push: PushDeliveryService,
   ) {}
 
   async notify(input: NotifyInput) {
@@ -53,20 +64,6 @@ export class NotificationsService {
       },
     });
 
-    const channel = process.env.FIREBASE_PROJECT_ID ? "PUSH_FCM" : "PUSH_DEV_LOG";
-    if (!process.env.FIREBASE_PROJECT_ID) {
-      this.logger.log(`[DEV PUSH -> ${input.recipientUserId}] ${input.title}: ${input.body}`);
-    }
-    await this.prisma.notificationDelivery.create({
-      data: {
-        id: generateId(),
-        notificationId: notification.id,
-        channel,
-        status: "DELIVERED",
-        attemptedAt: new Date(),
-        deliveredAt: new Date(),
-      },
-    });
     await this.prisma.notificationDelivery.create({
       data: {
         id: generateId(),
@@ -82,6 +79,8 @@ export class NotificationsService {
       recipientUserId: input.recipientUserId,
       notification,
     } satisfies NotificationCreatedEvent);
+    // Step 9: the push goes out in the background (its delivery row is written by the job).
+    this.push.enqueue(notification.id);
 
     return notification;
   }
@@ -122,5 +121,57 @@ export class NotificationsService {
       where: { id: notificationId, recipientUserId },
       data: { readAt: new Date() },
     });
+  }
+
+  /** `POST /notifications/read-all`: every unread notification of the caller in this organization. */
+  async markAllRead(organizationId: string, recipientUserId: string): Promise<{ updated: number }> {
+    const result = await this.prisma.notification.updateMany({
+      where: { organizationId, recipientUserId, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { updated: result.count };
+  }
+
+  /** The caller's own push switches (Step 9): one line per type their role can receive; push is on unless they turned it off. */
+  async myPreferences(actor: AuthenticatedUser): Promise<MyNotificationPreferences> {
+    const membership = await this.prisma.organizationMembership.findUniqueOrThrow({ where: { id: actor.membershipId }, select: { notificationPreferences: true } });
+    return this.preferencesView(actor, membership.notificationPreferences);
+  }
+
+  /**
+   * Changes some of the caller's push switches; types left out keep theirs.
+   * A type the caller's role never receives, or the same type twice, is a
+   * 400 (`details.field` = "preferences"). In-app notifications are not
+   * affected: they are always kept.
+   */
+  async updateMyPreferences(actor: AuthenticatedUser, changes: readonly { type: NotificationType; push: boolean }[]): Promise<MyNotificationPreferences> {
+    const receivable = new Set(receivableNotificationTypes(actor.role, actor.workerProfileId !== null));
+    const seen = new Set<string>();
+    for (const change of changes) {
+      if (!receivable.has(change.type)) {
+        throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "You do not receive this type of notification.", { field: "preferences", type: change.type });
+      }
+      if (seen.has(change.type)) {
+        throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Each notification type may appear only once.", { field: "preferences", type: change.type });
+      }
+      seen.add(change.type);
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const membership = await tx.organizationMembership.findUniqueOrThrow({ where: { id: actor.membershipId }, select: { notificationPreferences: true } });
+      return tx.organizationMembership.update({
+        where: { id: actor.membershipId },
+        data: { notificationPreferences: withPushPreferences(membership.notificationPreferences, changes) },
+        select: { notificationPreferences: true },
+      });
+    });
+    return this.preferencesView(actor, updated.notificationPreferences);
+  }
+
+  private preferencesView(actor: AuthenticatedUser, stored: Prisma.JsonValue): MyNotificationPreferences {
+    const push = readPushPreferences(stored);
+    return {
+      preferences: receivableNotificationTypes(actor.role, actor.workerProfileId !== null).map((type) => ({ type, push: push[type] ?? true })),
+    };
   }
 }
