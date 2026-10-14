@@ -2,7 +2,7 @@ import { OnEvent } from "@nestjs/event-emitter";
 import { ConnectedSocket, OnGatewayConnection, WebSocketGateway, WebSocketServer } from "@nestjs/websockets";
 import type { Namespace, Socket } from "socket.io";
 import { NOTIFICATION_CREATED_EVENT, type NotificationCreatedEvent } from "./notifications.service";
-import { RealtimeAuthService } from "./realtime-auth.service";
+import { RealtimeAuthService, operationsRooms } from "./realtime-auth.service";
 import { OPERATIONS_CHANGED_EVENT, SESSIONS_ENDED_EVENT, type OperationsChangedEvent, type SessionsEndedEvent } from "./realtime-events";
 
 /**
@@ -33,7 +33,7 @@ export class NotificationsGateway implements OnGatewayConnection {
       `user:${viewer.userId}`,
       `membership:${viewer.membershipId}`,
       ...(viewer.sessionId ? [`session:${viewer.sessionId}`] : []),
-      ...(viewer.canViewOperations ? [`ops:${viewer.organizationId}`] : []),
+      ...operationsRooms(viewer),
     ]);
     // A suspension or session revoke that landed between the check and the join found no socket to close: check once more.
     if (!(await this.realtimeAuth.authenticate(token))) client.disconnect(true);
@@ -46,7 +46,12 @@ export class NotificationsGateway implements OnGatewayConnection {
 
   @OnEvent(OPERATIONS_CHANGED_EVENT)
   handleOperationsChanged(event: OperationsChangedEvent) {
-    this.server.to(`ops:${event.organizationId}`).emit("operations", { kind: event.kind, at: event.at });
+    // Members who are not restricted listen on the organization's room; a restricted member only on the rooms
+    // of their projects and sites, so an event of another project (or one without a place) never reaches them.
+    const rooms = [`ops:${event.organizationId}`];
+    if (event.projectId) rooms.push(`ops:${event.organizationId}:p:${event.projectId}`);
+    if (event.siteId) rooms.push(`ops:${event.organizationId}:s:${event.siteId}`);
+    this.server.to(rooms).emit("operations", { kind: event.kind, at: event.at });
   }
 
   @OnEvent(SESSIONS_ENDED_EVENT)

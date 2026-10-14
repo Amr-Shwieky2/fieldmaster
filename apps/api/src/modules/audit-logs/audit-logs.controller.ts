@@ -6,6 +6,7 @@ import { Permission } from "../../common/auth/permissions";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
+import { redactAuditRow } from "../../common/audit/audit-redaction";
 
 @ApiBearerAuth()
 @ApiTags("audit-logs")
@@ -38,7 +39,8 @@ export class AuditLogsController {
     });
 
     const hasMore = rows.length > take;
-    const items = hasMore ? rows.slice(0, take) : rows;
+    // The amounts of money in the log (deductions, adjustments, the penalty rule) only for a member who may see financials.
+    const items = (hasMore ? rows.slice(0, take) : rows).map((row) => redactAuditRow(row, user));
     return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
   }
 

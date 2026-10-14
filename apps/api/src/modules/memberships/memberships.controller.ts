@@ -7,9 +7,9 @@ import { Permission } from "../../common/auth/permissions";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { MembershipsService } from "./memberships.service";
 import { CreateMembershipDto } from "./dto/create-membership.dto";
-import { ChangeMemberRoleDto, MemberActionReasonDto, SetTimeTrackingDto } from "./dto/member-actions.dto";
+import { ChangeMemberRoleDto, MemberActionReasonDto, SetMemberScopeDto, SetTimeTrackingDto } from "./dto/member-actions.dto";
 
-/** Members, roles and devices (Owners only; every change with a reason, audited). */
+/** Members, their roles and project scope, and devices (MANAGE_ORG_USERS; every change with a reason, audited). */
 @ApiBearerAuth()
 @ApiTags("memberships")
 @Controller("memberships")
@@ -28,10 +28,24 @@ export class MembershipsController {
     return this.membershipsService.list(user.organizationId, user);
   }
 
+  /** Each member's role record and project scope (the users page joins it to the list by membershipId). */
+  @Get("access")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  async access(@CurrentUser() user: AuthenticatedUser) {
+    return this.membershipsService.access(user.organizationId);
+  }
+
   @Patch(":id/role")
   @RequirePermissions(Permission.MANAGE_ORG_USERS)
   changeRole(@Param("id") id: string, @Body() dto: ChangeMemberRoleDto, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
     return this.membershipsService.changeRole(user.organizationId, id, dto, user, correlationId);
+  }
+
+  /** All projects, or only the listed projects and sites (a restricted member sees only those, everywhere). */
+  @Patch(":id/scope")
+  @RequirePermissions(Permission.MANAGE_ORG_USERS)
+  setScope(@Param("id") id: string, @Body() dto: SetMemberScopeDto, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    return this.membershipsService.setScope(user.organizationId, id, dto, user, correlationId);
   }
 
   @Post(":id/suspend")

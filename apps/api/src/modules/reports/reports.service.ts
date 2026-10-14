@@ -13,6 +13,7 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { projectScopeWhere, siteScopeWhere, workerScopeWhere } from "../../common/scope/scope-filters";
 import { canAccessReport, decideReportAccess, reportVisibilityWhere } from "./report-access";
 import { normalizeReportFilters } from "./report-filters";
 import { templateVersionFor } from "./report-definitions";
@@ -54,7 +55,9 @@ export class ReportsService {
     const reportType = dto.reportType;
     const filters = normalizeReportFilters(reportType, dto.filters ?? {});
     const { includesFinancials } = decideReportAccess(reportType, actor, filters);
-    const resolved = await this.resolveFilters(actor.organizationId, reportType, filters);
+    const resolved = await this.resolveFilters(actor.organizationId, reportType, filters, actor);
+    // A requester restricted to some projects gets a report of those projects only: the scope travels with the report to the job.
+    if (actor.scope?.restricted) resolved.scope = { projectIds: actor.scope.projectIds, siteIds: actor.scope.siteIds };
 
     // The request includes who asks: a key reused by someone else is a conflict, never their report.
     const request = { organizationId: actor.organizationId, userId: actor.sub, reportType, filters: dto.filters };
@@ -96,18 +99,29 @@ export class ReportsService {
   }
 
   /** 404 for a worker, project, site or payroll version that is not in the caller's organization; a payroll report's version is resolved (the latest when not given). */
-  private async resolveFilters(organizationId: string, reportType: ReportType, filters: ReportFilters): Promise<ReportFilters> {
+  private async resolveFilters(organizationId: string, reportType: ReportType, filters: ReportFilters, actor: AuthenticatedUser): Promise<ReportFilters> {
     const notFound = (what: string) => new AppException(404, ErrorCodes.NOT_FOUND, `${what} not found.`);
+    const scope = actor.scope ?? { restricted: false as const };
+    // A worker, project or site outside a restricted requester's projects is not found (a worker's own ledger always is theirs).
     const [worker, project, site] = await Promise.all([
-      filters.workerProfileId ? this.prisma.workerProfile.findFirst({ where: { id: filters.workerProfileId, organizationId }, select: { id: true } }) : null,
-      filters.projectId ? this.prisma.project.findFirst({ where: { id: filters.projectId, organizationId }, select: { id: true } }) : null,
-      filters.siteId ? this.prisma.site.findFirst({ where: { id: filters.siteId, organizationId }, select: { id: true } }) : null,
+      filters.workerProfileId
+        ? this.prisma.workerProfile.findFirst({
+            where: {
+              id: filters.workerProfileId,
+              organizationId,
+              ...(actor.workerProfileId === filters.workerProfileId ? {} : (workerScopeWhere(scope) ?? {})),
+            },
+            select: { id: true },
+          })
+        : null,
+      filters.projectId ? this.prisma.project.findFirst({ where: { id: filters.projectId, organizationId, ...(projectScopeWhere(scope) ?? {}) }, select: { id: true } }) : null,
+      filters.siteId ? this.prisma.site.findFirst({ where: { id: filters.siteId, organizationId, ...(siteScopeWhere(scope) ?? {}) }, select: { id: true } }) : null,
     ]);
     if (filters.workerProfileId && !worker) throw notFound("Worker");
     if (filters.projectId && !project) throw notFound("Project");
     if (filters.siteId && !site) throw notFound("Site");
 
-    if (reportType !== ReportType.PAYROLL) return filters;
+    if (reportType !== ReportType.PAYROLL) return { ...filters };
     const yearMonth = filters.yearMonth as string;
     const period =
       filters.version === undefined
@@ -248,7 +262,7 @@ export class ReportsService {
       reportType: report.reportType as ReportType,
       status: report.status as ReportStatus,
       progress: report.progress,
-      filters: (report.filtersJson ?? {}) as unknown as ReportFilters,
+      filters: publicFilters((report.filtersJson ?? {}) as unknown as ReportFilters),
       includesFinancials: report.includesFinancials,
       templateVersion: report.templateVersion,
       requestedByUserId: report.requestedByUserId,
@@ -273,4 +287,10 @@ export function downloadFileName(reportType: ReportType, generatedAt: Date, form
     .replace(/[\\/:*?"<>|]+/g, "")
     .replace(/\s+/g, "-");
   return `${name}-${toBusinessDay(generatedAt) ?? generatedAt.toISOString().slice(0, 10)}.${format}`;
+}
+
+/** The filters as echoed to clients: the internal scope a restricted requester's report carries is not one of them. */
+function publicFilters(filters: ReportFilters): ReportFilters {
+  const { scope: _scope, ...shown } = filters;
+  return shown;
 }

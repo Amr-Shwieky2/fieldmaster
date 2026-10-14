@@ -19,6 +19,7 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { scopeOf, shiftScopeWhere } from "../../common/scope/scope-filters";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationAudienceService } from "../notifications/notification-audience.service";
 import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
@@ -68,7 +69,9 @@ export class TemporarySupervisorsService {
   // ── Managers ──────────────────────────────────────────────────────────
 
   async assign(organizationId: string, shiftId: string, dto: AssignTemporarySupervisorDto, actor: AuthenticatedUser, correlationId: string) {
-    const shift = UUID_PATTERN.test(shiftId) ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId } }) : null;
+    const shift = UUID_PATTERN.test(shiftId)
+      ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId, ...(shiftScopeWhere(scopeOf(actor)) ?? {}) } })
+      : null;
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
     if (ENDED_SHIFT_STATUSES.includes(shift.status)) {
       throw new AppException(409, ErrorCodes.SHIFT_NOT_OPEN, "This shift is closed or cancelled.");
@@ -120,15 +123,18 @@ export class TemporarySupervisorsService {
       newValue: String(assignment.canOpenCheckInPoints),
       correlationId,
     });
-    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_SUPERVISOR);
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_SUPERVISOR, shiftId);
 
     return assignment;
   }
 
   /** A shift's assignments with their state now (shift page), newest first. */
-  async listForShift(organizationId: string, shiftId: string) {
+  async listForShift(organizationId: string, shiftId: string, viewer?: AuthenticatedUser) {
     const shift = UUID_PATTERN.test(shiftId)
-      ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId }, select: { id: true, status: true } })
+      ? await this.prisma.shift.findFirst({
+          where: { id: shiftId, organizationId, ...(viewer ? (shiftScopeWhere(scopeOf(viewer)) ?? {}) : {}) },
+          select: { id: true, status: true },
+        })
       : null;
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
 
@@ -159,7 +165,7 @@ export class TemporarySupervisorsService {
 
   async revoke(organizationId: string, id: string, actor: AuthenticatedUser, correlationId: string) {
     const assignment = UUID_PATTERN.test(id)
-      ? await this.prisma.temporarySupervisorAssignment.findFirst({ where: { id, shift: { organizationId } } })
+      ? await this.prisma.temporarySupervisorAssignment.findFirst({ where: { id, shift: { organizationId, ...(shiftScopeWhere(scopeOf(actor)) ?? {}) } } })
       : null;
     if (!assignment) throw new AppException(404, ErrorCodes.NOT_FOUND, "Assignment not found.");
     if (assignment.revokedAt) throw new AppException(409, ErrorCodes.CONFLICT, "This assignment was already revoked.");
@@ -177,7 +183,7 @@ export class TemporarySupervisorsService {
       entityId: id,
       correlationId,
     });
-    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_SUPERVISOR);
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_SUPERVISOR, assignment.shiftId);
 
     return updated;
   }
@@ -350,16 +356,14 @@ export class TemporarySupervisorsService {
     const text = dto.text.trim();
     const supervisorName = await loadWorkerName(this.prisma, assignment.workerProfileId);
 
-    const audience = await this.notificationAudience.shiftManagerAndOwners(
-      organizationId,
-      NotificationType.TEMPORARY_SUPERVISOR_ISSUE_REPORTED,
-      assignment.shift.managerId,
-    );
-    const recipients = [...new Set([...(audience.managerUserId ? [audience.managerUserId] : []), ...audience.ownerUserIds])];
+    const recipients = await this.notificationAudience.recipients(organizationId, NotificationType.TEMPORARY_SUPERVISOR_ISSUE_REPORTED, {
+      managerUserId: assignment.shift.managerId,
+      context: await this.notificationAudience.contextOfShift(assignment.shiftId),
+    });
     await this.notifications.notifyMany(
-      recipients.map((recipientUserId) => ({
+      recipients.map((recipient) => ({
         organizationId,
-        recipientUserId,
+        recipientUserId: recipient.userId,
         type: NotificationType.TEMPORARY_SUPERVISOR_ISSUE_REPORTED,
         title: "Issue reported by a temporary supervisor",
         body: `${supervisorName ?? "A temporary supervisor"} reported an issue on "${assignment.shift.title}": ${text}`,

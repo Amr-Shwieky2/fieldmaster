@@ -2,6 +2,7 @@ import { AttendanceListTab, TimeEntryStatus } from "@fieldmaster/shared-types";
 import { MAX_PAGE_SIZE } from "../../../common/validation/patterns";
 import type { ListAttendanceQueryDto } from "../../attendance/dto/attendance-list.dto";
 import type { ReportDataDeps, ReportLoadContext } from "../report.types";
+import { reportScope } from "../report-scope";
 
 /**
  * The operational attendance report: every entry in the period (optionally
@@ -68,7 +69,7 @@ export async function loadOperationalAttendance(deps: ReportDataDeps, context: R
 
   const byId = new Map<string, AttendanceRow>();
   for (let page = 1; ; page += 1) {
-    const result = await deps.attendanceRecords.list(context.organizationId, { ...query, page });
+    const result = await deps.attendanceRecords.list(context.organizationId, { ...query, page }, reportScope(filters));
     for (const item of result.items) {
       const workedMinutes = item.rawDurationMinutes === null ? null : Math.max(0, item.rawDurationMinutes - item.unpaidBreakMinutes);
       byId.set(item.id, {

@@ -1,3 +1,4 @@
+import { reportShiftScope } from "../report-scope";
 import type { Prisma } from "@prisma/client";
 import { PayrollAdjustmentType } from "@fieldmaster/shared-types";
 import type { ReportDataDeps, ReportLoadContext } from "../report.types";
@@ -62,10 +63,12 @@ export interface ForgottenStampsFinancialData {
 
 export async function loadForgottenStampsOperational(deps: ReportDataDeps, context: ReportLoadContext): Promise<ForgottenStampsOperationalData> {
   const { filters, organizationId } = context;
+  const scoped = reportShiftScope(filters);
   const where: Prisma.ForgottenStampInfractionWhereInput = {
     organizationId,
     ...(filters.workerProfileId ? { workerProfileId: filters.workerProfileId } : {}),
     ...(filters.yearMonth ? { businessMonth: filters.yearMonth } : { timeEntry: { businessDate: { gte: filters.fromDate, lte: filters.toDate } } }),
+    ...(scoped ? { AND: [{ timeEntry: { shift: scoped } }] } : {}),
   };
   // An explicit allowlist without `deductionAgorot`: the operational version never reads money.
   const infractions = await deps.prisma.forgottenStampInfraction.findMany({

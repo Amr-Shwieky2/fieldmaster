@@ -8,13 +8,15 @@ import {
   EventOrigin,
   LocationValidationStatus,
   PayrollPeriodStatus,
-  STANDARD_DAY_MINUTES,
   TimeEntryStatus,
 } from "@fieldmaster/shared-types";
 import { splitWorkedMinutes } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN, paginate } from "../../common/validation/patterns";
+import type { AuthenticatedUser, MemberScope } from "../../common/auth/auth-context";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
+import { scopeOf, shiftScopeWhere } from "../../common/scope/scope-filters";
 import type { ListAttendanceQueryDto } from "./dto/attendance-list.dto";
 
 /**
@@ -242,16 +244,22 @@ export const DurationBasis = {
 
 @Injectable()
 export class AttendanceRecordsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly workRules: WorkRulesService,
+  ) {}
 
-  async list(organizationId: string, query: ListAttendanceQueryDto) {
+  /** A member restricted to some projects sees the entries of those projects' shifts only (`scope`). */
+  async list(organizationId: string, query: ListAttendanceQueryDto, scope: MemberScope = { restricted: false }) {
     const tab = query.tab ?? AttendanceListTab.PENDING;
     const { page, pageSize, skip, take } = paginate(query.page, query.pageSize);
 
+    const scopeFilter = shiftScopeWhere(scope);
     const shiftFilter: Prisma.ShiftWhereInput = {
       ...(query.projectId ? { projectId: query.projectId } : {}),
       ...(query.siteId ? { siteId: query.siteId } : {}),
       ...(query.shiftType ? { shiftType: query.shiftType } : {}),
+      ...(scopeFilter ? { AND: [scopeFilter] } : {}),
     };
     const base: Prisma.TimeEntryWhereInput = {
       organizationId,
@@ -306,8 +314,11 @@ export class AttendanceRecordsService {
     };
   }
 
-  async getEvidence(organizationId: string, id: string) {
-    const entry = UUID_PATTERN.test(id) ? await this.prisma.timeEntry.findFirst({ where: { id, organizationId }, select: EVIDENCE_SELECT }) : null;
+  async getEvidence(organizationId: string, id: string, viewer?: AuthenticatedUser) {
+    const scopeFilter = viewer ? shiftScopeWhere(scopeOf(viewer)) : undefined;
+    const entry = UUID_PATTERN.test(id)
+      ? await this.prisma.timeEntry.findFirst({ where: { id, organizationId, ...(scopeFilter ? { shift: scopeFilter } : {}) }, select: EVIDENCE_SELECT })
+      : null;
     if (!entry) throw new AppException(404, ErrorCodes.NOT_FOUND, "Time entry not found.");
 
     const offlineEventIds = entry.clockEvents.filter((event) => event.origin === EventOrigin.OFFLINE).map((event) => event.id);
@@ -363,12 +374,14 @@ export class AttendanceRecordsService {
 
     const periodFinalized = period?.status === PayrollPeriodStatus.FINALIZED;
     const hasEnded = entry.clockOutAt !== null && entry.rawDurationMinutes !== null;
+    // The work rules in force on the entry's business date (the day length and the overtime threshold of that day).
+    const rules = await this.workRules.rulesOn(organizationId, entry.businessDate);
     const split = hasEnded
-      ? splitWorkedMinutes({ rawDurationMinutes: entry.rawDurationMinutes!, unpaidBreakMinutes: entry.unpaidBreakMinutes, fullDayCredit: entry.fullDayCredit })
+      ? splitWorkedMinutes({ rawDurationMinutes: entry.rawDurationMinutes!, unpaidBreakMinutes: entry.unpaidBreakMinutes, fullDayCredit: entry.fullDayCredit }, rules)
       : null;
     const isApproved = entry.status === TimeEntryStatus.APPROVED;
     const awaitingApproval = entry.status === TimeEntryStatus.PENDING_APPROVAL || entry.status === TimeEntryStatus.CORRECTION_REQUESTED;
-    const fullDayCreditEligible = hasEnded && entry.rawDurationMinutes! < STANDARD_DAY_MINUTES && !entry.fullDayCredit;
+    const fullDayCreditEligible = hasEnded && entry.rawDurationMinutes! < rules.standardDayMinutes && !entry.fullDayCredit;
 
     // The same flag tests as the list, on the same facts.
     const flagFacts = {
@@ -395,6 +408,8 @@ export class AttendanceRecordsService {
       approvedAt: entry.approvedAt,
       approvedByName: nameOf(entry.approvedBy),
       periodFinalized,
+      /** The day-length rules of the entry's business date (no money): the correction preview uses them. */
+      dayRules: { standardDayMinutes: rules.standardDayMinutes, overtimeThresholdMinutes: rules.overtimeThresholdMinutes },
       worker: {
         id: entry.worker.id,
         fullLegalName: entry.worker.membership.user.fullLegalName,

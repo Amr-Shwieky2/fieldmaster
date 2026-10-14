@@ -129,9 +129,11 @@ describe("Users and devices (Step 6)", () => {
     request(http()).patch(`/api/v1${path}`).set("Authorization", `Bearer ${token}`).send(body);
   const refresh = (refreshToken: string) => request(http()).post("/api/v1/auth/refresh").send({ refreshToken });
 
-  async function setup() {
+  /** `maxOwners`: the organization's limit of active Owners (a setting; none unless a test sets it). */
+  async function setup(options: { maxOwners?: number } = {}) {
     const owner = await createOrgWithOwner(prisma, OWNER_PHONE, "Dana Owner");
     const organizationId = owner.org.id;
+    if (options.maxOwners !== undefined) await prisma.organizationSettings.update({ where: { organizationId }, data: { maxOwners: options.maxOwners } });
     const manager = await addFieldManager(prisma, organizationId, MANAGER_PHONE, "Yossi Manager");
     const worker = await addWorker(prisma, organizationId, WORKER_PHONE, "Eli Worker");
     const project = await createProject(prisma, organizationId);
@@ -355,8 +357,8 @@ describe("Users and devices (Step 6)", () => {
     expect(neverSignedIn.body).toMatchObject({ id: second.membership.id, role: OrgRole.OWNER, lastActiveAt: null });
   });
 
-  it("a role change needs a reason (non-blank, at most 500 characters) and is audited old -> new with it; a third active Owner is refused", async () => {
-    const ctx = await setup();
+  it("a role change needs a reason (non-blank, at most 500 characters) and is audited old -> new with it; an Owner beyond the organization's limit (2 here) is refused", async () => {
+    const ctx = await setup({ maxOwners: 2 });
     const second = await addFieldManager(prisma, ctx.organizationId, SECOND_MANAGER_PHONE, "Rina Manager");
     const rolePath = (membershipId: string) => `/memberships/${membershipId}/role`;
 
@@ -409,8 +411,8 @@ describe("Users and devices (Step 6)", () => {
     expect(await prisma.auditLog.count({ where: { action: "MEMBERSHIP_ROLE_CHANGED" } })).toBe(2);
   });
 
-  it("an organization keeps one or two active Owners: the last can't be demoted, suspended or archived; a suspended Owner doesn't count, and reactivating a third is refused", async () => {
-    const ctx = await setup();
+  it("an organization keeps at least one active Owner (and at most its limit, 2 here): the last can't be demoted, suspended or archived; a suspended Owner doesn't count, and reactivating one beyond the limit is refused", async () => {
+    const ctx = await setup({ maxOwners: 2 });
     const second = await addFieldManager(prisma, ctx.organizationId, SECOND_MANAGER_PHONE, "Rina Manager");
     const self = ctx.owner.membership.id;
 

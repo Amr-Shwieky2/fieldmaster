@@ -5,6 +5,7 @@ import { PayrollCalculationService } from "../payroll/payroll-calculation.servic
 import { AttendanceCostService } from "../payroll/attendance-cost.service";
 import { PayrollVersionsService } from "../payroll/payroll-versions.service";
 import { AttendanceRecordsService } from "../attendance/attendance-records.service";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
 import type { ReportDataDeps, ReportDefinition, ReportFilters, ReportLoadContext, ReportNames } from "./report.types";
 
 /**
@@ -21,6 +22,7 @@ export class ReportDataService {
     private readonly prisma: PrismaService,
     private readonly payrollCalculation: PayrollCalculationService,
     private readonly attendanceCost: AttendanceCostService,
+    private readonly workRules: WorkRulesService,
     private readonly moduleRef: ModuleRef,
   ) {}
 
@@ -36,6 +38,7 @@ export class ReportDataService {
       prisma: this.prisma,
       payrollCalculation: this.payrollCalculation,
       attendanceCost: this.attendanceCost,
+      workRules: this.workRules,
       attendanceRecords: this.moduleRef.get(AttendanceRecordsService, { strict: false }),
       payrollVersions: this.moduleRef.get(PayrollVersionsService, { strict: false }),
     };

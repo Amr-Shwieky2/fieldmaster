@@ -1,6 +1,7 @@
 import { PayrollAdjustmentType, TimeEntryStatus } from "@fieldmaster/shared-types";
 import { pickEffectiveCompensationProfile } from "@fieldmaster/shared-validation";
 import { toEngineProfile } from "../../payroll/payroll-inputs.service";
+import { reportShiftScope } from "../report-scope";
 import type { AttendanceRecordsService } from "../../attendance/attendance-records.service";
 import type { ReportDataDeps, ReportLoadContext } from "../report.types";
 
@@ -372,8 +373,9 @@ export async function loadLedgerOperational(deps: ReportDataDeps, context: Repor
   const workerProfileId = filters.workerProfileId as string;
   const businessDate = { gte: filters.fromDate, lte: filters.toDate };
 
+  const scoped = reportShiftScope(filters);
   const rows = await deps.prisma.timeEntry.findMany({
-    where: { organizationId, workerProfileId, businessDate },
+    where: { organizationId, workerProfileId, businessDate, ...(scoped ? { shift: scoped } : {}) },
     select: { id: true },
     orderBy: [{ businessDate: "asc" }, { clockInAt: "asc" }, { id: "asc" }],
   });
@@ -382,7 +384,7 @@ export async function loadLedgerOperational(deps: ReportDataDeps, context: Repor
   for (const row of rows) entries.push(ledgerEntry(await deps.attendanceRecords.getEvidence(organizationId, row.id)));
 
   const unlinked = await deps.prisma.rejectedClockAttempt.findMany({
-    where: { organizationId, workerProfileId, timeEntryId: null, shift: { businessDate } },
+    where: { organizationId, workerProfileId, timeEntryId: null, shift: { businessDate, ...(scoped ? { AND: [scoped] } : {}) } },
     select: {
       eventType: true,
       origin: true,
@@ -434,6 +436,7 @@ export async function loadLedgerFinancial(deps: ReportDataDeps, context: ReportL
       .filter((adjustment) => adjustment.relatedInfractionId === infractionId && adjustment.type === type)
       .reduce((sum, adjustment) => sum + adjustment.amountAgorot, 0);
 
+  const rules = await deps.workRules.resolver(context.organizationId);
   const entries = operational.entries.map((entry): LedgerFinancialEntry => {
     let payStatus: LedgerPayStatus = LedgerPayStatus.NOT_APPROVED;
     let pay: LedgerEntryPay | null = null;
@@ -446,6 +449,7 @@ export async function loadLedgerFinancial(deps: ReportDataDeps, context: ReportL
         const result = deps.payrollCalculation.computeEntryCompensation(
           { approvedRegularMinutes: entry.minutes.regular, approvedOvertimeMinutes: entry.minutes.overtime, fullDayCredit: entry.fullDayCredit.applied },
           profile,
+          rules.rulesFor(entry.businessDate),
         );
         payStatus = LedgerPayStatus.PAID;
         pay = {

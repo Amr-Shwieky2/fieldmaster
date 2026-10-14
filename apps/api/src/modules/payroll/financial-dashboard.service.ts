@@ -8,6 +8,7 @@ import { PayrollInputsService, PENDING_ENTRY_STATUSES } from "./payroll-inputs.s
 import {
   buildPayrollSnapshotResult,
   PAYROLL_SNAPSHOT_SCHEMA_VERSION,
+  snapshotRulesFor,
   type PayrollSnapshotInputs,
   type PayrollSnapshotResult,
   type PayrollSnapshotTotals,
@@ -197,7 +198,7 @@ export class FinancialDashboardService {
       return { source: PayrollFigureSource.FINALIZED, finalizedVersion: latest.version, ...(await this.legacyFigures(latest.id)) };
     }
     const { inputs } = await this.inputs.load(organizationId, yearMonth);
-    const month = calculatePayrollMonth({ entries: inputs.entries, profiles: inputs.compensationProfiles, adjustments: inputs.adjustments });
+    const month = calculatePayrollMonth({ entries: inputs.entries, profiles: inputs.compensationProfiles, adjustments: inputs.adjustments, rulesFor: snapshotRulesFor(inputs) });
     return { source: PayrollFigureSource.LIVE, finalizedVersion: null, inputs, ...buildPayrollSnapshotResult(inputs, month.workers, month.entries) };
   }
 
@@ -280,7 +281,7 @@ export class FinancialDashboardService {
         approvedOvertimeMinutes: true,
       },
     });
-    const estimates = await Promise.all(entries.map((entry) => this.costs.estimateEntry(entry)));
+    const estimates = await this.costs.estimateEntries(organizationId, entries);
     return {
       entries: entries.length,
       exposureAgorot: estimates.reduce((sum, estimate) => sum + (estimate.basis === CostBasis.ESTIMATED ? (estimate.estimatedCostAgorot ?? 0) : 0), 0),

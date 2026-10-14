@@ -1,17 +1,20 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import { OrgRole, PayrollAdjustmentSource, PayrollAdjustmentType, PayrollPeriodStatus } from "@fieldmaster/shared-types";
+import { PayrollAdjustmentSource, PayrollAdjustmentType, PayrollPeriodStatus } from "@fieldmaster/shared-types";
 import { evaluateForgottenStampInfraction } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
+import { canViewFinancials } from "../../common/auth/permissions";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
+import { timeEntryScopeWhere } from "../../common/scope/scope-filters";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 
 /**
- * Every infraction column except the deduction, which is money and Owner-only
- * (spec section 6.2 / 23.5). Field Managers see the infractions they manage,
- * never what they cost the worker.
+ * Every infraction column except the deduction, which is money (spec section
+ * 6.2 / 23.5): only a member who may see financials gets it. Everyone else
+ * sees the infractions they manage, never what they cost the worker.
  */
 const INFRACTION_FIELDS_WITHOUT_DEDUCTION = {
   id: true,
@@ -29,16 +32,20 @@ const INFRACTION_FIELDS_WITHOUT_DEDUCTION = {
 } satisfies Prisma.ForgottenStampInfractionSelect;
 
 /**
- * Two-strike rule (spec section 14): the first two forgotten clock-stamp
- * infractions in a calendar month are free; the third and every later one
- * deduct a fixed 1000 agorot, recorded as a standing PayrollAdjustment that
- * gets attached to that month's PayrollItem once payroll is calculated.
+ * Two-strike rule (spec section 14): the first forgotten clock-stamp
+ * infractions in a calendar month are free (two by default); every later one
+ * deducts the penalty (1000 agorot by default), recorded as a standing
+ * PayrollAdjustment that gets attached to that month's PayrollItem once
+ * payroll is calculated. How many are free and how much the penalty is come
+ * from the work rules in force on the date of the infraction's time entry;
+ * an adjustment already recorded keeps the amount it was created with.
  */
 @Injectable()
 export class ForgottenStampService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly workRules: WorkRulesService,
   ) {}
 
   async recordInfraction(
@@ -54,7 +61,10 @@ export class ForgottenStampService {
   ) {
     const existingCount = await tx.forgottenStampInfraction.count({ where: { workerProfileId, businessMonth } });
     const monthlySequenceNumber = existingCount + 1;
-    const evaluation = evaluateForgottenStampInfraction(monthlySequenceNumber);
+    // The rules in force on the day of the entry the correction is about (or, with no entry date, the first day of the month).
+    const entry = await tx.timeEntry.findUnique({ where: { id: timeEntryId }, select: { businessDate: true } });
+    const rules = await this.workRules.rulesOn(organizationId, entry?.businessDate ?? `${businessMonth}-01`, tx);
+    const evaluation = evaluateForgottenStampInfraction(monthlySequenceNumber, rules);
 
     const infraction = await tx.forgottenStampInfraction.create({
       data: {
@@ -166,8 +176,10 @@ export class ForgottenStampService {
   /**
    * Infractions for the forgotten-stamp report, newest first, with the
    * worker, the correction that recorded them and the corrected entry's date.
-   * An Owner also gets `deductionAgorot`; for anyone else the column is never
-   * read (FM: counts and sequence numbers only).
+   * A member who may see financials also gets `deductionAgorot`; for anyone
+   * else the column is never read (counts and sequence numbers only). A member
+   * restricted to some projects sees the infractions of entries in those
+   * projects only.
    */
   async listForOrganization(organizationId: string, viewer: AuthenticatedUser, filters: { workerProfileId?: string; month?: string } = {}) {
     const related = {
@@ -175,8 +187,10 @@ export class ForgottenStampService {
       correction: { select: { id: true, field: true, oldValue: true, newValue: true, reason: true, note: true, editedBy: true, createdAt: true } },
       timeEntry: { select: { id: true, businessDate: true, status: true } },
     } satisfies Prisma.ForgottenStampInfractionSelect;
+    const entryScope = timeEntryScopeWhere(viewer.scope ?? { restricted: false });
     const where: Prisma.ForgottenStampInfractionWhereInput = {
       organizationId,
+      ...(entryScope ? { timeEntry: entryScope } : {}),
       ...(filters.workerProfileId ? { workerProfileId: filters.workerProfileId } : {}),
       ...(filters.month ? { businessMonth: filters.month } : {}),
     };
@@ -187,7 +201,7 @@ export class ForgottenStampService {
     ];
 
     const rows =
-      viewer.role === OrgRole.OWNER
+      canViewFinancials(viewer)
         ? await this.prisma.forgottenStampInfraction.findMany({
             where,
             orderBy,

@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { PERMISSIONS_KEY } from "../decorators/require-permissions.decorator";
-import { roleHasPermission, type Permission } from "../auth/permissions";
+import { hasPermission, type Permission } from "../auth/permissions";
 import type { AuthenticatedRequest } from "../auth/auth-context";
 
 @Injectable()
@@ -19,7 +19,7 @@ export class PermissionsGuard implements CanActivate {
     const user = request.user;
     if (!user) throw new ForbiddenException("No authenticated user in context.");
 
-    const hasAll = required.every((permission) => roleHasPermission(user.role, permission));
+    const hasAll = required.every((permission) => hasPermission(user, permission));
     if (!hasAll) {
       throw new ForbiddenException(`Missing required permission(s): ${required.join(", ")}`);
     }

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { pickWorkRules, type WorkRuleVersion, type WorkRules } from "@fieldmaster/shared-types";
 import {
   groupPayrollEntryCosts,
   sumPayrollWorkers,
@@ -58,6 +59,19 @@ export interface PayrollSnapshotInputs {
   workers: SnapshotWorkerName[];
   /** Entries waiting for approval (or a correction) at calculation time: not included. */
   pending: { entries: number; byWorker: (SnapshotWorkerName & { entries: number })[] };
+  /**
+   * The organization's work-rule versions when the calculation ran (flexible
+   * organization model): each entry was priced with the version in force on
+   * its business date, and a finalized month keeps exactly these. Absent on
+   * calculations made before the rules were settings: the default rules.
+   */
+  workRules?: WorkRuleVersion[];
+}
+
+/** The work rules of each business date of a stored calculation. */
+export function snapshotRulesFor(inputs: Pick<PayrollSnapshotInputs, "workRules">): (businessDate: string) => WorkRules {
+  const versions = inputs.workRules ?? [];
+  return (businessDate) => pickWorkRules(versions, businessDate);
 }
 
 export interface SnapshotWorkerResult extends PayrollWorkerResult {
@@ -90,12 +104,20 @@ export function buildPayrollSnapshotResult(
   workers: readonly PayrollWorkerResult[],
   entryResults: readonly PayrollEntryResult[],
 ): { result: PayrollSnapshotResult; totals: PayrollSnapshotTotals } {
-  const nameOf = (workerProfileId: string) => inputs.workers.find((worker) => worker.workerProfileId === workerProfileId)?.fullLegalName ?? "";
-  const pendingOf = (workerProfileId: string) => inputs.pending.byWorker.find((worker) => worker.workerProfileId === workerProfileId)?.entries ?? 0;
+  // Lookups by id (maps): a month of a few hundred workers must not cost a scan per worker.
+  const nameById = new Map(inputs.workers.map((worker) => [worker.workerProfileId, worker.fullLegalName]));
+  const pendingById = new Map(inputs.pending.byWorker.map((worker) => [worker.workerProfileId, worker.entries]));
+  const nameOf = (workerProfileId: string) => nameById.get(workerProfileId) ?? "";
+  const pendingOf = (workerProfileId: string) => pendingById.get(workerProfileId) ?? 0;
   const entryById = new Map(inputs.entries.map((entry) => [entry.timeEntryId, entry]));
-
-  const projectName = (id: string | null) => (id === null ? null : (inputs.entries.find((entry) => entry.projectId === id)?.projectName ?? null));
-  const site = (id: string | null) => (id === null ? null : (inputs.entries.find((entry) => entry.siteId === id) ?? null));
+  const projectNames = new Map<string, string | null>();
+  const sitesById = new Map<string, SnapshotEntryInput>();
+  for (const entry of inputs.entries) {
+    if (entry.projectId !== null && !projectNames.has(entry.projectId)) projectNames.set(entry.projectId, entry.projectName);
+    if (entry.siteId !== null && !sitesById.has(entry.siteId)) sitesById.set(entry.siteId, entry);
+  }
+  const projectName = (id: string | null) => (id === null ? null : (projectNames.get(id) ?? null));
+  const site = (id: string | null) => (id === null ? null : (sitesById.get(id) ?? null));
 
   const workersWithoutCompensation = workers
     .filter((worker) => worker.entriesWithoutCompensation > 0)
@@ -140,9 +162,16 @@ export function payrollInputsHash(parts: {
   entries: readonly { id: string; updatedAt: Date | string }[];
   adjustmentIds: readonly string[];
   profiles: readonly { id: string; updatedAt: Date | string }[];
+  /** The ids of the organization's work-rule versions: a new version makes a working month "changed since calculation". Left out while there are none. */
+  workRuleVersionIds?: readonly string[];
 }): string {
   const stamp = (rows: readonly { id: string; updatedAt: Date | string }[]) =>
     rows.map((row) => `${row.id}@${row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt}`).sort();
-  const canonical = JSON.stringify({ entries: stamp(parts.entries), adjustments: [...parts.adjustmentIds].sort(), profiles: stamp(parts.profiles) });
+  const canonical = JSON.stringify({
+    entries: stamp(parts.entries),
+    adjustments: [...parts.adjustmentIds].sort(),
+    profiles: stamp(parts.profiles),
+    ...(parts.workRuleVersionIds && parts.workRuleVersionIds.length > 0 ? { workRules: [...parts.workRuleVersionIds].sort() } : {}),
+  });
   return createHash("sha256").update(canonical).digest("hex");
 }

@@ -49,7 +49,7 @@ export class TimeEntriesController {
   @Get("attendance-approvals/pending")
   @RequirePermissions(Permission.APPROVE_ATTENDANCE)
   listPending(@CurrentUser() user: AuthenticatedUser) {
-    return this.approvalsService.listPendingApproval(user.organizationId);
+    return this.approvalsService.listPendingApproval(user.organizationId, user);
   }
 
   @Post("time-entries/:id/full-day-credit")
@@ -93,7 +93,7 @@ export class TimeEntriesController {
   }
 
   @Get("forgotten-stamp-infractions")
-  @RequirePermissions(Permission.APPROVE_ATTENDANCE)
+  @RequirePermissions(Permission.VIEW_ATTENDANCE)
   listForgottenStampInfractions(@CurrentUser() user: AuthenticatedUser, @Query() query: ListForgottenStampsQueryDto) {
     return this.forgottenStampService.listForOrganization(user.organizationId, user, query);
   }

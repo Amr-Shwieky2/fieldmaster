@@ -7,8 +7,8 @@ import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { OperationsService } from "./operations.service";
 
 /**
- * The live operations page's snapshot (Owners and Field Managers; no money
- * for anyone). Clients refetch it when an `operations` event arrives on the
+ * The live operations page's snapshot (whoever holds VIEW_OPERATIONS; no
+ * money for anyone). Clients refetch it when an `operations` event arrives on the
  * notifications WebSocket or SSE stream.
  */
 @ApiBearerAuth()
@@ -20,6 +20,6 @@ export class OperationsController {
   @Get("live")
   @RequirePermissions(Permission.VIEW_OPERATIONS)
   live(@CurrentUser() user: AuthenticatedUser) {
-    return this.operations.snapshot(user.organizationId);
+    return this.operations.snapshot(user.organizationId, user);
   }
 }

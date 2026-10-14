@@ -11,6 +11,7 @@ import { OrganizationSettingsService } from "../../common/settings/organization-
 import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { scopeOf, shiftInScope, shiftScopeWhere } from "../../common/scope/scope-filters";
 import { projectSelectFor } from "../sites/project-fields";
 import type { CreateShiftDto } from "./dto/create-shift.dto";
 
@@ -33,6 +34,10 @@ export class ShiftsService {
       throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "scheduledEnd must be after scheduledStart.");
     }
     const settings = await this.settings.get(organizationId);
+    // A member restricted to some projects creates shifts in those projects only.
+    if (!shiftInScope(scopeOf(actor), { projectId: dto.projectId ?? null, siteId: dto.siteId ?? null })) {
+      throw new AppException(403, ErrorCodes.FORBIDDEN, "This project or site is outside the projects you are restricted to.");
+    }
 
     const shift = await this.prisma.shift.create({
       data: {
@@ -78,6 +83,7 @@ export class ShiftsService {
     return this.prisma.shift.findMany({
       where: {
         organizationId,
+        ...(scope ? {} : (shiftScopeWhere(scopeOf(viewer)) ?? {})),
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.businessDate ? { businessDate: filters.businessDate } : {}),
         ...(filters.shiftType ? { shiftType: filters.shiftType } : {}),
@@ -114,7 +120,7 @@ export class ShiftsService {
       where: {
         id,
         organizationId,
-        ...(scope ? { assignments: { some: { workerProfileId: scope.workerProfileId, removedAt: null } } } : {}),
+        ...(scope ? { assignments: { some: { workerProfileId: scope.workerProfileId, removedAt: null } } } : (shiftScopeWhere(scopeOf(viewer)) ?? {})),
       },
       include: {
         // Managers get every assignment with the worker's name and phone. A worker gets only their own assignment,
@@ -136,7 +142,9 @@ export class ShiftsService {
   }
 
   async assignWorker(organizationId: string, shiftId: string, workerProfileId: string, actor: AuthenticatedUser, correlationId: string) {
-    const shift = UUID_PATTERN.test(shiftId) ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId } }) : null;
+    const shift = UUID_PATTERN.test(shiftId)
+      ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId, ...(shiftScopeWhere(scopeOf(actor)) ?? {}) } })
+      : null;
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
 
     const worker = await this.prisma.workerProfile.findFirst({ where: { id: workerProfileId, organizationId } });
@@ -200,7 +208,9 @@ export class ShiftsService {
   }
 
   async close(organizationId: string, shiftId: string, actor: AuthenticatedUser, correlationId: string) {
-    const shift = UUID_PATTERN.test(shiftId) ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId } }) : null;
+    const shift = UUID_PATTERN.test(shiftId)
+      ? await this.prisma.shift.findFirst({ where: { id: shiftId, organizationId, ...(shiftScopeWhere(scopeOf(actor)) ?? {}) } })
+      : null;
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
     // Step 6 fix: closing again would overwrite closedAt/closedBy and audit twice; a cancelled shift stays cancelled.
     if (shift.status === ShiftStatus.CLOSED || shift.status === ShiftStatus.CANCELLED) {
@@ -228,7 +238,7 @@ export class ShiftsService {
       correlationId,
     });
     // Its temporary points expired and its temporary supervisors lost access (checked live).
-    this.realtime.operationsChanged(organizationId, OperationsChangeKind.SHIFT);
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.SHIFT, shiftId);
 
     return updated;
   }

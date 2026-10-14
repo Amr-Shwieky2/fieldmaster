@@ -391,11 +391,11 @@ export class OnboardingService {
   /** Owners by default; Field Managers too when the organization's notification settings say so. Names only: never an ID number or bank detail. */
   private async notifyManagers(organizationId: string, workerProfileId: string, workerName: string) {
     try {
-      const { ownerUserIds, fieldManagerUserIds } = await this.notificationAudience.managers(organizationId, NotificationType.ONBOARDING_SUBMITTED);
+      const recipients = await this.notificationAudience.recipients(organizationId, NotificationType.ONBOARDING_SUBMITTED);
       await this.notifications.notifyMany(
-        [...ownerUserIds, ...fieldManagerUserIds].map((recipientUserId) => ({
+        recipients.map((recipient) => ({
           organizationId,
-          recipientUserId,
+          recipientUserId: recipient.userId,
           type: NotificationType.ONBOARDING_SUBMITTED,
           title: "New worker application",
           body: `${workerName} submitted an onboarding application awaiting your review.`,

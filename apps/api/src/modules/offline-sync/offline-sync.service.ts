@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { ClockEventType, EventOrigin, LocationValidationStatus, NotificationType, OfflineSyncEventStatus, OrgRole } from "@fieldmaster/shared-types";
+import { ClockEventType, EventOrigin, LocationValidationStatus, NotificationType, OfflineSyncEventStatus, Permission } from "@fieldmaster/shared-types";
 import { canonicalizeOfflineEvent, verifyOfflineEventSignature, type OfflineEventSignablePayload } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
@@ -11,6 +11,8 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { ClockEventsService } from "../attendance/clock-events.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { hasPermission } from "../../common/auth/permissions";
+import { scopeOf, workerScopeWhere } from "../../common/scope/scope-filters";
 import type { ClockInDto } from "../attendance/dto/clock-in.dto";
 import type { ClockOutDto } from "../attendance/dto/clock-out.dto";
 import type { OfflineSyncBatchDto, OfflineSyncEventInputDto } from "./dto/offline-sync-batch.dto";
@@ -100,26 +102,28 @@ export class OfflineSyncService {
   }
 
   async getBatch(organizationId: string, batchId: string, actor: AuthenticatedUser) {
+    const canReviewAll = hasPermission(actor, Permission.VIEW_ATTENDANCE);
     const batch = await this.prisma.offlineSyncBatch.findFirst({
-      where: { id: batchId, organizationId },
+      where: { id: batchId, organizationId, ...(canReviewAll && workerScopeWhere(scopeOf(actor)) ? { worker: workerScopeWhere(scopeOf(actor)) } : {}) },
       include: { events: { orderBy: { deviceTimestamp: "asc" } } },
     });
     if (!batch) throw new AppException(404, ErrorCodes.NOT_FOUND, "Offline sync batch not found.");
-    // Workers only ever see their own sync history; Owners/Field Managers
-    // (even ones who are also time-trackable) can review any worker's --
-    // this mirrors "Owners and Field Managers can review operational flags"
-    // (spec 19.2).
-    if (actor.role === OrgRole.WORKER && batch.workerProfileId !== actor.workerProfileId) {
+    // Members who may not review everyone's attendance only ever see their own
+    // sync history; those who may (even ones who are also time-trackable) can
+    // review any worker's -- this mirrors "Owners and Field Managers can
+    // review operational flags" (spec 19.2).
+    if (!canReviewAll && batch.workerProfileId !== actor.workerProfileId) {
       throw new AppException(403, ErrorCodes.FORBIDDEN, "You cannot view another worker's offline sync history.");
     }
     return batch;
   }
 
   async listBatches(organizationId: string, actor: AuthenticatedUser) {
-    const where =
-      actor.role === OrgRole.WORKER
-        ? { organizationId, workerProfileId: actor.workerProfileId ?? "" }
-        : { organizationId };
+    const canReviewAll = hasPermission(actor, Permission.VIEW_ATTENDANCE);
+    const workerScope = canReviewAll ? workerScopeWhere(scopeOf(actor)) : undefined;
+    const where = !canReviewAll
+      ? { organizationId, workerProfileId: actor.workerProfileId ?? "" }
+      : { organizationId, ...(workerScope ? { worker: workerScope } : {}) };
     return this.prisma.offlineSyncBatch.findMany({
       where,
       include: { events: true },
@@ -309,13 +313,13 @@ export class OfflineSyncService {
     const rejectedCount = outcomes.filter((o) => o.status === OfflineSyncEventStatus.REJECTED).length;
     const body = `${worker?.membership.user.fullLegalName ?? "A worker"}'s offline attendance sync needs review: ${flaggedCount} flagged, ${rejectedCount} rejected.`;
     const type = rejectedCount > 0 ? NotificationType.OFFLINE_EVENT_REJECTED : NotificationType.SUSPICIOUS_LOCATION_DETECTED;
-    // Owners by default; Field Managers too when the organization's notification settings say so.
-    const { ownerUserIds, fieldManagerUserIds } = await this.notificationAudience.managers(organizationId, type);
+    // Owners by default; Field Managers and custom roles too when the organization's notification settings say so.
+    const recipients = await this.notificationAudience.recipients(organizationId, type);
 
     await this.notifications.notifyMany(
-      [...ownerUserIds, ...fieldManagerUserIds].map((recipientUserId) => ({
+      recipients.map((recipient) => ({
         organizationId,
-        recipientUserId,
+        recipientUserId: recipient.userId,
         type,
         title: "Offline attendance needs review",
         body,

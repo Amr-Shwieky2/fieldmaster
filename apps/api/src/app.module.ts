@@ -13,6 +13,7 @@ import { PermissionsGuard } from "./common/guards/permissions.guard";
 import { AuthModule } from "./modules/auth/auth.module";
 import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { MembershipsModule } from "./modules/memberships/memberships.module";
+import { RolesModule } from "./modules/roles/roles.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { WorkersModule } from "./modules/workers/workers.module";
 import { FileAssetsModule } from "./modules/files/file-assets.module";
@@ -42,6 +43,7 @@ import { AttachmentsModule } from "./modules/attachments/attachments.module";
     QueueModule,
     AuthModule,
     OrganizationsModule,
+    RolesModule,
     MembershipsModule,
     NotificationsModule,
     WorkersModule,

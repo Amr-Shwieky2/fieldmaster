@@ -10,6 +10,7 @@ import { ForgottenStampService } from "./forgotten-stamp.service";
 import { RejectedClockAttemptsService } from "./rejected-clock-attempts.service";
 import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { scopeOf, shiftScopeWhere, timeEntryScopeWhere } from "../../common/scope/scope-filters";
 import { CorrectionField, type CreateManualCorrectionDto } from "./dto/manual-correction.dto";
 
 export interface CorrectionRequestMeta {
@@ -37,7 +38,7 @@ export class ManualCorrectionsService {
 
     const result = await this.prisma.$transaction(async (tx) => {
       let timeEntry = dto.timeEntryId
-        ? await tx.timeEntry.findFirst({ where: { id: dto.timeEntryId, organizationId } })
+        ? await tx.timeEntry.findFirst({ where: { id: dto.timeEntryId, organizationId, ...(timeEntryScopeWhere(scopeOf(actor)) ?? {}) } })
         : null;
 
       if (timeEntry) {
@@ -49,7 +50,7 @@ export class ManualCorrectionsService {
         if (dto.field !== CorrectionField.CLOCK_IN || !dto.shiftId || !dto.workerProfileId) {
           throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "shiftId and workerProfileId are required to create a missing clock-in.");
         }
-        const shift = await tx.shift.findFirst({ where: { id: dto.shiftId, organizationId } });
+        const shift = await tx.shift.findFirst({ where: { id: dto.shiftId, organizationId, ...(shiftScopeWhere(scopeOf(actor)) ?? {}) } });
         if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
         // The new entry belongs to the caller's organization, so its worker must too.
         const worker = await tx.workerProfile.findFirst({ where: { id: dto.workerProfileId, organizationId }, select: { id: true } });
@@ -218,7 +219,7 @@ export class ManualCorrectionsService {
       return { timeEntry: updatedEntry, correction };
     });
     // A correction can open or close an entry: the live operations page refetches.
-    this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE);
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE, result.timeEntry.shiftId);
     return result;
   }
 

@@ -2,12 +2,14 @@ import { Injectable } from "@nestjs/common";
 import {
   LocationValidationStatus,
   OfflineSyncEventStatus,
-  STANDARD_DAY_MINUTES,
   ShiftStatus,
   TemporaryPointStatus,
   TimeEntryStatus,
 } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
+import { scopeOf, shiftScopeWhere, timeEntryScopeWhere, workerScopeWhere } from "../../common/scope/scope-filters";
 
 /** How far back the "recent" lists look. */
 const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -22,20 +24,29 @@ const minutesSince = (from: Date, now: Date) => Math.max(0, Math.floor((now.getT
 
 /**
  * The live operations page (Step 6): what is happening right now, for
- * Owners and Field Managers alike. Operational only -- no money for anyone,
- * Owners included. Positions are the last accepted clock event of each open
- * entry (event-based; there is no continuous tracking).
+ * everyone who holds VIEW_OPERATIONS. Operational only -- no money for
+ * anyone, Owners included. Positions are the last accepted clock event of
+ * each open entry (event-based; there is no continuous tracking). A member
+ * restricted to some projects sees only those projects' shifts, workers and
+ * events (the organization-wide emergency call-outs are left out).
  */
 @Injectable()
 export class OperationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly workRules: WorkRulesService,
+  ) {}
 
-  async snapshot(organizationId: string, now = new Date()) {
+  async snapshot(organizationId: string, viewer?: AuthenticatedUser, now = new Date()) {
     const recentSince = new Date(now.getTime() - RECENT_WINDOW_MS);
+    const scope = viewer ? scopeOf(viewer) : { restricted: false as const };
+    const shiftScope = shiftScopeWhere(scope);
+    const inShiftScope = shiftScope ? { shift: shiftScope } : {};
+    const rules = await this.workRules.current(organizationId, this.prisma);
 
     const [openEntries, shifts, points, emergencies, attempts, suspicious, offline] = await Promise.all([
       this.prisma.timeEntry.findMany({
-        where: { organizationId, status: TimeEntryStatus.ACTIVE },
+        where: { organizationId, status: TimeEntryStatus.ACTIVE, ...(timeEntryScopeWhere(scope) ?? {}) },
         select: {
           id: true,
           clockInAt: true,
@@ -56,7 +67,10 @@ export class OperationsService {
         where: {
           organizationId,
           status: { notIn: [ShiftStatus.DRAFT, ShiftStatus.CLOSED, ShiftStatus.CANCELLED] },
-          OR: [{ scheduledStart: { lte: now }, scheduledEnd: { gte: now } }, { timeEntries: { some: { status: TimeEntryStatus.ACTIVE } } }],
+          AND: [
+            { OR: [{ scheduledStart: { lte: now }, scheduledEnd: { gte: now } }, { timeEntries: { some: { status: TimeEntryStatus.ACTIVE } } }] },
+            ...(shiftScope ? [shiftScope] : []),
+          ],
         },
         select: {
           id: true,
@@ -73,12 +87,13 @@ export class OperationsService {
         orderBy: { scheduledStart: "asc" },
       }),
       this.prisma.temporaryCheckInPoint.findMany({
-        where: { organizationId, status: TemporaryPointStatus.ACTIVE, revokedAt: null, expiresAt: { gt: now } },
+        where: { organizationId, status: TemporaryPointStatus.ACTIVE, revokedAt: null, expiresAt: { gt: now }, ...inShiftScope },
         select: { id: true, name: true, latitude: true, longitude: true, radiusMeters: true, expiresAt: true, shift: { select: { id: true, title: true, shiftType: true } } },
         orderBy: { createdAt: "asc" },
       }),
       this.prisma.emergencyCallout.findMany({
-        where: { organizationId, actualEndClick: null },
+        // The Turan rota belongs to the whole organization: a member restricted to some projects sees no call-outs.
+        where: { organizationId, actualEndClick: null, ...(scope.restricted ? { id: { in: [] } } : {}) },
         select: {
           id: true,
           timeEntryId: true,
@@ -92,7 +107,7 @@ export class OperationsService {
         orderBy: { actualStartClick: "asc" },
       }),
       this.prisma.rejectedClockAttempt.findMany({
-        where: { organizationId, serverReceivedAt: { gte: recentSince } },
+        where: { organizationId, serverReceivedAt: { gte: recentSince }, ...inShiftScope },
         select: {
           id: true,
           eventType: true,
@@ -113,7 +128,7 @@ export class OperationsService {
       }),
       this.prisma.clockEvent.findMany({
         where: {
-          timeEntry: { organizationId },
+          timeEntry: { organizationId, ...inShiftScope },
           serverReceivedAt: { gte: recentSince },
           OR: [{ mockLocationSuspected: true }, { locationValidationStatus: LocationValidationStatus.FLAGGED }],
         },
@@ -133,7 +148,7 @@ export class OperationsService {
       }),
       this.prisma.offlineSyncEvent.findMany({
         where: {
-          batch: { organizationId },
+          batch: { organizationId, ...(workerScopeWhere(scope) ? { worker: workerScopeWhere(scope) } : {}) },
           processedAt: { gte: new Date(now.getTime() - OFFLINE_REVIEW_WINDOW_MS) },
           status: { in: [OfflineSyncEventStatus.FLAGGED, OfflineSyncEventStatus.REJECTED] },
         },
@@ -237,7 +252,7 @@ export class OperationsService {
       })),
       lateWorkers,
       longOpenEntries: openEntries
-        .filter((entry) => entry.clockInAt && minutesSince(entry.clockInAt, now) >= STANDARD_DAY_MINUTES)
+        .filter((entry) => entry.clockInAt && minutesSince(entry.clockInAt, now) >= rules.standardDayMinutes)
         .map((entry) => ({
           timeEntryId: entry.id,
           worker: workerOf(entry.worker),

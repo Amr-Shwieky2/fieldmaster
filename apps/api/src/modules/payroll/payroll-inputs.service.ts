@@ -3,6 +3,7 @@ import type { CompensationProfile } from "@prisma/client";
 import { TimeEntryStatus } from "@fieldmaster/shared-types";
 import type { PayrollCompensationProfile } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
 import { PAYROLL_SNAPSHOT_SCHEMA_VERSION, payrollInputsHash, type PayrollSnapshotInputs, type SnapshotWorkerName } from "./payroll-snapshot";
 
 /** Entries a calculation leaves out because they still wait for a decision. */
@@ -36,7 +37,10 @@ export function toEngineProfile(profile: CompensationProfile): PayrollCompensati
  */
 @Injectable()
 export class PayrollInputsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly workRules: WorkRulesService,
+  ) {}
 
   async load(
     organizationId: string,
@@ -44,7 +48,7 @@ export class PayrollInputsService {
     options: { workerProfileId?: string } = {},
   ): Promise<{ inputs: PayrollSnapshotInputs; inputsHash: string }> {
     const worker = options.workerProfileId ? { workerProfileId: options.workerProfileId } : {};
-    const [approved, pending, adjustments] = await Promise.all([
+    const [approved, pending, adjustments, workRuleVersions] = await Promise.all([
       this.prisma.timeEntry.findMany({
         where: { organizationId, status: TimeEntryStatus.APPROVED, businessDate: { startsWith: monthPrefix(yearMonth) }, ...worker },
         select: {
@@ -83,6 +87,7 @@ export class PayrollInputsService {
         include: { relatedInfraction: { select: { timeEntryId: true } } },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       }),
+      this.workRules.versions(organizationId),
     ]);
 
     const paidWorkerIds = new Set([...approved.map((entry) => entry.workerProfileId), ...adjustments.map((adjustment) => adjustment.workerProfileId)]);
@@ -141,28 +146,36 @@ export class PayrollInputsService {
       })),
       workers,
       pending: { entries: byWorker.reduce((sum, row) => sum + row.entries, 0), byWorker },
+      // The rule versions the entries are priced with (only when the organization has changed a rule: none = the defaults).
+      ...(workRuleVersions.length > 0 ? { workRules: workRuleVersions } : {}),
     };
 
     return {
       inputs,
-      inputsHash: payrollInputsHash({ entries: approved, adjustmentIds: adjustments.map((adjustment) => adjustment.id), profiles }),
+      inputsHash: payrollInputsHash({
+        entries: approved,
+        adjustmentIds: adjustments.map((adjustment) => adjustment.id),
+        profiles,
+        workRuleVersionIds: workRuleVersions.map((version) => version.id),
+      }),
     };
   }
 
   /** The same fingerprint as `load`, from the live records, without loading them in full. */
   async liveInputsHash(organizationId: string, yearMonth: string): Promise<string> {
-    const [entries, adjustments] = await Promise.all([
+    const [entries, adjustments, workRuleVersions] = await Promise.all([
       this.prisma.timeEntry.findMany({
         where: { organizationId, status: TimeEntryStatus.APPROVED, businessDate: { startsWith: monthPrefix(yearMonth) } },
         select: { id: true, updatedAt: true, workerProfileId: true },
       }),
       this.prisma.payrollAdjustment.findMany({ where: { organizationId, businessMonth: yearMonth }, select: { id: true, workerProfileId: true } }),
+      this.workRules.versions(organizationId),
     ]);
     const paidWorkerIds = [...new Set([...entries.map((entry) => entry.workerProfileId), ...adjustments.map((adjustment) => adjustment.workerProfileId)])];
     const profiles = await this.prisma.compensationProfile.findMany({
       where: { workerProfileId: { in: paidWorkerIds } },
       select: { id: true, updatedAt: true },
     });
-    return payrollInputsHash({ entries, adjustmentIds: adjustments.map((adjustment) => adjustment.id), profiles });
+    return payrollInputsHash({ entries, adjustmentIds: adjustments.map((adjustment) => adjustment.id), profiles, workRuleVersionIds: workRuleVersions.map((version) => version.id) });
   }
 }

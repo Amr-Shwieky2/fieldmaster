@@ -43,13 +43,13 @@ export class SitesController {
   @Get("sites")
   @RequirePermissions(Permission.MANAGE_SITES)
   listSites(@CurrentUser() user: AuthenticatedUser, @Query("projectId") projectId?: string) {
-    return this.sitesService.listSites(user.organizationId, projectId);
+    return this.sitesService.listSites(user.organizationId, user, projectId);
   }
 
   @Get("sites/:id")
   @RequirePermissions(Permission.MANAGE_SITES)
   getSite(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.sitesService.getSite(user.organizationId, id);
+    return this.sitesService.getSite(user.organizationId, id, user);
   }
 
   @Post("geofences")
@@ -61,6 +61,6 @@ export class SitesController {
   @Get("sites/:id/geofences")
   @RequirePermissions(Permission.MANAGE_SITES)
   listGeofences(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.sitesService.listGeofencesForSite(user.organizationId, id);
+    return this.sitesService.listGeofencesForSite(user.organizationId, id, user);
   }
 }

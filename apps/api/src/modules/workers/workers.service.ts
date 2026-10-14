@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import { AccountStatus, NotificationType, OrgRole } from "@fieldmaster/shared-types";
+import { AccountStatus, NotificationType, OrgRole, Permission } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -9,6 +9,8 @@ import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
 import { serializeWorker } from "./worker-response.mapper";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { hasPermission } from "../../common/auth/permissions";
+import { scopeOf, workerScopeWhere } from "../../common/scope/scope-filters";
 import type { ApproveWorkerDto, RejectWorkerDto } from "./dto/approve-worker.dto";
 import type { CreateCompensationProfileDto } from "./dto/create-compensation-profile.dto";
 
@@ -20,33 +22,30 @@ export class WorkersService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  /** The workers (those of the viewer's projects, when restricted), with each one's pay only for someone who may see compensation (and for the worker themself). */
   async list(organizationId: string, viewer: AuthenticatedUser) {
     const workerProfiles = await this.prisma.workerProfile.findMany({
-      where: { organizationId, archivedAt: null },
+      where: { organizationId, archivedAt: null, ...(workerScopeWhere(scopeOf(viewer)) ?? {}) },
       include: { membership: { include: { user: true } } },
       orderBy: { createdAt: "asc" },
     });
 
-    return Promise.all(
-      workerProfiles.map(async (wp) => {
-        const activeCompensationProfile =
-          viewer.role === OrgRole.OWNER || viewer.workerProfileId === wp.id
-            ? await this.getActiveCompensationProfile(wp.id)
-            : null;
-        return serializeWorker({ workerProfile: wp, activeCompensationProfile }, viewer);
-      }),
-    );
+    // One query for every visible worker's current compensation profile (not one per worker).
+    const canSeeCompensation = hasPermission(viewer, Permission.VIEW_COMPENSATION);
+    const visibleIds = workerProfiles.filter((wp) => canSeeCompensation || viewer.workerProfileId === wp.id).map((wp) => wp.id);
+    const activeByWorker = await this.getActiveCompensationProfiles(visibleIds);
+    return workerProfiles.map((wp) => serializeWorker({ workerProfile: wp, activeCompensationProfile: activeByWorker.get(wp.id) ?? null }, viewer));
   }
 
   async getById(organizationId: string, workerProfileId: string, viewer: AuthenticatedUser) {
     const wp = await this.prisma.workerProfile.findFirst({
-      where: { id: workerProfileId, organizationId, archivedAt: null },
+      where: { id: workerProfileId, organizationId, archivedAt: null, ...(workerScopeWhere(scopeOf(viewer)) ?? {}) },
       include: { membership: { include: { user: true } } },
     });
     if (!wp) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
 
     const activeCompensationProfile =
-      viewer.role === OrgRole.OWNER || viewer.workerProfileId === wp.id
+      hasPermission(viewer, Permission.VIEW_COMPENSATION) || viewer.workerProfileId === wp.id
         ? await this.getActiveCompensationProfile(wp.id)
         : null;
 
@@ -138,8 +137,8 @@ export class WorkersService {
   }
 
   async listCompensationProfiles(organizationId: string, workerProfileId: string, viewer: AuthenticatedUser) {
-    await this.assertWorkerInOrg(organizationId, workerProfileId);
-    if (viewer.role !== OrgRole.OWNER && viewer.workerProfileId !== workerProfileId) {
+    await this.assertWorkerInOrg(organizationId, workerProfileId, viewer);
+    if (!hasPermission(viewer, Permission.VIEW_COMPENSATION) && viewer.workerProfileId !== workerProfileId) {
       throw new AppException(403, ErrorCodes.FORBIDDEN, "You cannot view this worker's compensation.");
     }
     return this.prisma.compensationProfile.findMany({
@@ -155,7 +154,7 @@ export class WorkersService {
     actor: AuthenticatedUser,
     correlationId: string,
   ) {
-    await this.assertWorkerInOrg(organizationId, workerProfileId);
+    await this.assertWorkerInOrg(organizationId, workerProfileId, actor);
     try {
       const profile = await this.prisma.$transaction(async (tx) => {
         const created = await this.createCompensationProfileInTx(tx, workerProfileId, dto, actor.sub);
@@ -184,6 +183,23 @@ export class WorkersService {
       }
       throw error;
     }
+  }
+
+  /** The compensation profile in effect today of each of the workers, in one query (the latest start wins). */
+  private async getActiveCompensationProfiles(workerProfileIds: string[]) {
+    const result = new Map<string, Awaited<ReturnType<WorkersService["getActiveCompensationProfile"]>> & object>();
+    if (workerProfileIds.length === 0) return result;
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    const profiles = await this.prisma.compensationProfile.findMany({
+      where: {
+        workerProfileId: { in: workerProfileIds },
+        effectiveStartDate: { lte: today },
+        OR: [{ effectiveEndDate: null }, { effectiveEndDate: { gte: today } }],
+      },
+      orderBy: { effectiveStartDate: "desc" },
+    });
+    for (const profile of profiles) if (!result.has(profile.workerProfileId)) result.set(profile.workerProfileId, profile);
+    return result;
   }
 
   private async getActiveCompensationProfile(workerProfileId: string) {
@@ -220,8 +236,8 @@ export class WorkersService {
     });
   }
 
-  private async assertWorkerInOrg(organizationId: string, workerProfileId: string) {
-    const wp = await this.prisma.workerProfile.findFirst({ where: { id: workerProfileId, organizationId } });
+  private async assertWorkerInOrg(organizationId: string, workerProfileId: string, viewer: AuthenticatedUser) {
+    const wp = await this.prisma.workerProfile.findFirst({ where: { id: workerProfileId, organizationId, ...(workerScopeWhere(scopeOf(viewer)) ?? {}) } });
     if (!wp) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
     return wp;
   }

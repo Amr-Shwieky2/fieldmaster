@@ -1,4 +1,5 @@
-import { CompensationType, STANDARD_DAY_MINUTES } from "@fieldmaster/shared-types";
+import { CompensationType, DEFAULT_WORK_RULES } from "@fieldmaster/shared-types";
+import type { DayRules } from "./attendance";
 
 /**
  * All monetary values are integer agorot (1 ILS = 100 agorot). Every
@@ -25,13 +26,18 @@ export interface DailyCompensationResult {
   totalCompensationAgorot: number;
 }
 
+/**
+ * `rules` are the work rules in force on the entry's business date (the
+ * standard day and the overtime threshold); without them, today's defaults.
+ */
 export function calculateDailyCompensation(
   input: DailyCompensationInput,
+  rules: DayRules = DEFAULT_WORK_RULES,
 ): DailyCompensationResult {
   const { dailyBaseRateAgorot, overtimeHourlyRateAgorot, approvedMinutes, fullDayCredit } = input;
 
-  if (approvedMinutes >= STANDARD_DAY_MINUTES) {
-    const overtimeMinutes = approvedMinutes - STANDARD_DAY_MINUTES;
+  if (approvedMinutes >= rules.standardDayMinutes) {
+    const overtimeMinutes = Math.max(0, approvedMinutes - rules.overtimeThresholdMinutes);
     const overtimeCompensationAgorot = proportionalAgorot(overtimeHourlyRateAgorot, overtimeMinutes);
     return {
       standardDaysCredited: 1,
@@ -52,7 +58,7 @@ export function calculateDailyCompensation(
     };
   }
 
-  const proratedAgorot = Math.round((dailyBaseRateAgorot * approvedMinutes) / STANDARD_DAY_MINUTES);
+  const proratedAgorot = Math.round((dailyBaseRateAgorot * approvedMinutes) / rules.standardDayMinutes);
   return {
     standardDaysCredited: 0,
     baseCompensationAgorot: proratedAgorot,
@@ -79,21 +85,22 @@ export interface HourlyCompensationResult {
 
 export function calculateHourlyCompensation(
   input: HourlyCompensationInput,
+  rules: DayRules = DEFAULT_WORK_RULES,
 ): HourlyCompensationResult {
   const { baseHourlyRateAgorot, overtimeHourlyRateAgorot, approvedMinutes, fullDayCredit } = input;
 
-  if (approvedMinutes < STANDARD_DAY_MINUTES && fullDayCredit) {
+  if (approvedMinutes < rules.standardDayMinutes && fullDayCredit) {
     return {
-      regularMinutes: STANDARD_DAY_MINUTES,
+      regularMinutes: rules.standardDayMinutes,
       overtimeMinutes: 0,
-      regularCompensationAgorot: proportionalAgorot(baseHourlyRateAgorot, STANDARD_DAY_MINUTES),
+      regularCompensationAgorot: proportionalAgorot(baseHourlyRateAgorot, rules.standardDayMinutes),
       overtimeCompensationAgorot: 0,
-      totalCompensationAgorot: proportionalAgorot(baseHourlyRateAgorot, STANDARD_DAY_MINUTES),
+      totalCompensationAgorot: proportionalAgorot(baseHourlyRateAgorot, rules.standardDayMinutes),
     };
   }
 
-  const regularMinutes = Math.min(approvedMinutes, STANDARD_DAY_MINUTES);
-  const overtimeMinutes = Math.max(0, approvedMinutes - STANDARD_DAY_MINUTES);
+  const regularMinutes = Math.min(approvedMinutes, rules.overtimeThresholdMinutes);
+  const overtimeMinutes = Math.max(0, approvedMinutes - rules.overtimeThresholdMinutes);
   const regularCompensationAgorot = proportionalAgorot(baseHourlyRateAgorot, regularMinutes);
   const overtimeCompensationAgorot = proportionalAgorot(overtimeHourlyRateAgorot, overtimeMinutes);
 
@@ -115,7 +122,7 @@ export interface CompensationCalcInput {
   overtimeHourlyRateAgorot: number;
 }
 
-export function calculateShiftCompensation(input: CompensationCalcInput): {
+export function calculateShiftCompensation(input: CompensationCalcInput, rules: DayRules = DEFAULT_WORK_RULES): {
   totalCompensationAgorot: number;
   regularMinutes: number;
   overtimeMinutes: number;
@@ -124,15 +131,18 @@ export function calculateShiftCompensation(input: CompensationCalcInput): {
     if (input.dailyBaseRateAgorot === undefined) {
       throw new Error("dailyBaseRateAgorot is required for DAILY compensation");
     }
-    const result = calculateDailyCompensation({
-      dailyBaseRateAgorot: input.dailyBaseRateAgorot,
-      overtimeHourlyRateAgorot: input.overtimeHourlyRateAgorot,
-      approvedMinutes: input.approvedMinutes,
-      fullDayCredit: input.fullDayCredit,
-    });
+    const result = calculateDailyCompensation(
+      {
+        dailyBaseRateAgorot: input.dailyBaseRateAgorot,
+        overtimeHourlyRateAgorot: input.overtimeHourlyRateAgorot,
+        approvedMinutes: input.approvedMinutes,
+        fullDayCredit: input.fullDayCredit,
+      },
+      rules,
+    );
     return {
       totalCompensationAgorot: result.totalCompensationAgorot,
-      regularMinutes: Math.min(input.approvedMinutes, STANDARD_DAY_MINUTES),
+      regularMinutes: Math.min(input.approvedMinutes, rules.overtimeThresholdMinutes),
       overtimeMinutes: result.overtimeMinutes,
     };
   }
@@ -140,12 +150,15 @@ export function calculateShiftCompensation(input: CompensationCalcInput): {
   if (input.baseHourlyRateAgorot === undefined) {
     throw new Error("baseHourlyRateAgorot is required for HOURLY compensation");
   }
-  const result = calculateHourlyCompensation({
-    baseHourlyRateAgorot: input.baseHourlyRateAgorot,
-    overtimeHourlyRateAgorot: input.overtimeHourlyRateAgorot,
-    approvedMinutes: input.approvedMinutes,
-    fullDayCredit: input.fullDayCredit,
-  });
+  const result = calculateHourlyCompensation(
+    {
+      baseHourlyRateAgorot: input.baseHourlyRateAgorot,
+      overtimeHourlyRateAgorot: input.overtimeHourlyRateAgorot,
+      approvedMinutes: input.approvedMinutes,
+      fullDayCredit: input.fullDayCredit,
+    },
+    rules,
+  );
   return {
     totalCompensationAgorot: result.totalCompensationAgorot,
     regularMinutes: result.regularMinutes,

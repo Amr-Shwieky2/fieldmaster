@@ -1,11 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import { ClockEventType, OrgRole } from "@fieldmaster/shared-types";
+import { ClockEventType } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN, paginate } from "../../common/validation/patterns";
 import { AttendanceCostService } from "../payroll/attendance-cost.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { canViewFinancials } from "../../common/auth/permissions";
+import { isRestricted } from "../../common/scope/scope-filters";
 import type { ListEmergencyCalloutsQueryDto } from "./dto/list-emergency-callouts.dto";
 
 const CALLOUT_SELECT = {
@@ -49,8 +51,10 @@ type CalloutRow = Prisma.EmergencyCalloutGetPayload<{ select: typeof CALLOUT_SEL
 
 /**
  * Emergency call-outs for the admin screens (Step 5). Two DTOs built by
- * different code paths: an Owner's carries `estimatedCostAgorot`, anyone
- * else's has no such key at all (not a null to hide).
+ * different code paths: one for a member who may see financials carries
+ * `estimatedCostAgorot`, anyone else's has no such key at all (not a null to
+ * hide). The Turan rota and its call-outs belong to the whole organization
+ * (they have no project), so a member restricted to some projects sees none.
  */
 @Injectable()
 export class EmergencyCalloutRecordsService {
@@ -67,6 +71,7 @@ export class EmergencyCalloutRecordsService {
     };
     const where: Prisma.EmergencyCalloutWhereInput = {
       organizationId,
+      ...(isRestricted(viewer) ? { id: { in: [] } } : {}),
       ...(query.workerProfileId ? { workerProfileId: query.workerProfileId } : {}),
       ...(Object.keys(entryFilter).length > 0 ? { timeEntry: entryFilter } : {}),
     };
@@ -79,7 +84,8 @@ export class EmergencyCalloutRecordsService {
   }
 
   async getById(organizationId: string, id: string, viewer: AuthenticatedUser) {
-    const row = UUID_PATTERN.test(id) ? await this.prisma.emergencyCallout.findFirst({ where: { id, organizationId }, select: CALLOUT_SELECT }) : null;
+    const row =
+      UUID_PATTERN.test(id) && !isRestricted(viewer) ? await this.prisma.emergencyCallout.findFirst({ where: { id, organizationId }, select: CALLOUT_SELECT }) : null;
     if (!row) throw new AppException(404, ErrorCodes.NOT_FOUND, "Emergency call-out not found.");
     const [dto] = await this.toDtos([row], viewer);
     return dto;
@@ -90,6 +96,10 @@ export class EmergencyCalloutRecordsService {
     const users =
       authorizerIds.length > 0 ? await this.prisma.user.findMany({ where: { id: { in: authorizerIds } }, select: { id: true, fullLegalName: true } }) : [];
 
+    // Money only for a member who may see financials: all the estimates in one batch, not one query per call-out.
+    const estimates = canViewFinancials(viewer)
+      ? new Map((await this.costs.estimateEntries(viewer.organizationId, rows.flatMap((row) => (row.timeEntry ? [row.timeEntry] : [])))).map((estimate) => [estimate.timeEntryId, estimate]))
+      : new Map();
     return Promise.all(
       rows.map(async (row) => {
         const accuracyOf = (eventType: ClockEventType) => row.timeEntry?.clockEvents.find((event) => event.eventType === eventType)?.accuracyMeters ?? null;
@@ -118,9 +128,9 @@ export class EmergencyCalloutRecordsService {
           summary: row.timeEntry?.dailySummary ?? null,
           createdAt: row.createdAt,
         };
-        if (viewer.role !== OrgRole.OWNER) return base;
+        if (!canViewFinancials(viewer)) return base;
 
-        const estimate = row.timeEntry ? await this.costs.estimateEntry(row.timeEntry) : null;
+        const estimate = row.timeEntry ? estimates.get(row.timeEntry.id) : null;
         return { ...base, estimatedCostAgorot: estimate?.estimatedCostAgorot ?? null };
       }),
     );

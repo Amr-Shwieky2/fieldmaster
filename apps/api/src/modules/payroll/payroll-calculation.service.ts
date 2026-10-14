@@ -19,7 +19,8 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { PayrollInputsService, toEngineProfile } from "./payroll-inputs.service";
-import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION } from "./payroll-snapshot";
+import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION, snapshotRulesFor } from "./payroll-snapshot";
+import type { WorkRules } from "@fieldmaster/shared-types";
 
 export type EntryCompensationResult = EntryCompensation;
 
@@ -55,11 +56,13 @@ export class PayrollCalculationService {
     @InjectQueue(QUEUE_NAMES.PAYROLL_CALCULATION) private readonly queue: Queue,
   ) {}
 
+  /** `rules`: the work rules in force on the entry's business date (the defaults when not given). */
   computeEntryCompensation(
     entry: Pick<TimeEntry, "approvedRegularMinutes" | "approvedOvertimeMinutes" | "fullDayCredit">,
     profile: CompensationProfile,
+    rules?: Pick<WorkRules, "standardDayMinutes" | "overtimeThresholdMinutes">,
   ): EntryCompensationResult {
-    return computeEntryPay(entry, toEngineProfile(profile));
+    return computeEntryPay(entry, toEngineProfile(profile), rules);
   }
 
   async findEffectiveCompensationProfile(workerProfileId: string, onDate: string): Promise<CompensationProfile | null> {
@@ -182,9 +185,20 @@ export class PayrollCalculationService {
 
       const workers: PayrollWorkerResult[] = [];
       const entryResults: PayrollEntryResult[] = [];
+      // Each worker is calculated from their own entries only (grouped once), with the rules of each entry's business date.
+      const rulesFor = snapshotRulesFor(inputs);
+      const entriesByWorker = groupBy(inputs.entries, (entry) => entry.workerProfileId);
+      const adjustmentsByWorker = groupBy(inputs.adjustments, (adjustment) => adjustment.workerProfileId);
+      const profilesByWorker = groupBy(inputs.compensationProfiles, (profile) => profile.workerProfileId);
       let lastProgress = 10;
       for (const [index, workerProfileId] of workerIds.entries()) {
-        const result = calculateWorkerPayroll(workerProfileId, inputs.entries, inputs.compensationProfiles, inputs.adjustments);
+        const result = calculateWorkerPayroll(
+          workerProfileId,
+          entriesByWorker.get(workerProfileId) ?? [],
+          profilesByWorker.get(workerProfileId) ?? [],
+          adjustmentsByWorker.get(workerProfileId) ?? [],
+          rulesFor,
+        );
         workers.push(result.worker);
         entryResults.push(...result.entries);
         const progress = 10 + Math.floor((80 * (index + 1)) / workerIds.length);
@@ -415,4 +429,15 @@ export class PayrollCalculationService {
 export function restingStatus(period: Pick<PayrollPeriod, "currentSnapshotId" | "version">): PayrollPeriodStatus {
   if (period.currentSnapshotId) return PayrollPeriodStatus.REVIEW;
   return period.version > 1 ? PayrollPeriodStatus.REOPENED : PayrollPeriodStatus.OPEN;
+}
+
+function groupBy<T>(rows: readonly T[], keyOf: (row: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  }
+  return groups;
 }

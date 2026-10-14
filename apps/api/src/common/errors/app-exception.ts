@@ -83,4 +83,27 @@ export const ErrorCodes = {
   DEVICE_KEY_REVOKED: "DEVICE_KEY_REVOKED",
   /** The transcription provider failed or is not configured. */
   TRANSCRIPTION_UNAVAILABLE: "TRANSCRIPTION_UNAVAILABLE",
+  // Flexible organization model: roles, scope, work rules.
+  /** A custom role's name is already used by another active role. */
+  ROLE_NAME_TAKEN: "ROLE_NAME_TAKEN",
+  /** A built-in role cannot be edited or archived. */
+  SYSTEM_ROLE_IMMUTABLE: "SYSTEM_ROLE_IMMUTABLE",
+  /** A role with members cannot be archived. */
+  ROLE_IN_USE: "ROLE_IN_USE",
+  /** A permission list with an unknown permission, or one without a permission it needs. */
+  INVALID_ROLE_PERMISSIONS: "INVALID_ROLE_PERMISSIONS",
+  /** The change would leave no active member who can manage roles and settings. */
+  LAST_ADMIN: "LAST_ADMIN",
+  /** The new limit of Owners is below the number of active Owners. */
+  OWNER_LIMIT_BELOW_CURRENT: "OWNER_LIMIT_BELOW_CURRENT",
+  /** A project or site of a scope does not exist in this organization. */
+  SCOPE_TARGET_NOT_FOUND: "SCOPE_TARGET_NOT_FOUND",
+  /** An organization-wide action (payroll months, the audit log, users, roles...) by a member restricted to some projects. */
+  SCOPE_RESTRICTED: "SCOPE_RESTRICTED",
+  /** A set of work rules that is out of range (details.problems says which). */
+  WORK_RULES_INVALID: "WORK_RULES_INVALID",
+  /** A work-rule change must take effect after today, so the past is never rewritten. */
+  WORK_RULES_EFFECTIVE_DATE_PAST: "WORK_RULES_EFFECTIVE_DATE_PAST",
+  /** Clock-in earlier than the work rules allow before the shift starts (details.opensAt). */
+  CLOCK_IN_TOO_EARLY: "CLOCK_IN_TOO_EARLY",
 } as const;

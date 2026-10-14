@@ -6,7 +6,7 @@ import {
   EventOrigin,
   LocationValidationStatus,
   NotificationType,
-  OrgRole,
+  Permission,
   ShiftStatus,
   ShiftType,
   TimeEntryStatus,
@@ -25,6 +25,8 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { TuranAssignmentsService } from "./turan-assignments.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { hasPermission } from "../../common/auth/permissions";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
 import type { StartEmergencyCalloutDto, EndEmergencyCalloutDto } from "./dto/emergency-callout.dto";
 
 const PLACEHOLDER_SHIFT_DURATION_MS = 8 * 60 * 60 * 1000;
@@ -58,11 +60,13 @@ export class EmergencyCalloutsService {
     private readonly notifications: NotificationsService,
     private readonly notificationAudience: NotificationAudienceService,
     private readonly realtime: RealtimeEventsService,
+    private readonly workRules: WorkRulesService,
   ) {}
 
   async start(organizationId: string, dto: StartEmergencyCalloutDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string) {
     const result = await this.idempotencyService.withIdempotency(idempotencyKey, "emergency-start", dto, async () => {
-      const isManager = actor.role === OrgRole.OWNER || actor.role === OrgRole.FIELD_MANAGER;
+      // Whoever manages the Turan rota may start a call-out for a worker (manual authorization).
+      const isManager = hasPermission(actor, Permission.MANAGE_TURAN);
       const workerProfileId = dto.workerProfileId && isManager ? dto.workerProfileId : actor.workerProfileId;
       if (!workerProfileId) throw new AppException(403, ErrorCodes.FORBIDDEN, "No worker profile to start an emergency call-out for.");
 
@@ -92,7 +96,9 @@ export class EmergencyCalloutsService {
         turanAssignmentId = eligibleAssignmentId;
       }
 
-      const compensatedStart = new Date(actualStartClick.getTime() - 60 * 60_000);
+      // The minutes paid before the click come from the work rules in force on the day of the click.
+      const rules = await this.workRules.rulesOn(organizationId, toBusinessDate(actualStartClick));
+      const compensatedStart = new Date(actualStartClick.getTime() - rules.emergencyMinutesBefore * 60_000);
 
       const { timeEntry, callout } = await this.prisma.$transaction(async (tx) => {
         const shift = await tx.shift.create({
@@ -159,6 +165,7 @@ export class EmergencyCalloutsService {
             authorizedBy,
             actualStartClick,
             compensatedStart,
+            retroactiveMinutes: rules.emergencyMinutesBefore,
             startLatitude: dto.latitude,
             startLongitude: dto.longitude,
           },
@@ -198,8 +205,8 @@ export class EmergencyCalloutsService {
           calloutId: callout.id,
           actualStartClick,
           compensatedStart,
-          retroactiveMinutes: 60,
-          explanation: "Your compensated start time is set to 60 minutes before you pressed Start, per policy.",
+          retroactiveMinutes: rules.emergencyMinutesBefore,
+          explanation: `Your compensated start time is set to ${rules.emergencyMinutesBefore} minutes before you pressed Start, per policy.`,
         },
       };
     });
@@ -284,7 +291,12 @@ export class EmergencyCalloutsService {
       }
 
       const actualEndClick = new Date();
-      const compensation = computeEmergencyCompensation(timeEntry.emergencyCallout.actualStartClick, actualEndClick);
+      // Paid from the minutes stored when the call-out started, to the return minutes in force on the day it started.
+      const rules = await this.workRules.rulesOn(organizationId, toBusinessDate(timeEntry.emergencyCallout.actualStartClick));
+      const compensation = computeEmergencyCompensation(timeEntry.emergencyCallout.actualStartClick, actualEndClick, {
+        emergencyMinutesBefore: timeEntry.emergencyCallout.retroactiveMinutes,
+        emergencyMinutesAfter: rules.emergencyMinutesAfter,
+      });
 
       await this.prisma.$transaction(async (tx) => {
         await tx.clockEvent.create({
@@ -383,11 +395,9 @@ export class EmergencyCalloutsService {
     body: string,
     data: NotificationData,
   ) {
-    const { ownerUserIds, fieldManagerUserIds } = await this.notificationAudience.managers(organizationId, type);
+    const recipients = await this.notificationAudience.recipients(organizationId, type);
     const sharedData = withoutFinancialData(data);
-    await this.notifications.notifyMany(
-      [...ownerUserIds, ...fieldManagerUserIds].map((recipientUserId) => ({ organizationId, recipientUserId, type, title, body, data: sharedData })),
-    );
+    await this.notifications.notifyMany(recipients.map((recipient) => ({ organizationId, recipientUserId: recipient.userId, type, title, body, data: sharedData })));
   }
 
   private async notifyEmergencyEnd(
@@ -397,10 +407,10 @@ export class EmergencyCalloutsService {
     refs: { timeEntryId: string; calloutId: string; endedAt: string },
   ) {
     const formatHm = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`;
-    const { ownerUserIds, fieldManagerUserIds } = await this.notificationAudience.managers(organizationId, NotificationType.EMERGENCY_SHIFT_ENDED);
+    const recipients = await this.notificationAudience.recipients(organizationId, NotificationType.EMERGENCY_SHIFT_ENDED);
 
     const managerBody = `Emergency call-out ended. Compensated duration: ${formatHm(compensatedDurationMinutes)}. Approval is required.`;
-    // No money here: this is what Field Managers get.
+    // No money here: this is what recipients who may not see money get.
     const managerData: NotificationData = {
       ...refs,
       workerProfileId,
@@ -424,27 +434,19 @@ export class EmergencyCalloutsService {
         overtimeHourlyRateAgorot: activeCompensation.overtimeHourlyRateAgorot,
       });
       ownerBody = `Emergency call-out ended. Compensated duration: ${formatHm(compensatedDurationMinutes)}. Estimated cost: ₪${(estimate.totalCompensationAgorot / 100).toFixed(2)}`;
-      // Owner-only: the same estimate as the cost line in ownerBody.
+      // Only for recipients who may see money: the same estimate as the cost line in ownerBody.
       ownerData = { ...managerData, estimatedCostAgorot: estimate.totalCompensationAgorot };
     }
 
-    await this.notifications.notifyMany([
-      ...ownerUserIds.map((recipientUserId) => ({
+    await this.notifications.notifyMany(
+      recipients.map((recipient) => ({
         organizationId,
-        recipientUserId,
+        recipientUserId: recipient.userId,
         type: NotificationType.EMERGENCY_SHIFT_ENDED,
         title: "Emergency call-out ended",
-        body: ownerBody,
-        data: ownerData,
+        body: recipient.financial ? ownerBody : managerBody,
+        data: recipient.financial ? ownerData : withoutFinancialData(managerData),
       })),
-      ...fieldManagerUserIds.map((recipientUserId) => ({
-        organizationId,
-        recipientUserId,
-        type: NotificationType.EMERGENCY_SHIFT_ENDED,
-        title: "Emergency call-out ended",
-        body: managerBody,
-        data: withoutFinancialData(managerData),
-      })),
-    ]);
+    );
   }
 }

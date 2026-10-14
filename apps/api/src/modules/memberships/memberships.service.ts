@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import type { OrganizationMembership, Prisma, User } from "@prisma/client";
-import { AccountStatus, OrgRole, TimeEntryStatus } from "@fieldmaster/shared-types";
+import type { OrganizationMembership, Prisma, Role, User } from "@prisma/client";
+import { AccountStatus, OrgRole, TimeEntryStatus, holdsAdminPermissions } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { OwnerLimitService } from "../organizations/owner-limit.service";
@@ -10,20 +10,45 @@ import { UUID_PATTERN } from "../../common/validation/patterns";
 import { parseDurationMs } from "../auth/duration.util";
 import { RealtimeEventsService } from "../notifications/realtime-events";
 import { DeviceKeyStatus, DevicesService } from "../devices/devices.service";
+import { RolesService } from "../roles/roles.service";
+import { countAdmins, lastAdminError, lockAdmins } from "../../common/auth/admin-guard";
+import { permissionsOfRole } from "../../common/auth/member-access";
 import type { CreateMembershipDto } from "./dto/create-membership.dto";
-import type { ChangeMemberRoleDto, MemberActionReasonDto, SetTimeTrackingDto } from "./dto/member-actions.dto";
+import type { ChangeMemberRoleDto, MemberActionReasonDto, SetMemberScopeDto, SetTimeTrackingDto } from "./dto/member-actions.dto";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 
 type PrismaTx = Prisma.TransactionClient;
-type MemberRow = OrganizationMembership & { user: User; workerProfile: { id: string } | null };
+type MemberRow = OrganizationMembership & {
+  user: User;
+  workerProfile: { id: string } | null;
+  roleRecord: Role | null;
+  scopes: { projectId: string | null; siteId: string | null }[];
+};
+
+const MEMBER_INCLUDE = {
+  user: true,
+  workerProfile: { select: { id: true } },
+  roleRecord: true,
+  scopes: { select: { projectId: true, siteId: true } },
+} as const;
+
+/** The role as the audit log and the users page name it: the built-in key, or `CUSTOM:<name>`. */
+function roleLabel(kind: string, record: Pick<Role, "name"> | null): string {
+  return kind === OrgRole.CUSTOM ? `CUSTOM:${record?.name ?? ""}` : kind;
+}
 
 /**
- * Members, roles and devices (spec section 7, Step 6 users page; Owners
- * only). Every change needs a reason and is audited old -> new. Suspending
- * or archiving a member ends their sessions at once: their refresh-token
+ * Members, roles and devices (spec section 7, Step 6 users page; whoever
+ * holds MANAGE_ORG_USERS). Every change needs a reason and is audited old ->
+ * new. A member has one role (a built-in one, or a custom one an Owner
+ * created) and may be restricted to some projects and sites. Suspending or
+ * archiving a member ends their sessions at once: their refresh-token
  * families are revoked, their open WebSocket / SSE connections are closed,
  * and every REST call is refused by the guard's live status check. An
- * organization always keeps at least one active Owner (and at most two).
+ * organization always keeps at least one active member who can manage roles
+ * and settings (and so at least one active Owner, unless another role holds
+ * those permissions), and has at most as many active Owners as its setting
+ * allows (none: no limit).
  */
 @Injectable()
 export class MembershipsService {
@@ -33,11 +58,17 @@ export class MembershipsService {
     private readonly ownerLimitService: OwnerLimitService,
     private readonly realtime: RealtimeEventsService,
     private readonly devices: DevicesService,
+    private readonly roles: RolesService,
   ) {}
 
   async create(organizationId: string, dto: CreateMembershipDto, actor: AuthenticatedUser, correlationId: string) {
+    if (!dto.role && !dto.roleId) throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Send a role or a roleId.");
     return this.prisma.$transaction(async (tx) => {
-      if (dto.role === OrgRole.OWNER) {
+      const next = await this.resolveRole(tx, organizationId, dto);
+      if (next.kind === OrgRole.WORKER) {
+        throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Workers join through an onboarding invitation.");
+      }
+      if (next.kind === OrgRole.OWNER) {
         await this.ownerLimitService.assertCanAddOwner(organizationId, undefined, tx);
       }
 
@@ -56,7 +87,8 @@ export class MembershipsService {
           id: generateId(),
           organizationId,
           userId: user.id,
-          role: dto.role,
+          role: next.kind,
+          roleId: next.record.id,
           isTimeTrackable: dto.isTimeTrackable ?? false,
           status: AccountStatus.ACTIVE,
         },
@@ -75,7 +107,7 @@ export class MembershipsService {
           action: "MEMBERSHIP_CREATED",
           entityType: "OrganizationMembership",
           entityId: membership.id,
-          newValue: dto.role,
+          newValue: roleLabel(next.kind, next.record),
           correlationId,
         },
         tx,
@@ -89,7 +121,7 @@ export class MembershipsService {
   async list(organizationId: string, viewer: AuthenticatedUser) {
     const members = await this.prisma.organizationMembership.findMany({
       where: { organizationId },
-      include: { user: true, workerProfile: { select: { id: true } } },
+      include: MEMBER_INCLUDE,
       orderBy: { createdAt: "asc" },
     });
     const lastUse = await this.prisma.refreshTokenFamily.groupBy({
@@ -101,26 +133,92 @@ export class MembershipsService {
     return members.map((member) => this.toMember(member, viewer, lastActive.get(member.id) ?? null));
   }
 
+  /**
+   * Each member's role record and project scope, for the users page (the list
+   * above keeps its shape): `{ membershipId, roleId, roleName, restrictedToScope, projectIds, siteIds }`.
+   */
+  async access(organizationId: string) {
+    const members = await this.prisma.organizationMembership.findMany({
+      where: { organizationId },
+      select: { id: true, roleId: true, restrictedToScope: true, roleRecord: { select: { name: true, systemKey: true } }, scopes: { select: { projectId: true, siteId: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    return members.map((member) => ({
+      membershipId: member.id,
+      roleId: member.roleId,
+      roleName: member.roleRecord?.name ?? null,
+      restrictedToScope: member.restrictedToScope,
+      projectIds: member.scopes.flatMap((scope) => (scope.projectId ? [scope.projectId] : [])),
+      siteIds: member.scopes.flatMap((scope) => (scope.siteId ? [scope.siteId] : [])),
+    }));
+  }
+
   async changeRole(organizationId: string, membershipId: string, dto: ChangeMemberRoleDto, actor: AuthenticatedUser, correlationId: string) {
+    if (!dto.role && !dto.roleId) throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Send a role or a roleId.");
     const updated = await this.prisma.$transaction(async (tx) => {
       const member = await this.findEditable(tx, organizationId, membershipId);
-      if (member.role === dto.role) return member;
-      if (dto.role === OrgRole.OWNER && member.status === AccountStatus.ACTIVE) {
+      const next = await this.resolveRole(tx, organizationId, dto);
+      if (member.role === next.kind && member.roleId === next.record.id) return member;
+      if (next.kind === OrgRole.OWNER && member.status === AccountStatus.ACTIVE) {
         await this.ownerLimitService.assertCanAddOwner(organizationId, member.id, tx);
       }
-      if (member.role === OrgRole.OWNER) await this.assertNotLastActiveOwner(tx, member);
-      if (dto.role === OrgRole.WORKER && (!member.isTimeTrackable || !member.workerProfile)) {
+      // Moving an administrator to a role that cannot manage roles and settings must leave another one.
+      if (isActiveAdmin(member) && !holdsAdminPermissions(permissionsOfRole(next.kind, next.record)) ) await this.assertAdminRemains(tx, member);
+      if (next.kind === OrgRole.WORKER && (!member.isTimeTrackable || !member.workerProfile)) {
         throw new AppException(409, ErrorCodes.ROLE_REQUIRES_TIME_TRACKING, "A worker must have time tracking on.");
       }
       const changed = await tx.organizationMembership.update({
         where: { id: member.id },
-        data: { role: dto.role },
-        include: { user: true, workerProfile: { select: { id: true } } },
+        data: { role: next.kind, roleId: next.record.id },
+        include: MEMBER_INCLUDE,
       });
-      await this.audit(tx, actor, member, "MEMBERSHIP_ROLE_CHANGED", "role", member.role, dto.role, dto.reason, correlationId);
+      await this.audit(tx, actor, member, "MEMBERSHIP_ROLE_CHANGED", "role", roleLabel(member.role, member.roleRecord), roleLabel(next.kind, next.record), dto.reason, correlationId);
       return changed;
     });
     // Open connections re-authenticate with the new role (e.g. joining or leaving the live operations room).
+    this.realtime.sessionsEnded({ membershipId: updated.id });
+    return this.toMember(updated, actor, await this.lastActive(updated.id));
+  }
+
+  /**
+   * All projects, or only the listed projects and sites (flexible
+   * organization model). A restricted member has no organization-wide
+   * permissions (payroll months, the audit log, users, roles, settings...):
+   * restricting an administrator is refused when no other one remains.
+   */
+  async setScope(organizationId: string, membershipId: string, dto: SetMemberScopeDto, actor: AuthenticatedUser, correlationId: string) {
+    const projectIds = [...new Set(dto.projectIds ?? [])];
+    const siteIds = [...new Set(dto.siteIds ?? [])];
+    if (dto.restricted && projectIds.length + siteIds.length === 0) {
+      throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Select at least one project or site, or choose all projects.");
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const member = await this.findEditable(tx, organizationId, membershipId);
+      if (dto.restricted) {
+        const [projects, sites] = await Promise.all([
+          tx.project.count({ where: { organizationId, id: { in: projectIds } } }),
+          tx.site.count({ where: { organizationId, id: { in: siteIds } } }),
+        ]);
+        if (projects !== projectIds.length || sites !== siteIds.length) {
+          throw new AppException(404, ErrorCodes.SCOPE_TARGET_NOT_FOUND, "A project or site was not found in this organization.");
+        }
+        if (isActiveAdmin(member)) await this.assertAdminRemains(tx, member);
+      }
+      const before = scopeLabel(member);
+      await tx.memberScope.deleteMany({ where: { membershipId: member.id } });
+      if (dto.restricted) {
+        await tx.memberScope.createMany({
+          data: [
+            ...projectIds.map((projectId) => ({ id: generateId(), organizationId, membershipId: member.id, projectId })),
+            ...siteIds.map((siteId) => ({ id: generateId(), organizationId, membershipId: member.id, siteId })),
+          ],
+        });
+      }
+      const changed = await tx.organizationMembership.update({ where: { id: member.id }, data: { restrictedToScope: dto.restricted }, include: MEMBER_INCLUDE });
+      const after = scopeLabel(changed);
+      if (before !== after) await this.audit(tx, actor, member, "MEMBERSHIP_SCOPE_CHANGED", "scope", before, after, dto.reason, correlationId);
+      return changed;
+    });
     this.realtime.sessionsEnded({ membershipId: updated.id });
     return this.toMember(updated, actor, await this.lastActive(updated.id));
   }
@@ -129,11 +227,11 @@ export class MembershipsService {
     const updated = await this.prisma.$transaction(async (tx) => {
       const member = await this.findEditable(tx, organizationId, membershipId);
       if (member.status !== AccountStatus.ACTIVE) throw new AppException(409, ErrorCodes.CONFLICT, "Only an active member can be suspended.");
-      if (member.role === OrgRole.OWNER) await this.assertNotLastActiveOwner(tx, member);
+      if (isActiveAdmin(member)) await this.assertAdminRemains(tx, member);
       const changed = await tx.organizationMembership.update({
         where: { id: member.id },
         data: { status: AccountStatus.SUSPENDED },
-        include: { user: true, workerProfile: { select: { id: true } } },
+        include: MEMBER_INCLUDE,
       });
       await this.revokeSessions(tx, member.id, "MEMBERSHIP_SUSPENDED");
       await this.audit(tx, actor, member, "MEMBERSHIP_SUSPENDED", "status", member.status, AccountStatus.SUSPENDED, dto.reason, correlationId);
@@ -151,7 +249,7 @@ export class MembershipsService {
       const changed = await tx.organizationMembership.update({
         where: { id: member.id },
         data: { status: AccountStatus.ACTIVE },
-        include: { user: true, workerProfile: { select: { id: true } } },
+        include: MEMBER_INCLUDE,
       });
       await this.audit(tx, actor, member, "MEMBERSHIP_REACTIVATED", "status", member.status, AccountStatus.ACTIVE, dto.reason, correlationId);
       return changed;
@@ -162,11 +260,11 @@ export class MembershipsService {
   async archive(organizationId: string, membershipId: string, dto: MemberActionReasonDto, actor: AuthenticatedUser, correlationId: string) {
     const updated = await this.prisma.$transaction(async (tx) => {
       const member = await this.findEditable(tx, organizationId, membershipId);
-      if (member.role === OrgRole.OWNER) await this.assertNotLastActiveOwner(tx, member);
+      if (isActiveAdmin(member)) await this.assertAdminRemains(tx, member);
       const changed = await tx.organizationMembership.update({
         where: { id: member.id },
         data: { status: AccountStatus.ARCHIVED, archivedAt: new Date() },
-        include: { user: true, workerProfile: { select: { id: true } } },
+        include: MEMBER_INCLUDE,
       });
       await this.revokeSessions(tx, member.id, "MEMBERSHIP_ARCHIVED");
       await this.audit(tx, actor, member, "MEMBERSHIP_ARCHIVED", "status", member.status, AccountStatus.ARCHIVED, dto.reason, correlationId);
@@ -193,7 +291,7 @@ export class MembershipsService {
       const changed = await tx.organizationMembership.update({
         where: { id: member.id },
         data: { isTimeTrackable: dto.isTimeTrackable },
-        include: { user: true, workerProfile: { select: { id: true } } },
+        include: MEMBER_INCLUDE,
       });
       await this.audit(
         tx,
@@ -312,7 +410,7 @@ export class MembershipsService {
     const member = UUID_PATTERN.test(membershipId)
       ? await client.organizationMembership.findFirst({
           where: { id: membershipId, organizationId },
-          include: { user: true, workerProfile: { select: { id: true } } },
+          include: MEMBER_INCLUDE,
         })
       : null;
     if (!member) throw new AppException(404, ErrorCodes.NOT_FOUND, "Member not found.");
@@ -328,15 +426,21 @@ export class MembershipsService {
     return member;
   }
 
-  /** Demoting, suspending or archiving this Owner must leave another active Owner. */
-  private async assertNotLastActiveOwner(tx: PrismaTx, member: MemberRow): Promise<void> {
-    if (member.role !== OrgRole.OWNER || member.status !== AccountStatus.ACTIVE) return;
-    const otherActiveOwners = await tx.organizationMembership.count({
-      where: { organizationId: member.organizationId, role: OrgRole.OWNER, status: AccountStatus.ACTIVE, archivedAt: null, id: { not: member.id } },
-    });
-    if (otherActiveOwners === 0) {
-      throw new AppException(409, ErrorCodes.LAST_ACTIVE_OWNER, "The organization must keep at least one active Owner.");
+  /** The role a request names: a built-in role by its kind, or any unarchived role by id. */
+  private async resolveRole(tx: PrismaTx, organizationId: string, input: { role?: OrgRole; roleId?: string }): Promise<{ kind: OrgRole; record: Role }> {
+    if (input.roleId) {
+      const record = await this.roles.findAssignable(tx, organizationId, input.roleId);
+      return { kind: (record.systemKey as OrgRole | null) ?? OrgRole.CUSTOM, record };
     }
+    const kind = input.role as OrgRole;
+    if (kind === OrgRole.CUSTOM) throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Name the custom role by its roleId.");
+    return { kind, record: await this.roles.findSystem(tx, organizationId, kind as "OWNER" | "FIELD_MANAGER" | "WORKER") };
+  }
+
+  /** Taking an administrator away (demoting, suspending, archiving, restricting) must leave another active one. */
+  private async assertAdminRemains(tx: PrismaTx, member: MemberRow): Promise<void> {
+    await lockAdmins(tx, member.organizationId);
+    if ((await countAdmins(tx, member.organizationId, { excludeMembershipId: member.id })) === 0) throw lastAdminError(member.role);
   }
 
   /** Ends every session of this membership (refresh-token families); access tokens then fail the guard. */
@@ -388,4 +492,18 @@ export class MembershipsService {
       isSelf: member.id === viewer.membershipId,
     };
   }
+}
+
+/** An active, unrestricted member whose role can manage roles and settings. */
+function isActiveAdmin(member: Pick<MemberRow, "role" | "roleRecord" | "status" | "archivedAt" | "restrictedToScope">): boolean {
+  if (member.status !== AccountStatus.ACTIVE || member.archivedAt || member.restrictedToScope) return false;
+  return holdsAdminPermissions(permissionsOfRole(member.role as OrgRole, member.roleRecord));
+}
+
+/** "all" or "projects:a,b;sites:c" (the audit's old -> new values). */
+function scopeLabel(member: Pick<MemberRow, "restrictedToScope" | "scopes">): string {
+  if (!member.restrictedToScope) return "all";
+  const projects = member.scopes.flatMap((scope) => (scope.projectId ? [scope.projectId] : [])).sort();
+  const sites = member.scopes.flatMap((scope) => (scope.siteId ? [scope.siteId] : [])).sort();
+  return `projects:${projects.join(",")};sites:${sites.join(",")}`;
 }

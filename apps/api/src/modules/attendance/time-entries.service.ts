@@ -1,10 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import { FileAssetPurpose, OrgRole, type SummarySource, type TimeEntryStatus } from "@fieldmaster/shared-types";
+import { FileAssetPurpose, Permission, type SummarySource, type TimeEntryStatus } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN, YEAR_MONTH_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { hasPermission } from "../../common/auth/permissions";
+import { scopeOf, timeEntryScopeWhere } from "../../common/scope/scope-filters";
 
 /** The clock event fields a worker sees on their own entry (the receipt's reference and times, the location check). */
 const OWN_CLOCK_EVENT_SELECT = {
@@ -55,13 +57,15 @@ export class TimeEntriesService {
     if (filters.month !== undefined && !YEAR_MONTH_PATTERN.test(filters.month)) {
       throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "month must be a month in the form YYYY-MM.", { field: "month" });
     }
-    const isManager = viewer.role === OrgRole.OWNER || viewer.role === OrgRole.FIELD_MANAGER;
+    // A member who may see everyone's attendance sees every worker's entries (those of their projects, when restricted); anyone else, their own.
+    const isManager = hasPermission(viewer, Permission.VIEW_ATTENDANCE);
     const workerScope = isManager ? filters.workerProfileId : viewer.workerProfileId ?? "__none__";
 
     return this.prisma.timeEntry.findMany({
       where: {
         organizationId,
         ...(workerScope ? { workerProfileId: workerScope } : {}),
+        ...(isManager ? (timeEntryScopeWhere(scopeOf(viewer)) ?? {}) : {}),
         ...(filters.status ? { status: filters.status } : {}),
         AND: [
           ...(filters.businessDate ? [{ businessDate: filters.businessDate }] : []),
@@ -84,9 +88,10 @@ export class TimeEntriesService {
    * One entry. The caller's OWN entry (Step 9, any role) is the worker's
    * detail: the entry with its shift and clock events, its corrections with
    * their reason and who made them (by name), its summary and how many photos
-   * it has -- no money. Owners and Field Managers get every other entry of
-   * the organization in the shape they always had. For anyone else the entry
-   * does not exist: 404, like an unknown or malformed id.
+   * it has -- no money. A member who may see everyone's attendance gets every
+   * other entry (of their projects, when restricted) in the shape it always
+   * had. For anyone else the entry does not exist: 404, like an unknown or
+   * malformed id.
    */
   async getById(organizationId: string, id: string, viewer: AuthenticatedUser) {
     const notFound = () => new AppException(404, ErrorCodes.NOT_FOUND, "Time entry not found.");
@@ -96,12 +101,13 @@ export class TimeEntriesService {
 
     if (viewer.workerProfileId !== null && owner.workerProfileId === viewer.workerProfileId) return this.ownDetail(id);
 
-    const isManager = viewer.role === OrgRole.OWNER || viewer.role === OrgRole.FIELD_MANAGER;
-    if (!isManager) throw notFound();
-    return this.prisma.timeEntry.findFirstOrThrow({
-      where: { id, organizationId },
+    if (!hasPermission(viewer, Permission.VIEW_ATTENDANCE)) throw notFound();
+    const entry = await this.prisma.timeEntry.findFirst({
+      where: { id, organizationId, ...(timeEntryScopeWhere(scopeOf(viewer)) ?? {}) },
       include: { shift: true, dailySummary: true, clockEvents: true, corrections: true, approvals: true, unpaidBreaks: true },
     });
+    if (!entry) throw notFound();
+    return entry;
   }
 
   /** The contract's `MyTimeEntryDetail`. */

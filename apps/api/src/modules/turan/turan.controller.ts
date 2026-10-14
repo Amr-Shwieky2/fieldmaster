@@ -60,13 +60,13 @@ export class TuranController {
 
   /** Owners and Field Managers; an Owner's items also carry `estimatedCostAgorot`. */
   @Get("emergency-callouts")
-  @RequirePermissions(Permission.APPROVE_ATTENDANCE)
+  @RequirePermissions(Permission.VIEW_ATTENDANCE)
   listEmergencyCallouts(@Query() query: ListEmergencyCalloutsQueryDto, @CurrentUser() user: AuthenticatedUser) {
     return this.emergencyCalloutRecords.list(user.organizationId, user, query);
   }
 
   @Get("emergency-callouts/:id")
-  @RequirePermissions(Permission.APPROVE_ATTENDANCE)
+  @RequirePermissions(Permission.VIEW_ATTENDANCE)
   getEmergencyCallout(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.emergencyCalloutRecords.getById(user.organizationId, id, user);
   }

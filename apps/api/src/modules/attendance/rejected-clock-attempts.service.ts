@@ -75,7 +75,7 @@ export class RejectedClockAttemptsService {
         },
       });
       // The live operations page lists recent rejected attempts.
-      this.realtime.operationsChanged(input.organizationId, OperationsChangeKind.REJECTED_ATTEMPT);
+      this.realtime.operationsChanged(input.organizationId, OperationsChangeKind.REJECTED_ATTEMPT, input.shiftId);
     } catch (error) {
       this.logger.warn(`Could not store a rejected ${input.eventType} attempt (${input.code}): ${error instanceof Error ? error.message : String(error)}`);
     }

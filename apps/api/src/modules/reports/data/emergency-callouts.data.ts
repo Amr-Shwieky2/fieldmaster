@@ -141,7 +141,7 @@ export async function loadEmergencyFinancial(deps: ReportDataDeps, context: Repo
   const rows: CalloutFinancialRow[] = [];
   for (const row of operational.rows) {
     const entry = entryOf.get(row.calloutId);
-    const estimate = entry ? await deps.attendanceCost.estimateEntry(entry) : null;
+    const estimate = entry ? await deps.attendanceCost.estimateEntry(entry, context.organizationId) : null;
     rows.push({ ...row, costBasis: estimate?.basis ?? null, costAgorot: estimate?.estimatedCostAgorot ?? null });
   }
   return {

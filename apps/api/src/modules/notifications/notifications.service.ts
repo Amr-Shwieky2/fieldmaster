@@ -1,11 +1,13 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import type { Prisma, Notification } from "@prisma/client";
-import { AccountStatus, OrgRole, type NotificationType } from "@fieldmaster/shared-types";
+import { AccountStatus, Permission, type NotificationType } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { MEMBERSHIP_ACCESS_INCLUDE, effectivePermissionsOf } from "../../common/auth/member-access";
+import { scopeOf, shiftScopeWhere } from "../../common/scope/scope-filters";
 import { hasFinancialData, withoutFinancialData } from "./notification-data";
 import { readPushPreferences, receivableNotificationTypes, withPushPreferences } from "./notification-preferences";
 import { PushDeliveryService } from "./push/push-delivery.service";
@@ -16,7 +18,7 @@ export interface NotifyInput {
   type: NotificationType;
   title: string;
   body: string;
-  /** Values the text is built from, for localized rendering (see notification-data.ts). Money only for Owner recipients. */
+  /** Values the text is built from, for localized rendering (see notification-data.ts). Money only for recipients who may see money (VIEW_FINANCIALS). */
   data?: Record<string, unknown>;
 }
 
@@ -91,28 +93,39 @@ export class NotificationsService {
 
   /**
    * Safety net for financial isolation: money values (`*Agorot` keys) in
-   * `data` are kept only when the recipient is an active Owner of the
-   * organization. Call sites already send money to Owners only; this makes a
-   * mistake there strip the values (and log) instead of leaking them to a
-   * Field Manager or Worker. Costs one lookup, and only when data has money.
+   * `data` are kept only when the recipient is an active member who may see
+   * money (VIEW_FINANCIALS). Call sites already send money to such recipients
+   * only; this makes a mistake there strip the values (and log) instead of
+   * leaking them to a Field Manager, a Worker or a custom role without the
+   * financial permission. Costs one lookup, and only when data has money.
    */
   private async guardFinancialData(input: NotifyInput): Promise<Record<string, unknown>> {
     const data = input.data ?? {};
     if (!hasFinancialData(data)) return data;
-    const ownerMembership = await this.prisma.organizationMembership.findFirst({
-      where: { organizationId: input.organizationId, userId: input.recipientUserId, role: OrgRole.OWNER, status: AccountStatus.ACTIVE, archivedAt: null },
-      select: { id: true },
+    const membership = await this.prisma.organizationMembership.findFirst({
+      where: { organizationId: input.organizationId, userId: input.recipientUserId, status: AccountStatus.ACTIVE, archivedAt: null },
+      include: MEMBERSHIP_ACCESS_INCLUDE,
     });
-    if (ownerMembership) return data;
-    this.logger.warn(`Stripped financial values from a ${input.type} notification for non-Owner recipient ${input.recipientUserId}.`);
+    if (membership && effectivePermissionsOf({ role: membership.role, roleRecord: membership.roleRecord, restrictedToScope: membership.restrictedToScope }).has(Permission.VIEW_FINANCIALS)) return data;
+    this.logger.warn(`Stripped financial values from a ${input.type} notification for recipient ${input.recipientUserId}, who may not see money.`);
     return withoutFinancialData(data);
   }
 
-  async listForUser(organizationId: string, recipientUserId: string) {
-    return this.prisma.notification.findMany({
+  async listForUser(organizationId: string, recipientUserId: string, viewer?: AuthenticatedUser) {
+    const notifications = await this.prisma.notification.findMany({
       where: { organizationId, recipientUserId },
       orderBy: { createdAt: "desc" },
       take: 100,
+    });
+    // A member restricted to some projects: what is about a shift of another project is not theirs to read
+    // (notifications are filtered when they are created; this covers a restriction added later).
+    const shiftScope = viewer ? shiftScopeWhere(scopeOf(viewer)) : undefined;
+    if (!shiftScope) return notifications;
+    const shiftIds = [...new Set(notifications.map((notification) => shiftIdOf(notification.dataJson)).filter((id): id is string => id !== null))];
+    const visible = new Set((await this.prisma.shift.findMany({ where: { organizationId, id: { in: shiftIds }, ...shiftScope }, select: { id: true } })).map((shift) => shift.id));
+    return notifications.filter((notification) => {
+      const shiftId = shiftIdOf(notification.dataJson);
+      return shiftId === null || visible.has(shiftId);
     });
   }
 
@@ -145,7 +158,7 @@ export class NotificationsService {
    * affected: they are always kept.
    */
   async updateMyPreferences(actor: AuthenticatedUser, changes: readonly { type: NotificationType; push: boolean }[]): Promise<MyNotificationPreferences> {
-    const receivable = new Set(receivableNotificationTypes(actor.role, actor.workerProfileId !== null));
+    const receivable = new Set(receivableNotificationTypes(actor, actor.workerProfileId !== null));
     const seen = new Set<string>();
     for (const change of changes) {
       if (!receivable.has(change.type)) {
@@ -171,7 +184,13 @@ export class NotificationsService {
   private preferencesView(actor: AuthenticatedUser, stored: Prisma.JsonValue): MyNotificationPreferences {
     const push = readPushPreferences(stored);
     return {
-      preferences: receivableNotificationTypes(actor.role, actor.workerProfileId !== null).map((type) => ({ type, push: push[type] ?? true })),
+      preferences: receivableNotificationTypes(actor, actor.workerProfileId !== null).map((type) => ({ type, push: push[type] ?? true })),
     };
   }
+}
+
+function shiftIdOf(data: Prisma.JsonValue | null): string | null {
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
+  const shiftId = (data as Record<string, unknown>).shiftId;
+  return typeof shiftId === "string" ? shiftId : null;
 }

@@ -5,7 +5,8 @@ import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
-import { Permission, roleHasPermission } from "../../common/auth/permissions";
+import { Permission, hasPermission } from "../../common/auth/permissions";
+import { scopeOf, shiftScopeWhere } from "../../common/scope/scope-filters";
 import { OrganizationSettingsService } from "../../common/settings/organization-settings.service";
 import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { TemporarySupervisorsService } from "./temporary-supervisors.service";
@@ -35,10 +36,13 @@ export class TemporaryCheckInPointsService {
   ) {}
 
   async create(organizationId: string, dto: CreateTemporaryCheckInPointDto, actor: AuthenticatedUser, correlationId: string) {
-    const shift = UUID_PATTERN.test(dto.shiftId) ? await this.prisma.shift.findFirst({ where: { id: dto.shiftId, organizationId } }) : null;
+    const isManager = hasPermission(actor, Permission.MANAGE_TEMP_SUPERVISORS);
+    // A manager restricted to some projects reaches only those projects' shifts; a temporary supervisor reaches the shift they supervise.
+    const shift = UUID_PATTERN.test(dto.shiftId)
+      ? await this.prisma.shift.findFirst({ where: { id: dto.shiftId, organizationId, ...(isManager ? (shiftScopeWhere(scopeOf(actor)) ?? {}) : {}) } })
+      : null;
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
 
-    const isManager = roleHasPermission(actor.role, Permission.MANAGE_TEMP_SUPERVISORS);
     if (!isManager) await this.assertSupervisorMayManagePoints(dto.shiftId, actor);
     if (shift.status === ShiftStatus.CLOSED || shift.status === ShiftStatus.CANCELLED) {
       throw new AppException(409, ErrorCodes.SHIFT_NOT_OPEN, "This shift is closed or cancelled.");
@@ -68,15 +72,18 @@ export class TemporaryCheckInPointsService {
       entityId: point.id,
       correlationId,
     });
-    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_POINT);
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_POINT, dto.shiftId);
 
     return point;
   }
 
   async revoke(organizationId: string, id: string, actor: AuthenticatedUser, correlationId: string) {
-    const point = UUID_PATTERN.test(id) ? await this.prisma.temporaryCheckInPoint.findFirst({ where: { id, organizationId } }) : null;
+    const isManager = hasPermission(actor, Permission.MANAGE_TEMP_SUPERVISORS);
+    const point = UUID_PATTERN.test(id)
+      ? await this.prisma.temporaryCheckInPoint.findFirst({ where: { id, organizationId, ...(isManager ? { shift: shiftScopeWhere(scopeOf(actor)) ?? {} } : {}) } })
+      : null;
     if (!point) throw new AppException(404, ErrorCodes.NOT_FOUND, "Check-in point not found.");
-    if (!roleHasPermission(actor.role, Permission.MANAGE_TEMP_SUPERVISORS)) await this.assertSupervisorMayManagePoints(point.shiftId, actor);
+    if (!isManager) await this.assertSupervisorMayManagePoints(point.shiftId, actor);
     if (!this.isCurrentlyActive(point)) throw new AppException(409, ErrorCodes.CONFLICT, "This check-in point is already closed or expired.");
 
     const updated = await this.prisma.temporaryCheckInPoint.update({
@@ -92,7 +99,7 @@ export class TemporaryCheckInPointsService {
       entityId: id,
       correlationId,
     });
-    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_POINT);
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.TEMPORARY_POINT, point.shiftId);
 
     return updated;
   }

@@ -13,9 +13,10 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
 import { PayrollInputsService, toEngineProfile } from "./payroll-inputs.service";
 import { previousYearMonth } from "./financial-dashboard.service";
-import { PAYROLL_SNAPSHOT_SCHEMA_VERSION, type PayrollSnapshotInputs, type PayrollSnapshotResult } from "./payroll-snapshot";
+import { PAYROLL_SNAPSHOT_SCHEMA_VERSION, snapshotRulesFor, type PayrollSnapshotInputs, type PayrollSnapshotResult } from "./payroll-snapshot";
 
 /** `GET /time-entries/:id/my-pay` (the contract's `MyEntryPay`): the caller's own pay for one entry. */
 export interface MyEntryPay {
@@ -84,6 +85,7 @@ export class SalaryStatementsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inputs: PayrollInputsService,
+    private readonly workRules: WorkRulesService,
   ) {}
 
   async myStatements(organizationId: string, actor: AuthenticatedUser) {
@@ -110,7 +112,7 @@ export class SalaryStatementsService {
       const { inputs } = await this.inputs.load(organizationId, yearMonth, { workerProfileId });
       const hasActivity = inputs.entries.length > 0 || inputs.adjustments.length > 0 || inputs.pending.entries > 0;
       if (yearMonth !== currentMonth && !hasActivity) continue;
-      const { worker } = calculateWorkerPayroll(workerProfileId, inputs.entries, inputs.compensationProfiles, inputs.adjustments);
+      const { worker } = calculateWorkerPayroll(workerProfileId, inputs.entries, inputs.compensationProfiles, inputs.adjustments, snapshotRulesFor(inputs));
       estimates.push(statement(yearMonth, worker, null, inputs.pending.entries));
     }
 
@@ -140,7 +142,7 @@ export class SalaryStatementsService {
     }
 
     const { inputs } = await this.inputs.load(organizationId, yearMonth, { workerProfileId });
-    const { worker } = calculateWorkerPayroll(workerProfileId, inputs.entries, inputs.compensationProfiles, inputs.adjustments);
+    const { worker } = calculateWorkerPayroll(workerProfileId, inputs.entries, inputs.compensationProfiles, inputs.adjustments, snapshotRulesFor(inputs));
     return { ...statement(yearMonth, worker, null, inputs.pending.entries), isEstimate: true as const, basis: "APPROVED_ENTRIES_ONLY" as const, calculatedAt: now };
   }
 
@@ -173,7 +175,10 @@ export class SalaryStatementsService {
       // The minutes as recorded, split the way approval would split them; no amount before approval.
       const recorded =
         entry.clockOutAt && entry.rawDurationMinutes !== null
-          ? splitWorkedMinutes({ rawDurationMinutes: entry.rawDurationMinutes, unpaidBreakMinutes: entry.unpaidBreakMinutes, fullDayCredit: entry.fullDayCredit })
+          ? splitWorkedMinutes(
+              { rawDurationMinutes: entry.rawDurationMinutes, unpaidBreakMinutes: entry.unpaidBreakMinutes, fullDayCredit: entry.fullDayCredit },
+              await this.workRules.rulesOn(organizationId, entry.businessDate),
+            )
           : { regularMinutes: 0, overtimeMinutes: 0 };
       return pay({
         approved: false,
@@ -226,7 +231,7 @@ export class SalaryStatementsService {
         finalized: false,
       });
     }
-    const computed = computeEntryCompensation(entry, profile);
+    const computed = computeEntryCompensation(entry, profile, await this.workRules.rulesOn(organizationId, entry.businessDate));
     return pay({
       approved: true,
       compensationType: profile.compensationType,
