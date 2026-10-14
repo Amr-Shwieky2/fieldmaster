@@ -20,10 +20,15 @@ import {
  */
 export const PAYROLL_SNAPSHOT_SCHEMA_VERSION = 2;
 
-export interface SnapshotEntryInput extends PayrollMonthEntry {
+/** An approved entry as the figures of a month need it: what payroll prices, and its shift, project and site. */
+export interface FigureEntryInput extends PayrollMonthEntry {
   shift: { id: string; title: string; shiftType: string };
   projectName: string | null;
   siteName: string | null;
+}
+
+/** An entry as a stored calculation keeps it: its figures, plus its times and last change. */
+export interface SnapshotEntryInput extends FigureEntryInput {
   clockInAt: string | null;
   clockOutAt: string | null;
   updatedAt: string;
@@ -49,11 +54,13 @@ export interface SnapshotWorkerName {
   fullLegalName: string;
 }
 
-export interface PayrollSnapshotInputs {
-  schemaVersion: typeof PAYROLL_SNAPSHOT_SCHEMA_VERSION;
-  yearMonth: string;
+/**
+ * What a month's figures are computed from: a stored calculation's inputs,
+ * or the live month the Owner dashboard reads (`PayrollInputsService.loadFigures`).
+ */
+export interface PayrollFigureInputs {
   /** The month's APPROVED entries: the only attendance a calculation reads. */
-  entries: SnapshotEntryInput[];
+  entries: FigureEntryInput[];
   compensationProfiles: PayrollCompensationProfile[];
   adjustments: SnapshotAdjustmentInput[];
   workers: SnapshotWorkerName[];
@@ -68,8 +75,14 @@ export interface PayrollSnapshotInputs {
   workRules?: WorkRuleVersion[];
 }
 
-/** The work rules of each business date of a stored calculation. */
-export function snapshotRulesFor(inputs: Pick<PayrollSnapshotInputs, "workRules">): (businessDate: string) => WorkRules {
+export interface PayrollSnapshotInputs extends PayrollFigureInputs {
+  schemaVersion: typeof PAYROLL_SNAPSHOT_SCHEMA_VERSION;
+  yearMonth: string;
+  entries: SnapshotEntryInput[];
+}
+
+/** The work rules of each business date of a stored calculation (or a live month). */
+export function snapshotRulesFor(inputs: Pick<PayrollFigureInputs, "workRules">): (businessDate: string) => WorkRules {
   const versions = inputs.workRules ?? [];
   return (businessDate) => pickWorkRules(versions, businessDate);
 }
@@ -100,7 +113,7 @@ const byName = (a: { fullLegalName: string }, b: { fullLegalName: string }) => a
 
 /** The results and totals stored with a calculation, from the engine's per-worker and per-entry results. */
 export function buildPayrollSnapshotResult(
-  inputs: PayrollSnapshotInputs,
+  inputs: PayrollFigureInputs,
   workers: readonly PayrollWorkerResult[],
   entryResults: readonly PayrollEntryResult[],
 ): { result: PayrollSnapshotResult; totals: PayrollSnapshotTotals } {
@@ -111,7 +124,7 @@ export function buildPayrollSnapshotResult(
   const pendingOf = (workerProfileId: string) => pendingById.get(workerProfileId) ?? 0;
   const entryById = new Map(inputs.entries.map((entry) => [entry.timeEntryId, entry]));
   const projectNames = new Map<string, string | null>();
-  const sitesById = new Map<string, SnapshotEntryInput>();
+  const sitesById = new Map<string, FigureEntryInput>();
   for (const entry of inputs.entries) {
     if (entry.projectId !== null && !projectNames.has(entry.projectId)) projectNames.set(entry.projectId, entry.projectName);
     if (entry.siteId !== null && !sitesById.has(entry.siteId)) sitesById.set(entry.siteId, entry);

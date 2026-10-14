@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from "@nestjs/swagger";
 import { ONBOARDING_FILE_PURPOSES } from "@fieldmaster/shared-types";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -16,6 +16,7 @@ import { OnboardingRateLimit } from "./onboarding-rate-limit";
 import { CreateInvitationDto } from "./dto/create-invitation.dto";
 import { JoinApplicationDto } from "./dto/join-application.dto";
 import { UploadFileDto } from "./dto/upload-file.dto";
+import { pageWindow } from "../../common/validation/page-query";
 
 @ApiTags("onboarding")
 @Controller()
@@ -38,8 +39,8 @@ export class OnboardingController {
   @ApiBearerAuth()
   @Get("onboarding-invitations")
   @RequirePermissions(Permission.APPROVE_ONBOARDING)
-  async listInvitations(@CurrentUser() user: AuthenticatedUser) {
-    return this.onboardingService.listInvitations(user.organizationId);
+  async listInvitations(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.onboardingService.listInvitations(user.organizationId, pageWindow({ page, pageSize }));
   }
 
   @ApiBearerAuth()
@@ -54,8 +55,8 @@ export class OnboardingController {
   @ApiBearerAuth()
   @Get("onboarding-invitations/pending-workers")
   @RequirePermissions(Permission.APPROVE_ONBOARDING)
-  async listPending(@CurrentUser() user: AuthenticatedUser) {
-    return this.workersService.listPendingApproval(user.organizationId);
+  async listPending(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.workersService.listPendingApproval(user.organizationId, pageWindow({ page, pageSize }));
   }
 
   // ── The public onboarding page (no sign-in, rate limited) ─────────────

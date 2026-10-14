@@ -11,9 +11,24 @@ import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { WorkRulesService } from "../../common/settings/work-rules.service";
 import { scopeOf, timeEntryScopeWhere } from "../../common/scope/scope-filters";
+import { listOrPage, type PageWindow } from "../../common/validation/page-query";
 
 /** The scope filter of a member restricted to some projects, as an extra `where` for a time entry looked up by id. */
 const entryScope = (actor: AuthenticatedUser) => timeEntryScopeWhere(scopeOf(actor)) ?? {};
+
+/** What the approvals queue shows of an entry's shift. */
+const PENDING_SHIFT_SELECT = {
+  id: true,
+  organizationId: true,
+  projectId: true,
+  siteId: true,
+  title: true,
+  shiftType: true,
+  status: true,
+  businessDate: true,
+  scheduledStart: true,
+  scheduledEnd: true,
+} as const;
 
 @Injectable()
 export class AttendanceApprovalsService {
@@ -25,12 +40,48 @@ export class AttendanceApprovalsService {
     private readonly workRules: WorkRulesService,
   ) {}
 
-  async listPendingApproval(organizationId: string, viewer?: AuthenticatedUser) {
-    return this.prisma.timeEntry.findMany({
-      where: { organizationId, status: TimeEntryStatus.PENDING_APPROVAL, ...(viewer ? entryScope(viewer) : {}) },
-      include: { shift: true, dailySummary: true, corrections: true, worker: { include: { membership: { include: { user: true } } } } },
-      orderBy: { clockOutAt: "asc" },
-    });
+  /**
+   * The entries waiting for approval, oldest clock-out first: all of them, or
+   * one page (`?page=` / `?pageSize=`). Each with its shift, summary and
+   * corrections, and the worker by name (not their whole user record).
+   */
+  async listPendingApproval(organizationId: string, viewer?: AuthenticatedUser, window: PageWindow | null = null) {
+    const where = { organizationId, status: TimeEntryStatus.PENDING_APPROVAL, ...(viewer ? entryScope(viewer) : {}) };
+    return listOrPage(
+      window,
+      async (range) => {
+        // Flat rows, then the shifts (a few for thousands of entries), summaries, corrections and names
+        // read once each: nesting them in every row costs several times more to load and to send.
+        const entries = await this.prisma.timeEntry.findMany({ where, orderBy: [{ clockOutAt: "asc" }, { id: "asc" }], ...range });
+        const entryIds = entries.map((entry) => entry.id);
+        const [shifts, summaries, corrections, workers] = await Promise.all([
+          this.prisma.shift.findMany({ where: { id: { in: [...new Set(entries.map((entry) => entry.shiftId))] } }, select: PENDING_SHIFT_SELECT }),
+          this.prisma.dailySummary.findMany({ where: { timeEntryId: { in: entryIds } } }),
+          this.prisma.manualTimeCorrection.findMany({ where: { timeEntryId: { in: entryIds } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }),
+          this.prisma.workerProfile.findMany({
+            where: { id: { in: [...new Set(entries.map((entry) => entry.workerProfileId))] } },
+            select: { id: true, membership: { select: { user: { select: { id: true, fullLegalName: true } } } } },
+          }),
+        ]);
+        const shiftById = new Map(shifts.map((shift) => [shift.id, shift]));
+        const summaryByEntry = new Map(summaries.map((summary) => [summary.timeEntryId, summary]));
+        const workerById = new Map(workers.map((worker) => [worker.id, worker]));
+        const correctionsByEntry = new Map<string, typeof corrections>();
+        for (const correction of corrections) {
+          const list = correctionsByEntry.get(correction.timeEntryId);
+          if (list) list.push(correction);
+          else correctionsByEntry.set(correction.timeEntryId, [correction]);
+        }
+        return entries.map((entry) => ({
+          ...entry,
+          shift: shiftById.get(entry.shiftId) ?? null,
+          dailySummary: summaryByEntry.get(entry.id) ?? null,
+          corrections: correctionsByEntry.get(entry.id) ?? [],
+          worker: workerById.get(entry.workerProfileId) ?? null,
+        }));
+      },
+      () => this.prisma.timeEntry.count({ where }),
+    );
   }
 
   async applyFullDayCredit(organizationId: string, timeEntryId: string, reason: string, actor: AuthenticatedUser, correlationId: string) {

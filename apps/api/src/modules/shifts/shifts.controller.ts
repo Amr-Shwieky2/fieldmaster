@@ -15,6 +15,7 @@ import { TemporarySupervisorsService } from "./temporary-supervisors.service";
 import { AssignTemporarySupervisorDto } from "./dto/temporary-supervisor.dto";
 import { TemporaryCheckInPointsService } from "./temporary-check-in-points.service";
 import { CreateTemporaryCheckInPointDto } from "./dto/temporary-check-in-point.dto";
+import { pageWindow } from "../../common/validation/page-query";
 
 @ApiBearerAuth()
 @ApiTags("shifts")
@@ -38,12 +39,14 @@ export class ShiftsController {
     @Query("status") status?: ShiftStatus,
     @Query("businessDate") businessDate?: string,
     @Query("shiftType") shiftType?: ShiftType,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
   ) {
     // A member without VIEW_SHIFTS (a Worker) only ever sees the shifts they're
     // personally assigned to; whoever holds it sees the organization's list
     // (the projects they are restricted to, if any).
     const scope = this.scopeFor(user);
-    return this.shiftsService.list(user.organizationId, { status, businessDate, shiftType }, user, scope);
+    return this.shiftsService.list(user.organizationId, { status, businessDate, shiftType }, user, scope, pageWindow({ page, pageSize }));
   }
 
   @Get(":id")

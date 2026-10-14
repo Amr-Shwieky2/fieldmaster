@@ -16,6 +16,7 @@ import { scopeOf, workerScopeWhere } from "../../common/scope/scope-filters";
 import type { ClockInDto } from "../attendance/dto/clock-in.dto";
 import type { ClockOutDto } from "../attendance/dto/clock-out.dto";
 import type { OfflineSyncBatchDto, OfflineSyncEventInputDto } from "./dto/offline-sync-batch.dto";
+import { listOrPage, type PageWindow } from "../../common/validation/page-query";
 
 export interface EventOutcome {
   clientEventId: string;
@@ -118,18 +119,18 @@ export class OfflineSyncService {
     return batch;
   }
 
-  async listBatches(organizationId: string, actor: AuthenticatedUser) {
+  /** The 50 newest batches, or one page of all of them (`?page=` / `?pageSize=`). */
+  async listBatches(organizationId: string, actor: AuthenticatedUser, window: PageWindow | null = null) {
     const canReviewAll = hasPermission(actor, Permission.VIEW_ATTENDANCE);
     const workerScope = canReviewAll ? workerScopeWhere(scopeOf(actor)) : undefined;
     const where = !canReviewAll
       ? { organizationId, workerProfileId: actor.workerProfileId ?? "" }
       : { organizationId, ...(workerScope ? { worker: workerScope } : {}) };
-    return this.prisma.offlineSyncBatch.findMany({
-      where,
-      include: { events: true },
-      orderBy: { submittedAt: "desc" },
-      take: 50,
-    });
+    return listOrPage(
+      window,
+      (range) => this.prisma.offlineSyncBatch.findMany({ where, include: { events: true }, orderBy: [{ submittedAt: "desc" }, { id: "desc" }], skip: range.skip, take: range.take ?? 50 }),
+      () => this.prisma.offlineSyncBatch.count({ where }),
+    );
   }
 
   private async processEvent(

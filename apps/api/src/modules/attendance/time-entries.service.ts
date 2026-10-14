@@ -1,12 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { FileAssetPurpose, Permission, type SummarySource, type TimeEntryStatus } from "@fieldmaster/shared-types";
+import { businessMonthDates } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN, YEAR_MONTH_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { hasPermission } from "../../common/auth/permissions";
 import { scopeOf, timeEntryScopeWhere } from "../../common/scope/scope-filters";
+import { listOrPage, type PageWindow } from "../../common/validation/page-query";
 
 /** The clock event fields a worker sees on their own entry (the receipt's reference and times, the location check). */
 const OWN_CLOCK_EVENT_SELECT = {
@@ -52,6 +54,7 @@ export class TimeEntriesService {
     organizationId: string,
     viewer: AuthenticatedUser,
     filters: { workerProfileId?: string; status?: TimeEntryStatus; businessDate?: string; month?: string },
+    window: PageWindow | null = null,
   ) {
     // Step 9: `?month=YYYY-MM` (business month, Asia/Jerusalem); a malformed month is a 400, never an empty list.
     if (filters.month !== undefined && !YEAR_MONTH_PATTERN.test(filters.month)) {
@@ -61,27 +64,35 @@ export class TimeEntriesService {
     const isManager = hasPermission(viewer, Permission.VIEW_ATTENDANCE);
     const workerScope = isManager ? filters.workerProfileId : viewer.workerProfileId ?? "__none__";
 
-    return this.prisma.timeEntry.findMany({
-      where: {
-        organizationId,
-        ...(workerScope ? { workerProfileId: workerScope } : {}),
-        ...(isManager ? (timeEntryScopeWhere(scopeOf(viewer)) ?? {}) : {}),
-        ...(filters.status ? { status: filters.status } : {}),
-        AND: [
-          ...(filters.businessDate ? [{ businessDate: filters.businessDate }] : []),
-          ...(filters.month ? [{ businessDate: { startsWith: `${filters.month}-` } }] : []),
-        ],
-      },
-      include: {
-        shift: true,
-        dailySummary: true,
-        clockEvents: true,
-        // Step 9: a worker's own list never carries who corrected an entry by IP address or browser (managers' list unchanged).
-        corrections: isManager ? true : { select: WORKER_CORRECTION_SELECT },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 200,
-    });
+    const where = {
+      organizationId,
+      ...(workerScope ? { workerProfileId: workerScope } : {}),
+      ...(isManager ? (timeEntryScopeWhere(scopeOf(viewer)) ?? {}) : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      AND: [
+        ...(filters.businessDate ? [{ businessDate: filters.businessDate }] : []),
+        ...(filters.month ? [{ businessDate: businessMonthDates(filters.month) }] : []),
+      ],
+    };
+    // The 200 newest, or one page of all of them (`?page=` / `?pageSize=`).
+    return listOrPage(
+      window,
+      (range) =>
+        this.prisma.timeEntry.findMany({
+          where,
+          include: {
+            shift: true,
+            dailySummary: true,
+            clockEvents: true,
+            // Step 9: a worker's own list never carries who corrected an entry by IP address or browser (managers' list unchanged).
+            corrections: isManager ? true : { select: WORKER_CORRECTION_SELECT },
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          skip: range.skip,
+          take: range.take ?? 200,
+        }),
+      () => this.prisma.timeEntry.count({ where }),
+    );
   }
 
   /**

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -6,6 +6,7 @@ import { RequirePermissions } from "../../common/decorators/require-permissions.
 import { Permission } from "../../common/auth/permissions";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { MembershipsService } from "./memberships.service";
+import { pageWindow } from "../../common/validation/page-query";
 import { CreateMembershipDto } from "./dto/create-membership.dto";
 import { ChangeMemberRoleDto, MemberActionReasonDto, SetMemberScopeDto, SetTimeTrackingDto } from "./dto/member-actions.dto";
 
@@ -24,15 +25,15 @@ export class MembershipsController {
 
   @Get()
   @RequirePermissions(Permission.MANAGE_ORG_USERS)
-  async list(@CurrentUser() user: AuthenticatedUser) {
-    return this.membershipsService.list(user.organizationId, user);
+  async list(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.membershipsService.list(user.organizationId, user, pageWindow({ page, pageSize }));
   }
 
   /** Each member's role record and project scope (the users page joins it to the list by membershipId). */
   @Get("access")
   @RequirePermissions(Permission.MANAGE_ORG_USERS)
-  async access(@CurrentUser() user: AuthenticatedUser) {
-    return this.membershipsService.access(user.organizationId);
+  async access(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.membershipsService.access(user.organizationId, pageWindow({ page, pageSize }));
   }
 
   @Patch(":id/role")

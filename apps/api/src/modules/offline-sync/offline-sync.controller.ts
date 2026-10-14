@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiHeader, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -7,6 +7,7 @@ import { Permission } from "../../common/auth/permissions";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { OfflineSyncService } from "./offline-sync.service";
 import { OfflineSyncBatchDto } from "./dto/offline-sync-batch.dto";
+import { pageWindow } from "../../common/validation/page-query";
 
 @ApiBearerAuth()
 @ApiTags("offline-sync")
@@ -28,8 +29,8 @@ export class OfflineSyncController {
 
   @Get("batches")
   @RequirePermissions(Permission.VIEW_OWN_ATTENDANCE)
-  listBatches(@CurrentUser() user: AuthenticatedUser) {
-    return this.offlineSyncService.listBatches(user.organizationId, user);
+  listBatches(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.offlineSyncService.listBatches(user.organizationId, user, pageWindow({ page, pageSize }));
   }
 
   @Get("batches/:id")

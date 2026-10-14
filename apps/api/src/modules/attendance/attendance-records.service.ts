@@ -9,6 +9,7 @@ import {
   LocationValidationStatus,
   PayrollPeriodStatus,
   TimeEntryStatus,
+  type WorkRules,
 } from "@fieldmaster/shared-types";
 import { splitWorkedMinutes } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -242,6 +243,11 @@ export const DurationBasis = {
   OPEN: "OPEN",
 } as const;
 
+/** What the screens need of the work rules to split an entry's minutes: the standard day and the overtime threshold. */
+function dayRulesOf(rules: Pick<WorkRules, "standardDayMinutes" | "overtimeThresholdMinutes">) {
+  return { standardDayMinutes: rules.standardDayMinutes, overtimeThresholdMinutes: rules.overtimeThresholdMinutes };
+}
+
 @Injectable()
 export class AttendanceRecordsService {
   constructor(
@@ -278,12 +284,15 @@ export class AttendanceRecordsService {
         ? [{ businessDate: "asc" }, { clockOutAt: "asc" }, { id: "asc" }]
         : [{ businessDate: "desc" }, { clockInAt: "desc" }, { id: "desc" }];
 
-    const [rows, pending, approved, rejected, all] = await this.prisma.$transaction([
-      this.prisma.timeEntry.findMany({ where: whereFor(tab), select: LIST_SELECT, orderBy, skip, take }),
-      this.prisma.timeEntry.count({ where: whereFor(AttendanceListTab.PENDING) }),
-      this.prisma.timeEntry.count({ where: whereFor(AttendanceListTab.APPROVED) }),
-      this.prisma.timeEntry.count({ where: whereFor(AttendanceListTab.REJECTED) }),
-      this.prisma.timeEntry.count({ where: whereFor(AttendanceListTab.ALL) }),
+    const [[rows, pending, approved, rejected, all], rules] = await Promise.all([
+      this.prisma.$transaction([
+        this.prisma.timeEntry.findMany({ where: whereFor(tab), select: LIST_SELECT, orderBy, skip, take }),
+        this.prisma.timeEntry.count({ where: whereFor(AttendanceListTab.PENDING) }),
+        this.prisma.timeEntry.count({ where: whereFor(AttendanceListTab.APPROVED) }),
+        this.prisma.timeEntry.count({ where: whereFor(AttendanceListTab.REJECTED) }),
+        this.prisma.timeEntry.count({ where: whereFor(AttendanceListTab.ALL) }),
+      ]),
+      this.workRules.resolver(organizationId),
     ]);
     const tabCounts: Record<AttendanceListTab, number> = { PENDING: pending, APPROVED: approved, REJECTED: rejected, ALL: all };
 
@@ -302,6 +311,8 @@ export class AttendanceRecordsService {
         isEmergency: row.isEmergency,
         devRewoundAt: row.devRewoundAt,
         checkInMethod: row.checkInMethod,
+        // The standard day and overtime threshold in force on the entry's business date (the full-day credit and the split).
+        dayRules: dayRulesOf(rules.rulesFor(row.businessDate)),
         worker: { id: row.worker.id, fullLegalName: row.worker.membership.user.fullLegalName },
         shift: { id: row.shift.id, title: row.shift.title, shiftType: row.shift.shiftType, project: row.shift.project, site: row.shift.site },
         dailySummary: row.dailySummary,
@@ -409,7 +420,7 @@ export class AttendanceRecordsService {
       approvedByName: nameOf(entry.approvedBy),
       periodFinalized,
       /** The day-length rules of the entry's business date (no money): the correction preview uses them. */
-      dayRules: { standardDayMinutes: rules.standardDayMinutes, overtimeThresholdMinutes: rules.overtimeThresholdMinutes },
+      dayRules: dayRulesOf(rules),
       worker: {
         id: entry.worker.id,
         fullLegalName: entry.worker.membership.user.fullLegalName,

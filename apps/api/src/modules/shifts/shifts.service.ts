@@ -14,6 +14,7 @@ import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { scopeOf, shiftInScope, shiftScopeWhere } from "../../common/scope/scope-filters";
 import { projectSelectFor } from "../sites/project-fields";
 import type { CreateShiftDto } from "./dto/create-shift.dto";
+import { listOrPage, type PageWindow } from "../../common/validation/page-query";
 
 const LONG_RUNNING_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
@@ -79,28 +80,37 @@ export class ShiftsService {
     filters: { status?: ShiftStatus; businessDate?: string; shiftType?: ShiftType },
     viewer: AuthenticatedUser,
     scope?: { workerProfileId: string },
+    window: PageWindow | null = null,
   ) {
-    return this.prisma.shift.findMany({
-      where: {
-        organizationId,
-        ...(scope ? {} : (shiftScopeWhere(scopeOf(viewer)) ?? {})),
-        ...(filters.status ? { status: filters.status } : {}),
-        ...(filters.businessDate ? { businessDate: filters.businessDate } : {}),
-        ...(filters.shiftType ? { shiftType: filters.shiftType } : {}),
-        // Workers (no MANAGE_SHIFTS permission) only ever see shifts
-        // they're actually assigned to -- managers see the full org list.
-        ...(scope ? { assignments: { some: { workerProfileId: scope.workerProfileId, removedAt: null } } } : {}),
-      },
-      // The project budget is Owner-only: everyone else's query never reads it.
-      // A worker sees only their own assignment, never who else is on the shift (Step 9: no other worker's data).
-      include: {
-        assignments: { where: { removedAt: null, ...(scope ? { workerProfileId: scope.workerProfileId } : {}) } },
-        site: true,
-        project: { select: projectSelectFor(viewer) },
-      },
-      orderBy: { scheduledStart: "desc" },
-      take: 200,
-    });
+    const where = {
+      organizationId,
+      ...(scope ? {} : (shiftScopeWhere(scopeOf(viewer)) ?? {})),
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.businessDate ? { businessDate: filters.businessDate } : {}),
+      ...(filters.shiftType ? { shiftType: filters.shiftType } : {}),
+      // Workers (no MANAGE_SHIFTS permission) only ever see shifts
+      // they're actually assigned to -- managers see the full org list.
+      ...(scope ? { assignments: { some: { workerProfileId: scope.workerProfileId, removedAt: null } } } : {}),
+    };
+    // The 200 latest, or one page of all of them (`?page=` / `?pageSize=`).
+    return listOrPage(
+      window,
+      (range) =>
+        this.prisma.shift.findMany({
+          where,
+          // The project budget is Owner-only: everyone else's query never reads it.
+          // A worker sees only their own assignment, never who else is on the shift (Step 9: no other worker's data).
+          include: {
+            assignments: { where: { removedAt: null, ...(scope ? { workerProfileId: scope.workerProfileId } : {}) } },
+            site: true,
+            project: { select: projectSelectFor(viewer) },
+          },
+          orderBy: [{ scheduledStart: "desc" }, { id: "desc" }],
+          skip: range.skip,
+          take: range.take ?? 200,
+        }),
+      () => this.prisma.shift.count({ where }),
+    );
   }
 
   /**

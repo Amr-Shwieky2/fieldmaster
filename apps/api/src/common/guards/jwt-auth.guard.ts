@@ -51,6 +51,8 @@ export class JwtAuthGuard implements CanActivate {
       this.prisma.organizationMembership.findUnique({
         where: { id: payload.membershipId },
         include: { user: true, workerProfile: true, ...MEMBERSHIP_ACCESS_INCLUDE },
+        // One statement with joins instead of one per relation: this runs on every request.
+        relationLoadStrategy: "join",
       }),
       payload.sid ? this.prisma.refreshTokenFamily.findUnique({ where: { id: payload.sid }, select: { revokedAt: true } }) : null,
     ]);

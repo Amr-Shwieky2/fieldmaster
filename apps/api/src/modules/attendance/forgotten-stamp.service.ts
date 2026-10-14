@@ -10,6 +10,7 @@ import { canViewFinancials } from "../../common/auth/permissions";
 import { WorkRulesService } from "../../common/settings/work-rules.service";
 import { timeEntryScopeWhere } from "../../common/scope/scope-filters";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { listOrPage, mapRows, type PageWindow } from "../../common/validation/page-query";
 
 /**
  * Every infraction column except the deduction, which is money (spec section
@@ -182,7 +183,12 @@ export class ForgottenStampService {
    * restricted to some projects sees the infractions of entries in those
    * projects only.
    */
-  async listForOrganization(organizationId: string, viewer: AuthenticatedUser, filters: { workerProfileId?: string; month?: string } = {}) {
+  async listForOrganization(
+    organizationId: string,
+    viewer: AuthenticatedUser,
+    filters: { workerProfileId?: string; month?: string } = {},
+    window: PageWindow | null = null,
+  ) {
     const related = {
       worker: { select: { id: true, membership: { select: { user: { select: { fullLegalName: true } } } } } },
       correction: { select: { id: true, field: true, oldValue: true, newValue: true, reason: true, note: true, editedBy: true, createdAt: true } },
@@ -201,24 +207,37 @@ export class ForgottenStampService {
       { monthlySequenceNumber: "desc" },
     ];
 
-    const rows =
-      canViewFinancials(viewer)
-        ? await this.prisma.forgottenStampInfraction.findMany({
-            where,
-            orderBy,
-            select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, deductionAgorot: true, ...related },
-          })
-        : await this.prisma.forgottenStampInfraction.findMany({ where, orderBy, select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, ...related } });
+    // Every infraction, or one page of them (`?page=` / `?pageSize=`).
+    const list = await listOrPage(
+      window,
+      (range) =>
+        canViewFinancials(viewer)
+          ? this.prisma.forgottenStampInfraction.findMany({
+              where,
+              orderBy: [...orderBy, { id: "desc" }],
+              select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, deductionAgorot: true, ...related },
+              ...range,
+            })
+          : this.prisma.forgottenStampInfraction.findMany({
+              where,
+              orderBy: [...orderBy, { id: "desc" }],
+              select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, ...related },
+              ...range,
+            }),
+      () => this.prisma.forgottenStampInfraction.count({ where }),
+    );
 
-    const userIds = [...new Set(rows.flatMap((row) => [row.correction.editedBy, row.reversedBy]).filter((id): id is string => id !== null))];
-    const users = userIds.length > 0 ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullLegalName: true } }) : [];
-    const nameOf = (id: string | null) => (id ? (users.find((user) => user.id === id)?.fullLegalName ?? null) : null);
-
-    return rows.map(({ worker, correction, ...row }) => ({
-      ...row,
-      reversedByName: nameOf(row.reversedBy),
-      worker: { id: worker.id, fullLegalName: worker.membership.user.fullLegalName },
-      correction: { ...correction, editedByName: nameOf(correction.editedBy) },
-    }));
+    return mapRows(list, async (rows) => {
+      const userIds = [...new Set(rows.flatMap((row) => [row.correction.editedBy, row.reversedBy]).filter((id): id is string => id !== null))];
+      const users = userIds.length > 0 ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullLegalName: true } }) : [];
+      const names = new Map(users.map((user) => [user.id, user.fullLegalName]));
+      const nameOf = (id: string | null) => (id ? (names.get(id) ?? null) : null);
+      return rows.map(({ worker, correction, ...row }) => ({
+        ...row,
+        reversedByName: nameOf(row.reversedBy),
+        worker: { id: worker.id, fullLegalName: worker.membership.user.fullLegalName },
+        correction: { ...correction, editedByName: nameOf(correction.editedBy) },
+      }));
+    });
   }
 }

@@ -44,31 +44,32 @@ export class OperationsService {
     const inShiftScope = shiftScope ? { shift: shiftScope } : {};
     const rules = await this.workRules.current(organizationId, this.prisma);
 
-    const [openEntries, shifts, points, emergencies, attempts, suspicious, offline] = await Promise.all([
-      this.prisma.timeEntry.findMany({
-        where: { organizationId, status: TimeEntryStatus.ACTIVE, ...(timeEntryScopeWhere(scope) ?? {}) },
-        select: {
-          id: true,
-          clockInAt: true,
-          isEmergency: true,
-          shiftId: true,
-          worker: { select: workerSelect },
-          shift: { select: { id: true, title: true, shiftType: true } },
-          clockEvents: {
-            select: { latitude: true, longitude: true, accuracyMeters: true, serverReceivedAt: true, locationValidationStatus: true, eventType: true },
-            orderBy: { serverReceivedAt: "desc" },
-            take: 1,
-          },
+    const openEntriesQuery = this.prisma.timeEntry.findMany({
+      where: { organizationId, status: TimeEntryStatus.ACTIVE, ...(timeEntryScopeWhere(scope) ?? {}) },
+      select: {
+        id: true,
+        clockInAt: true,
+        isEmergency: true,
+        shiftId: true,
+        worker: { select: workerSelect },
+        shift: { select: { id: true, title: true, shiftType: true } },
+        clockEvents: {
+          select: { latitude: true, longitude: true, accuracyMeters: true, serverReceivedAt: true, locationValidationStatus: true, eventType: true },
+          orderBy: { serverReceivedAt: "desc" },
+          take: 1,
         },
-        orderBy: { clockInAt: "asc" },
-      }),
-      // Shifts on now: inside their scheduled window, or with someone clocked in.
+      },
+      orderBy: { clockInAt: "asc" },
+    });
+    // Shifts on now: inside their scheduled window, or with someone clocked in -- the open entries' shifts, by id
+    // (a correlated "has an open entry" subquery per shift costs more, and its estimate sets off the planner's JIT).
+    const shiftsQuery = openEntriesQuery.then((entries) =>
       this.prisma.shift.findMany({
         where: {
           organizationId,
           status: { notIn: [ShiftStatus.DRAFT, ShiftStatus.CLOSED, ShiftStatus.CANCELLED] },
           AND: [
-            { OR: [{ scheduledStart: { lte: now }, scheduledEnd: { gte: now } }, { timeEntries: { some: { status: TimeEntryStatus.ACTIVE } } }] },
+            { OR: [{ scheduledStart: { lte: now }, scheduledEnd: { gte: now } }, { id: { in: [...new Set(entries.map((entry) => entry.shiftId))] } }] },
             ...(shiftScope ? [shiftScope] : []),
           ],
         },
@@ -86,6 +87,11 @@ export class OperationsService {
         },
         orderBy: { scheduledStart: "asc" },
       }),
+    );
+
+    const [openEntries, shifts, points, emergencies, attempts, suspicious, offline] = await Promise.all([
+      openEntriesQuery,
+      shiftsQuery,
       this.prisma.temporaryCheckInPoint.findMany({
         where: { organizationId, status: TemporaryPointStatus.ACTIVE, revokedAt: null, expiresAt: { gt: now }, ...inShiftScope },
         select: { id: true, name: true, latitude: true, longitude: true, radiusMeters: true, expiresAt: true, shift: { select: { id: true, title: true, shiftType: true } } },

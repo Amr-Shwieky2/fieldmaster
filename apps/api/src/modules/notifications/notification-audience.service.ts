@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { AccountStatus, NotificationType, OrgRole } from "@fieldmaster/shared-types";
+import { AccountStatus, OrgRole } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { Permission } from "../../common/auth/permissions";
 import { NOTIFICATION_PERMISSION } from "./notification-preferences";

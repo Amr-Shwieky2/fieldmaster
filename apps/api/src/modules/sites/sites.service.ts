@@ -10,6 +10,7 @@ import type { CreateProjectDto } from "./dto/create-project.dto";
 import type { CreateSiteDto } from "./dto/create-site.dto";
 import type { CreateGeofenceDto } from "./dto/create-geofence.dto";
 import { projectSelectFor } from "./project-fields";
+import { listOrPage, type PageWindow } from "../../common/validation/page-query";
 
 @Injectable()
 export class SitesService {
@@ -48,12 +49,13 @@ export class SitesService {
     return project;
   }
 
-  async listProjects(organizationId: string, viewer: AuthenticatedUser) {
-    return this.prisma.project.findMany({
-      where: { organizationId, archivedAt: null, ...(projectScopeWhere(scopeOf(viewer)) ?? {}) },
-      select: projectSelectFor(viewer),
-      orderBy: { createdAt: "asc" },
-    });
+  async listProjects(organizationId: string, viewer: AuthenticatedUser, window: PageWindow | null = null) {
+    const where = { organizationId, archivedAt: null, ...(projectScopeWhere(scopeOf(viewer)) ?? {}) };
+    return listOrPage(
+      window,
+      (range) => this.prisma.project.findMany({ where, select: projectSelectFor(viewer), orderBy: [{ createdAt: "asc" }, { id: "asc" }], ...range }),
+      () => this.prisma.project.count({ where }),
+    );
   }
 
   async getProject(organizationId: string, id: string, viewer: AuthenticatedUser) {
@@ -96,11 +98,13 @@ export class SitesService {
     return site;
   }
 
-  async listSites(organizationId: string, viewer: AuthenticatedUser, projectId?: string) {
-    return this.prisma.site.findMany({
-      where: { organizationId, archivedAt: null, ...(siteScopeWhere(scopeOf(viewer)) ?? {}), ...(projectId ? { projectId } : {}) },
-      orderBy: { createdAt: "asc" },
-    });
+  async listSites(organizationId: string, viewer: AuthenticatedUser, projectId?: string, window: PageWindow | null = null) {
+    const where = { organizationId, archivedAt: null, ...(siteScopeWhere(scopeOf(viewer)) ?? {}), ...(projectId ? { projectId } : {}) };
+    return listOrPage(
+      window,
+      (range) => this.prisma.site.findMany({ where, orderBy: [{ createdAt: "asc" }, { id: "asc" }], ...range }),
+      () => this.prisma.site.count({ where }),
+    );
   }
 
   async getSite(organizationId: string, id: string, viewer: AuthenticatedUser) {

@@ -22,6 +22,7 @@ import { sha256Hex } from "./report-hash";
 import { enumLabel } from "./render/messages";
 import type { CreateReportDto } from "./dto/create-report.dto";
 import type { GeneratedReportDto, ReportDownloadDto, ReportFileFormat, ReportFilters, ReportVerificationDto } from "./report.types";
+import { listOrPage, mapRows, type Page, type PageWindow } from "../../common/validation/page-query";
 
 /** Signed download URLs live this long. */
 export const REPORT_DOWNLOAD_TTL_SECONDS = 300;
@@ -134,14 +135,16 @@ export class ReportsService {
     return { ...filters, version: period.version };
   }
 
-  async list(actor: AuthenticatedUser): Promise<GeneratedReportDto[]> {
+  /** The caller's 100 newest reports, or one page of all of them (`?page=` / `?pageSize=`). */
+  async list(actor: AuthenticatedUser, window: PageWindow | null = null): Promise<GeneratedReportDto[] | Page<GeneratedReportDto>> {
     await this.generation.failStaleReports(actor.organizationId);
-    const reports = await this.prisma.generatedReport.findMany({
-      where: { organizationId: actor.organizationId, ...reportVisibilityWhere(actor) },
-      orderBy: [{ generatedAt: "desc" }, { id: "desc" }],
-      take: 100,
-    });
-    return this.toDtos(reports);
+    const where = { organizationId: actor.organizationId, ...reportVisibilityWhere(actor) };
+    const list = await listOrPage(
+      window,
+      (range) => this.prisma.generatedReport.findMany({ where, orderBy: [{ generatedAt: "desc" }, { id: "desc" }], skip: range.skip, take: range.take ?? 100 }),
+      () => this.prisma.generatedReport.count({ where }),
+    );
+    return mapRows(list, (reports) => this.toDtos(reports));
   }
 
   /** The report, if the caller may see it; otherwise (or for a malformed id) 404. */

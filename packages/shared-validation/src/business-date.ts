@@ -20,6 +20,18 @@ export function toBusinessYearMonth(date: Date, timeZone: string = BUSINESS_TIME
   return toBusinessDate(date, timeZone).slice(0, 7); // YYYY-MM
 }
 
+/**
+ * "2026-10" -> its business dates (YYYY-MM-DD strings) as a range:
+ * "2026-10-01" <= date < "2026-11-01". A database filter on a range is served
+ * by an index on the business date whatever the query plan (a "2026-10-"
+ * prefix match is not).
+ */
+export function businessMonthDates(yearMonth: string): { gte: string; lt: string } {
+  const [year, month] = yearMonth.split("-").map(Number);
+  const next = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, "0")}`;
+  return { gte: `${yearMonth}-01`, lt: `${next}-01` };
+}
+
 export interface BusinessMonthRange {
   /** Inclusive UTC instant marking the start of the business month. */
   startUtc: Date;

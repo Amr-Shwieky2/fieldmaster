@@ -190,6 +190,23 @@ describe("calculateWorkerPayroll / calculatePayrollMonth", () => {
     ]);
     expect(sumPayrollWorkers(month.workers)).toMatchObject({ workers: 2, approvedShifts: 1, netPayableAgorot: 46_000 });
   });
+
+  it("a month with workers' rows interleaved equals each worker calculated alone, in first-seen order", () => {
+    const entries = [
+      entry("w-daily", "2026-10-04", 540),
+      entry("w-hourly", "2026-10-04", 480, 30),
+      entry("w-daily", "2026-10-05", 540, 60),
+      entry("w-hourly", "2026-10-05", 300),
+    ];
+    const adjustments = [
+      { id: "a1", workerProfileId: "w-hourly", type: PayrollAdjustmentType.MANUAL_BONUS, amountAgorot: 700 },
+      { id: "a2", workerProfileId: "w-daily", type: PayrollAdjustmentType.FORGOTTEN_STAMP_PENALTY, amountAgorot: -1_000 },
+    ];
+    const month = calculatePayrollMonth({ entries, profiles: [HOURLY, DAILY], adjustments });
+    const alone = ["w-daily", "w-hourly"].map((id) => calculateWorkerPayroll(id, entries, [HOURLY, DAILY], adjustments));
+    expect(month.workers).toEqual(alone.map((result) => result.worker));
+    expect(month.entries).toEqual(alone.flatMap((result) => result.entries));
+  });
 });
 
 describe("groupPayrollEntryCosts", () => {

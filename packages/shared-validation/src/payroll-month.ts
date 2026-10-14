@@ -306,12 +306,33 @@ export function calculatePayrollMonth(input: {
 }): { workers: PayrollWorkerResult[]; entries: PayrollEntryResult[] } {
   const workers: PayrollWorkerResult[] = [];
   const entries: PayrollEntryResult[] = [];
+  // Each worker's own rows, grouped once: a month of hundreds of workers must not scan every entry per worker.
+  const entriesOf = groupByWorker(input.entries);
+  const profilesOf = groupByWorker(input.profiles);
+  const adjustmentsOf = groupByWorker(input.adjustments);
   for (const workerProfileId of payrollMonthWorkerIds(input.entries, input.adjustments)) {
-    const result = calculateWorkerPayroll(workerProfileId, input.entries, input.profiles, input.adjustments, input.rulesFor);
+    const result = calculateWorkerPayroll(
+      workerProfileId,
+      entriesOf.get(workerProfileId) ?? [],
+      profilesOf.get(workerProfileId) ?? [],
+      adjustmentsOf.get(workerProfileId) ?? [],
+      input.rulesFor,
+    );
     workers.push(result.worker);
     entries.push(...result.entries);
   }
   return { workers, entries };
+}
+
+/** Rows by worker, each group in input order. */
+export function groupByWorker<T extends { workerProfileId: string }>(rows: readonly T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const group = groups.get(row.workerProfileId);
+    if (group) group.push(row);
+    else groups.set(row.workerProfileId, [row]);
+  }
+  return groups;
 }
 
 export interface PayrollTotalsResult extends AdjustmentBreakdown {

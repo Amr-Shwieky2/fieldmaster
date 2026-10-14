@@ -1,7 +1,11 @@
 import type { INestApplication } from "@nestjs/common";
 import { ALL_PERMISSIONS, AccountStatus, OrgRole, PERMISSION_GROUPS, Permission, SYSTEM_ROLE_PERMISSIONS } from "@fieldmaster/shared-types";
 import { createTestApp, resetDatabase, request, loginAs } from "./test-app";
+import { v7 as uuidv7 } from "uuid";
 import { PrismaService } from "../src/common/prisma/prisma.service";
+import { MembershipsService } from "../src/modules/memberships/memberships.service";
+import type { AuthenticatedUser } from "../src/common/auth/auth-context";
+import type { AppException } from "../src/common/errors/app-exception";
 import { addFieldManager, addWorker, assignWorkerToShift, createOrgWithOwner, createProject, createSiteWithGeofence, createStandardShift } from "./fixtures";
 
 /**
@@ -14,6 +18,7 @@ import { addFieldManager, addWorker, assignWorkerToShift, createOrgWithOwner, cr
 
 const OWNER_PHONE = "+972500000001";
 const SECOND_OWNER_PHONE = "+972500000002";
+const THIRD_OWNER_PHONE = "+972500000003";
 const MANAGER_PHONE = "+972500000011";
 const WORKER_PHONE = "+972500010001";
 const MEMBER_PHONE = "+972500020001";
@@ -231,18 +236,39 @@ describe("Roles and permissions (flexible organization model)", () => {
   it("two simultaneous attempts to remove the only two administrators leave one", async () => {
     const ctx = await setup();
     const second = await createOrgSecondOwner(ctx);
-    const results = await Promise.all([
-      patch(ctx.tokens.owner, `/memberships/${second.membershipId}/role`, { role: OrgRole.FIELD_MANAGER, reason: "A" }),
-      patch(second.token, `/memberships/${ctx.owner.membership.id}/role`, { role: OrgRole.FIELD_MANAGER, reason: "B" }),
+    const secondUserId = (await prisma.organizationMembership.findUniqueOrThrow({ where: { id: second.membershipId } })).userId;
+    const activeOwners = () => prisma.organizationMembership.count({ where: { organizationId: ctx.organizationId, role: OrgRole.OWNER, status: AccountStatus.ACTIVE } });
+
+    // On the service, both changes are past the permission check before either commits: the advisory lock alone decides.
+    const memberships = app.get(MembershipsService);
+    const actor = (sub: string, membershipId: string) =>
+      ({ sub, organizationId: ctx.organizationId, membershipId, role: OrgRole.OWNER, workerProfileId: null, permissions: new Set(ALL_PERMISSIONS), scope: { restricted: false } }) as unknown as AuthenticatedUser;
+    const results = await Promise.allSettled([
+      memberships.changeRole(ctx.organizationId, second.membershipId, { role: OrgRole.FIELD_MANAGER, reason: "A" }, actor(ctx.owner.user.id, ctx.owner.membership.id), uuidv7()),
+      memberships.changeRole(ctx.organizationId, ctx.owner.membership.id, { role: OrgRole.FIELD_MANAGER, reason: "B" }, actor(secondUserId, second.membershipId), uuidv7()),
     ]);
-    const outcomes = results.map((response) => ({ status: response.status, code: response.body.code })).sort((a, b) => a.status - b.status);
-    expect(outcomes).toEqual([{ status: 200, code: undefined }, { status: 409, code: "LAST_ACTIVE_OWNER" }]);
-    expect(await prisma.organizationMembership.count({ where: { organizationId: ctx.organizationId, role: OrgRole.OWNER, status: AccountStatus.ACTIVE } })).toBe(1);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const refusals = results.flatMap((result) => (result.status === "rejected" ? [result.reason as AppException] : []));
+    expect(refusals.map((error) => ({ status: error.getStatus(), code: error.code }))).toEqual([{ status: 409, code: "LAST_ACTIVE_OWNER" }]);
+    expect(await activeOwners()).toBe(1);
+
+    // Over HTTP the same race ends the same way: one change passes, the other is refused -- by the lock (409), or by
+    // the guard (403) when the first change was committed before the second request was authorized.
+    const remaining = results[0].status === "fulfilled" ? ctx.tokens.owner : second.token;
+    const remainingMembershipId = results[0].status === "fulfilled" ? ctx.owner.membership.id : second.membershipId;
+    const third = await createOrgSecondOwner(ctx, THIRD_OWNER_PHONE, remaining);
+    const responses = await Promise.all([
+      patch(remaining, `/memberships/${third.membershipId}/role`, { role: OrgRole.FIELD_MANAGER, reason: "C" }),
+      patch(third.token, `/memberships/${remainingMembershipId}/role`, { role: OrgRole.FIELD_MANAGER, reason: "D" }),
+    ]);
+    const statuses = responses.map((response) => response.status).sort();
+    expect([[200, 403], [200, 409]]).toContainEqual(statuses);
+    expect(await activeOwners()).toBe(1);
   });
 
-  async function createOrgSecondOwner(ctx: Awaited<ReturnType<typeof setup>>) {
-    const created = await post(ctx.tokens.owner, "/memberships", { phoneNumber: SECOND_OWNER_PHONE, fullLegalName: "Second Owner", role: OrgRole.OWNER }).expect(201);
-    return { membershipId: created.body.id as string, token: (await loginAs(app, SECOND_OWNER_PHONE)).accessToken };
+  async function createOrgSecondOwner(ctx: Awaited<ReturnType<typeof setup>>, phoneNumber = SECOND_OWNER_PHONE, byToken = ctx.tokens.owner) {
+    const created = await post(byToken, "/memberships", { phoneNumber, fullLegalName: "Another Owner", role: OrgRole.OWNER }).expect(201);
+    return { membershipId: created.body.id as string, token: (await loginAs(app, phoneNumber)).accessToken };
   }
 
   it("money is behind the one financial permission: a project's budget, a worker's pay and the penalty only with it", async () => {

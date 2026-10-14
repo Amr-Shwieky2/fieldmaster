@@ -1,6 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  previewFeatures = ["postgresqlExtensions", "relationJoins"]
 }
 
 datasource db {
@@ -357,9 +357,10 @@ model MemberScope {
   membershipId   String                 @map("membership_id") @db.Uuid
   membership     OrganizationMembership @relation(fields: [membershipId], references: [id])
   projectId      String?                @map("project_id") @db.Uuid
-  project        Project?               @relation(fields: [projectId], references: [id])
+  // A scope row names one project or one site: it goes with it (the database cascades).
+  project        Project?               @relation(fields: [projectId], references: [id], onDelete: Cascade)
   siteId         String?                @map("site_id") @db.Uuid
-  site           Site?                  @relation(fields: [siteId], references: [id])
+  site           Site?                  @relation(fields: [siteId], references: [id], onDelete: Cascade)
   createdAt      DateTime               @default(now()) @map("created_at")
 
   @@index([membershipId])
@@ -754,6 +755,7 @@ model Site {
   scopes    MemberScope[]
 
   @@index([organizationId, active])
+  @@index([projectId])
   @@map("sites")
 }
 
@@ -827,6 +829,8 @@ model Shift {
 
   @@index([organizationId, status])
   @@index([organizationId, businessDate])
+  @@index([projectId])
+  @@index([siteId])
   @@map("shifts")
 }
 
@@ -1029,7 +1033,9 @@ model TimeEntry {
   emergencyCallout          EmergencyCallout?
   rejectedClockAttempts     RejectedClockAttempt[]
 
-  @@index([organizationId, status])
+  @@index([organizationId, status, businessDate])
+  @@index([organizationId, businessDate])
+  @@index([shiftId])
   @@index([workerProfileId, businessDate])
   @@map("time_entries")
 }
@@ -1236,6 +1242,7 @@ model ForgottenStampInfraction {
   payrollAdjustments PayrollAdjustment[]
 
   @@index([workerProfileId, businessMonth])
+  @@index([organizationId, businessMonth])
   @@map("forgotten_stamp_infractions")
 }
 

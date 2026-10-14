@@ -8,6 +8,7 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { CreateTuranAssignmentDto } from "./dto/create-turan-assignment.dto";
+import { listOrPage, type PageWindow } from "../../common/validation/page-query";
 
 @Injectable()
 export class TuranAssignmentsService {
@@ -115,17 +116,20 @@ export class TuranAssignmentsService {
     return updated;
   }
 
-  async list(organizationId: string, filters: { turanType?: TuranType; from?: string; to?: string; workerProfileId?: string }) {
-    return this.prisma.turanAssignment.findMany({
-      where: {
-        organizationId,
-        ...(filters.turanType ? { turanType: filters.turanType } : {}),
-        ...(filters.workerProfileId ? { assignedWorkerProfileId: filters.workerProfileId } : {}),
-        ...(filters.from ? { endAt: { gte: new Date(filters.from) } } : {}),
-        ...(filters.to ? { startAt: { lte: new Date(filters.to) } } : {}),
-      },
-      orderBy: { startAt: "asc" },
-    });
+  /** The assignments matching the filters, or one page of them (`?page=` / `?pageSize=`), earliest first. */
+  async list(organizationId: string, filters: { turanType?: TuranType; from?: string; to?: string; workerProfileId?: string }, window: PageWindow | null = null) {
+    const where = {
+      organizationId,
+      ...(filters.turanType ? { turanType: filters.turanType } : {}),
+      ...(filters.workerProfileId ? { assignedWorkerProfileId: filters.workerProfileId } : {}),
+      ...(filters.from ? { endAt: { gte: new Date(filters.from) } } : {}),
+      ...(filters.to ? { startAt: { lte: new Date(filters.to) } } : {}),
+    };
+    return listOrPage(
+      window,
+      (range) => this.prisma.turanAssignment.findMany({ where, orderBy: [{ startAt: "asc" }, { id: "asc" }], ...range }),
+      () => this.prisma.turanAssignment.count({ where }),
+    );
   }
 
   /** True when this worker has an active/scheduled Night Turan assignment covering `at`. */

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Header, Param, Post, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
@@ -9,6 +9,7 @@ import { WorkersService } from "./workers.service";
 import { OnboardingReviewService } from "./onboarding-review.service";
 import { ApproveWorkerDto, RejectWorkerDto } from "./dto/approve-worker.dto";
 import { CreateCompensationProfileDto } from "./dto/create-compensation-profile.dto";
+import { pageWindow } from "../../common/validation/page-query";
 
 @ApiBearerAuth()
 @ApiTags("workers")
@@ -21,14 +22,14 @@ export class WorkersController {
 
   @Get()
   @RequirePermissions(Permission.MANAGE_WORKERS)
-  async list(@CurrentUser() user: AuthenticatedUser) {
-    return this.workersService.list(user.organizationId, user);
+  async list(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.workersService.list(user.organizationId, user, pageWindow({ page, pageSize }));
   }
 
   @Get("pending-approval")
   @RequirePermissions(Permission.APPROVE_ONBOARDING)
-  async pendingApproval(@CurrentUser() user: AuthenticatedUser) {
-    return this.workersService.listPendingApproval(user.organizationId);
+  async pendingApproval(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.workersService.listPendingApproval(user.organizationId, pageWindow({ page, pageSize }));
   }
 
   @Get(":id")

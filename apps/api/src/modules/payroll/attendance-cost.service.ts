@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { TimeEntry } from "@prisma/client";
 import { TimeEntryStatus } from "@fieldmaster/shared-types";
-import { computeEntryCompensation, pickEffectiveCompensationProfile, splitWorkedMinutes } from "@fieldmaster/shared-validation";
+import { businessMonthDates, computeEntryCompensation, groupByWorker, pickEffectiveCompensationProfile, splitWorkedMinutes } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
@@ -93,8 +93,10 @@ export class AttendanceCostService {
       this.prisma.compensationProfile.findMany({ where: { workerProfileId: { in: workerIds } }, orderBy: [{ effectiveStartDate: "asc" }, { id: "asc" }] }),
       this.workRules.resolver(organizationId),
     ]);
-    const profiles = profileRows.map(toEngineProfile);
-    return entries.map((entry) => estimate(entry, pickEffectiveCompensationProfile(profiles, entry.workerProfileId, entry.businessDate), rules.rulesFor(entry.businessDate)));
+    const profilesOf = groupByWorker(profileRows.map(toEngineProfile));
+    return entries.map((entry) =>
+      estimate(entry, pickEffectiveCompensationProfile(profilesOf.get(entry.workerProfileId) ?? [], entry.workerProfileId, entry.businessDate), rules.rulesFor(entry.businessDate)),
+    );
   }
 
   async estimateEntryById(organizationId: string, timeEntryId: string): Promise<EntryCostEstimate> {
@@ -118,7 +120,7 @@ export class AttendanceCostService {
     if (!worker) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
 
     const [entries, adjustments] = await Promise.all([
-      this.prisma.timeEntry.findMany({ where: { organizationId, workerProfileId, businessDate: { startsWith: month } }, select: ENTRY_COST_SELECT }),
+      this.prisma.timeEntry.findMany({ where: { organizationId, workerProfileId, businessDate: businessMonthDates(month) }, select: ENTRY_COST_SELECT }),
       this.prisma.payrollAdjustment.findMany({ where: { organizationId, workerProfileId, businessMonth: month }, select: { amountAgorot: true } }),
     ]);
 

@@ -12,6 +12,7 @@ import { EmergencyCalloutsService } from "./emergency-callouts.service";
 import { StartEmergencyCalloutDto, EndEmergencyCalloutDto } from "./dto/emergency-callout.dto";
 import { EmergencyCalloutRecordsService } from "./emergency-callout-records.service";
 import { ListEmergencyCalloutsQueryDto } from "./dto/list-emergency-callouts.dto";
+import { pageWindow } from "../../common/validation/page-query";
 
 @ApiBearerAuth()
 @ApiTags("turan")
@@ -37,8 +38,10 @@ export class TuranController {
     @Query("from") from?: string,
     @Query("to") to?: string,
     @Query("workerProfileId") workerProfileId?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
   ) {
-    return this.turanAssignmentsService.list(user.organizationId, { turanType, from, to, workerProfileId });
+    return this.turanAssignmentsService.list(user.organizationId, { turanType, from, to, workerProfileId }, pageWindow({ page, pageSize }));
   }
 
   @Post("turan-assignments/:id/cancel")

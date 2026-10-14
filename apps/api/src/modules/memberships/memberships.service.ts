@@ -16,6 +16,7 @@ import { permissionsOfRole } from "../../common/auth/member-access";
 import type { CreateMembershipDto } from "./dto/create-membership.dto";
 import type { ChangeMemberRoleDto, MemberActionReasonDto, SetMemberScopeDto, SetTimeTrackingDto } from "./dto/member-actions.dto";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { listOrPage, mapRows, type PageWindow } from "../../common/validation/page-query";
 
 type PrismaTx = Prisma.TransactionClient;
 type MemberRow = OrganizationMembership & {
@@ -118,39 +119,50 @@ export class MembershipsService {
   }
 
   /** Every member, archived ones included, with their last activity (latest sign-in or refresh). */
-  async list(organizationId: string, viewer: AuthenticatedUser) {
-    const members = await this.prisma.organizationMembership.findMany({
-      where: { organizationId },
-      include: MEMBER_INCLUDE,
-      orderBy: { createdAt: "asc" },
+  /** Every member, or one page of them (`?page=` / `?pageSize=`), oldest first. */
+  async list(organizationId: string, viewer: AuthenticatedUser, window: PageWindow | null = null) {
+    const where = { organizationId };
+    const list = await listOrPage(
+      window,
+      (range) => this.prisma.organizationMembership.findMany({ where, include: MEMBER_INCLUDE, orderBy: [{ createdAt: "asc" }, { id: "asc" }], ...range }),
+      () => this.prisma.organizationMembership.count({ where }),
+    );
+    return mapRows(list, async (members) => {
+      const lastUse = await this.prisma.refreshTokenFamily.groupBy({
+        by: ["membershipId"],
+        where: { membershipId: { in: members.map((member) => member.id) } },
+        _max: { lastUsedAt: true },
+      });
+      const lastActive = new Map(lastUse.map((row) => [row.membershipId, row._max.lastUsedAt]));
+      return members.map((member) => this.toMember(member, viewer, lastActive.get(member.id) ?? null));
     });
-    const lastUse = await this.prisma.refreshTokenFamily.groupBy({
-      by: ["membershipId"],
-      where: { membershipId: { in: members.map((member) => member.id) } },
-      _max: { lastUsedAt: true },
-    });
-    const lastActive = new Map(lastUse.map((row) => [row.membershipId, row._max.lastUsedAt]));
-    return members.map((member) => this.toMember(member, viewer, lastActive.get(member.id) ?? null));
   }
 
   /**
    * Each member's role record and project scope, for the users page (the list
    * above keeps its shape): `{ membershipId, roleId, roleName, restrictedToScope, projectIds, siteIds }`.
    */
-  async access(organizationId: string) {
-    const members = await this.prisma.organizationMembership.findMany({
-      where: { organizationId },
-      select: { id: true, roleId: true, restrictedToScope: true, roleRecord: { select: { name: true, systemKey: true } }, scopes: { select: { projectId: true, siteId: true } } },
-      orderBy: { createdAt: "asc" },
-    });
-    return members.map((member) => ({
+  async access(organizationId: string, window: PageWindow | null = null) {
+    const where = { organizationId };
+    const list = await listOrPage(
+      window,
+      (range) =>
+        this.prisma.organizationMembership.findMany({
+          where,
+          select: { id: true, roleId: true, restrictedToScope: true, roleRecord: { select: { name: true, systemKey: true } }, scopes: { select: { projectId: true, siteId: true } } },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          ...range,
+        }),
+      () => this.prisma.organizationMembership.count({ where }),
+    );
+    return mapRows(list, (members) => members.map((member) => ({
       membershipId: member.id,
       roleId: member.roleId,
       roleName: member.roleRecord?.name ?? null,
       restrictedToScope: member.restrictedToScope,
       projectIds: member.scopes.flatMap((scope) => (scope.projectId ? [scope.projectId] : [])),
       siteIds: member.scopes.flatMap((scope) => (scope.siteId ? [scope.siteId] : [])),
-    }));
+    })));
   }
 
   async changeRole(organizationId: string, membershipId: string, dto: ChangeMemberRoleDto, actor: AuthenticatedUser, correlationId: string) {

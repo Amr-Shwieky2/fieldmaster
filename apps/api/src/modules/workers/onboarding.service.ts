@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { Prisma, type OnboardingInvitation } from "@prisma/client";
 import {
   AccountStatus,
   FileAssetPurpose,
@@ -25,6 +25,7 @@ import { generateInvitationToken, invitationTokenCandidate, isUsableInvitation }
 import { deriveInvitationStatus } from "./invitation-status";
 import { normalizeGovernmentIdNumber } from "./government-id";
 import type { JoinApplicationDto } from "./dto/join-application.dto";
+import { listOrPage, mapRows, type Page, type PageWindow } from "../../common/validation/page-query";
 
 /** An invitation that passed the public token check, with what the onboarding page shows. */
 export type ActiveInvitation = Prisma.OnboardingInvitationGetPayload<{ include: { organization: { select: { name: true } } } }>;
@@ -134,8 +135,18 @@ export class OnboardingService {
     return { invitationId: invitation.id, token, joinPath: `/join/${token}`, expiresAt: expiresAt.toISOString() };
   }
 
-  async listInvitations(organizationId: string): Promise<InvitationListItem[]> {
-    const invitations = await this.prisma.onboardingInvitation.findMany({ where: { organizationId }, orderBy: { createdAt: "desc" } });
+  /** Every invitation, or one page of them (`?page=` / `?pageSize=`), newest first. */
+  async listInvitations(organizationId: string, window: PageWindow | null = null): Promise<InvitationListItem[] | Page<InvitationListItem>> {
+    const where = { organizationId };
+    const list = await listOrPage(
+      window,
+      (range) => this.prisma.onboardingInvitation.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], ...range }),
+      () => this.prisma.onboardingInvitation.count({ where }),
+    );
+    return mapRows(list, (invitations) => this.toInvitationItems(organizationId, invitations));
+  }
+
+  private async toInvitationItems(organizationId: string, invitations: OnboardingInvitation[]): Promise<InvitationListItem[]> {
 
     const userIds = [
       ...new Set(invitations.flatMap((invitation) => (invitation.revokedBy ? [invitation.createdBy, invitation.revokedBy] : [invitation.createdBy]))),

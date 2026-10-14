@@ -14,6 +14,7 @@ import { FullDayCreditDto, ApproveTimeEntryDto, RejectTimeEntryDto, RequestCorre
 import { CreateManualCorrectionDto } from "./dto/manual-correction.dto";
 import { ReverseInfractionDto } from "./dto/reverse-infraction.dto";
 import { ListForgottenStampsQueryDto } from "./dto/forgotten-stamp-list.dto";
+import { pageWindow } from "../../common/validation/page-query";
 
 @ApiBearerAuth()
 @ApiTags("attendance")
@@ -35,8 +36,10 @@ export class TimeEntriesController {
     @Query("status") status?: TimeEntryStatus,
     @Query("businessDate") businessDate?: string,
     @Query("month") month?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
   ) {
-    return this.timeEntriesService.list(user.organizationId, user, { workerProfileId, status, businessDate, month });
+    return this.timeEntriesService.list(user.organizationId, user, { workerProfileId, status, businessDate, month }, pageWindow({ page, pageSize }));
   }
 
   /** The caller's own entry: the worker's detail (Step 9, no money). Managers: any entry, as before. Anyone else: 404. */
@@ -48,8 +51,8 @@ export class TimeEntriesController {
 
   @Get("attendance-approvals/pending")
   @RequirePermissions(Permission.APPROVE_ATTENDANCE)
-  listPending(@CurrentUser() user: AuthenticatedUser) {
-    return this.approvalsService.listPendingApproval(user.organizationId, user);
+  listPending(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.approvalsService.listPendingApproval(user.organizationId, user, pageWindow({ page, pageSize }));
   }
 
   @Post("time-entries/:id/full-day-credit")
@@ -95,7 +98,7 @@ export class TimeEntriesController {
   @Get("forgotten-stamp-infractions")
   @RequirePermissions(Permission.VIEW_ATTENDANCE)
   listForgottenStampInfractions(@CurrentUser() user: AuthenticatedUser, @Query() query: ListForgottenStampsQueryDto) {
-    return this.forgottenStampService.listForOrganization(user.organizationId, user, query);
+    return this.forgottenStampService.listForOrganization(user.organizationId, user, query, pageWindow(query));
   }
 
   @Post("forgotten-stamp-infractions/:id/reverse")

@@ -13,6 +13,7 @@ import { hasPermission } from "../../common/auth/permissions";
 import { scopeOf, workerScopeWhere } from "../../common/scope/scope-filters";
 import type { ApproveWorkerDto, RejectWorkerDto } from "./dto/approve-worker.dto";
 import type { CreateCompensationProfileDto } from "./dto/create-compensation-profile.dto";
+import { listOrPage, mapRows, type PageWindow } from "../../common/validation/page-query";
 
 @Injectable()
 export class WorkersService {
@@ -23,18 +24,22 @@ export class WorkersService {
   ) {}
 
   /** The workers (those of the viewer's projects, when restricted), with each one's pay only for someone who may see compensation (and for the worker themself). */
-  async list(organizationId: string, viewer: AuthenticatedUser) {
-    const workerProfiles = await this.prisma.workerProfile.findMany({
-      where: { organizationId, archivedAt: null, ...(workerScopeWhere(scopeOf(viewer)) ?? {}) },
-      include: { membership: { include: { user: true } } },
-      orderBy: { createdAt: "asc" },
-    });
+  /** Every worker (of the viewer's projects, when restricted), or one page of them (`?page=` / `?pageSize=`), oldest first. */
+  async list(organizationId: string, viewer: AuthenticatedUser, window: PageWindow | null = null) {
+    const where = { organizationId, archivedAt: null, ...(workerScopeWhere(scopeOf(viewer)) ?? {}) };
+    const list = await listOrPage(
+      window,
+      (range) => this.prisma.workerProfile.findMany({ where, include: { membership: { include: { user: true } } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], ...range }),
+      () => this.prisma.workerProfile.count({ where }),
+    );
 
-    // One query for every visible worker's current compensation profile (not one per worker).
-    const canSeeCompensation = hasPermission(viewer, Permission.VIEW_COMPENSATION);
-    const visibleIds = workerProfiles.filter((wp) => canSeeCompensation || viewer.workerProfileId === wp.id).map((wp) => wp.id);
-    const activeByWorker = await this.getActiveCompensationProfiles(visibleIds);
-    return workerProfiles.map((wp) => serializeWorker({ workerProfile: wp, activeCompensationProfile: activeByWorker.get(wp.id) ?? null }, viewer));
+    return mapRows(list, async (workerProfiles) => {
+      // One query for every visible worker's current compensation profile (not one per worker).
+      const canSeeCompensation = hasPermission(viewer, Permission.VIEW_COMPENSATION);
+      const visibleIds = workerProfiles.filter((wp) => canSeeCompensation || viewer.workerProfileId === wp.id).map((wp) => wp.id);
+      const activeByWorker = await this.getActiveCompensationProfiles(visibleIds);
+      return workerProfiles.map((wp) => serializeWorker({ workerProfile: wp, activeCompensationProfile: activeByWorker.get(wp.id) ?? null }, viewer));
+    });
   }
 
   async getById(organizationId: string, workerProfileId: string, viewer: AuthenticatedUser) {
@@ -52,18 +57,22 @@ export class WorkersService {
     return serializeWorker({ workerProfile: wp, activeCompensationProfile }, viewer);
   }
 
-  async listPendingApproval(organizationId: string) {
-    const memberships = await this.prisma.organizationMembership.findMany({
-      where: { organizationId, role: OrgRole.WORKER, status: AccountStatus.PENDING_APPROVAL, archivedAt: null },
-      include: { user: true, workerProfile: true },
-    });
-    return memberships.map((m) => ({
-      membershipId: m.id,
-      workerProfileId: m.workerProfile?.id,
-      fullLegalName: m.user.fullLegalName,
-      phoneNumber: m.user.phoneNumber,
-      submittedAt: m.createdAt,
-    }));
+  async listPendingApproval(organizationId: string, window: PageWindow | null = null) {
+    const where = { organizationId, role: OrgRole.WORKER, status: AccountStatus.PENDING_APPROVAL, archivedAt: null };
+    const list = await listOrPage(
+      window,
+      (range) => this.prisma.organizationMembership.findMany({ where, include: { user: true, workerProfile: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], ...range }),
+      () => this.prisma.organizationMembership.count({ where }),
+    );
+    return mapRows(list, (memberships) =>
+      memberships.map((m) => ({
+        membershipId: m.id,
+        workerProfileId: m.workerProfile?.id,
+        fullLegalName: m.user.fullLegalName,
+        phoneNumber: m.user.phoneNumber,
+        submittedAt: m.createdAt,
+      })),
+    );
   }
 
   async approve(organizationId: string, workerProfileId: string, dto: ApproveWorkerDto, actor: AuthenticatedUser, correlationId: string) {

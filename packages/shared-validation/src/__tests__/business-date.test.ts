@@ -1,4 +1,4 @@
-import { getBusinessMonthRange, toBusinessDate, toBusinessYearMonth } from "../business-date";
+import { businessMonthDates, getBusinessMonthRange, toBusinessDate, toBusinessYearMonth } from "../business-date";
 
 describe("toBusinessDate / toBusinessYearMonth (Asia/Jerusalem)", () => {
   it("rolls a late-night UTC timestamp to the next local calendar day (IDT, UTC+3)", () => {
@@ -33,5 +33,20 @@ describe("getBusinessMonthRange", () => {
     const justBeforeEnd = new Date(range.endUtc.getTime() - 60_000);
     expect(toBusinessDate(justBeforeEnd)).toBe("2026-08-31");
     expect(toBusinessDate(range.endUtc)).toBe("2026-09-01");
+  });
+});
+
+describe("businessMonthDates", () => {
+  it("is the month's first date up to the next month's first date, across a year end", () => {
+    expect(businessMonthDates("2026-10")).toEqual({ gte: "2026-10-01", lt: "2026-11-01" });
+    expect(businessMonthDates("2026-12")).toEqual({ gte: "2026-12-01", lt: "2027-01-01" });
+    expect(businessMonthDates("2027-01")).toEqual({ gte: "2027-01-01", lt: "2027-02-01" });
+  });
+
+  it("holds exactly the month's business dates", () => {
+    const { gte, lt } = businessMonthDates("2026-02");
+    const inside = (date: string) => date >= gte && date < lt;
+    expect(["2026-02-01", "2026-02-28"].every(inside)).toBe(true);
+    expect(["2026-01-31", "2026-03-01"].some(inside)).toBe(false);
   });
 });

@@ -37,7 +37,8 @@ import { AttachmentsModule } from "./modules/attachments/attachments.module";
     ConfigModule.forRoot({ isGlobal: true }),
     AppConfigModule,
     EventEmitterModule.forRoot(),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
+    // Requests per minute per client address (RATE_LIMIT_PER_MINUTE; the load test raises it: all its traffic comes from one address).
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: Number(process.env.RATE_LIMIT_PER_MINUTE) > 0 ? Number(process.env.RATE_LIMIT_PER_MINUTE) : 300 }]),
     PrismaModule,
     CommonModule,
     QueueModule,

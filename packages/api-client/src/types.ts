@@ -889,6 +889,8 @@ export interface AttendanceListItem {
   isEmergency: boolean;
   devRewoundAt: string | null;
   checkInMethod: CheckInMethod;
+  /** The standard day and overtime threshold in force on the entry's business date. */
+  dayRules?: { standardDayMinutes: number; overtimeThresholdMinutes: number };
   worker: { id: string; fullLegalName: string };
   shift: { id: string; title: string; shiftType: ShiftType; project: { id: string; name: string } | null; site: { id: string; name: string } | null };
   dailySummary: { text: string | null; taskCategory: string } | null;
