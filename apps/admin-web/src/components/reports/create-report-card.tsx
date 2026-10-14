@@ -4,8 +4,9 @@ import { useId, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { CreateReportInput, GeneratedReport } from "@fieldmaster/api-client";
-import { AccountStatus, OrgRole, ReportType } from "@fieldmaster/shared-types";
+import { AccountStatus, Permission, ReportType } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { currentYearMonth } from "@/lib/business-date";
 import { YEAR_MONTH_PATTERN, monthDateRange } from "@/lib/jerusalem-time";
 import { useErrorMessage } from "@/lib/use-error-message";
@@ -74,19 +75,22 @@ function ListError({ query }: { query: UseQueryResult<unknown> }) {
  * «إنشاء تقرير»: the report type and its filters, checked before anything is
  * sent. «إنشاء التقرير» starts a background job (one Idempotency-Key per
  * click) and the report's progress, files and integrity check appear below.
- * An Owner gets the financial copy of every report and may request the
- * payroll report; a Field Manager gets the operational copy, without money.
+ * A member with GENERATE_FINANCIAL_REPORTS (and VIEW_FINANCIALS) gets the
+ * financial copy of every report and, with VIEW_PAYROLL, may request the
+ * payroll report; anyone else gets the operational copy, without money.
  */
 export function CreateReportCard() {
   const t = useTranslations("reports");
   const enumLabel = useEnumLabel();
   const errorMessage = useErrorMessage();
   const format = useFormat();
-  const { client, session } = useAuth();
+  const { client } = useAuth();
+  const { canAll } = useAccess();
   const queryClient = useQueryClient();
   const id = useId();
-  const isOwner = session?.role === OrgRole.OWNER;
-  const types = reportTypesFor(isOwner);
+  const financialCopy = canAll([Permission.VIEW_FINANCIALS, Permission.GENERATE_FINANCIAL_REPORTS]);
+  const canRequestPayroll = financialCopy && canAll([Permission.VIEW_PAYROLL]);
+  const types = reportTypesFor(canRequestPayroll);
 
   const [values, setValues] = useState<ReportFormValues>(initialValues);
   const [showErrors, setShowErrors] = useState(false);
@@ -99,12 +103,12 @@ export function CreateReportCard() {
   const workersQuery = useQuery({ queryKey: ["workers"], queryFn: () => client.listWorkers() });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: () => client.listProjects() });
   const sitesQuery = useQuery({ queryKey: ["sites"], queryFn: () => client.listSites() });
-  const periodsQuery = useQuery({ queryKey: payrollKeys.periods, queryFn: () => client.listPayrollPeriods(), enabled: isOwner && fields.payroll });
+  const periodsQuery = useQuery({ queryKey: payrollKeys.periods, queryFn: () => client.listPayrollPeriods(), enabled: canRequestPayroll && fields.payroll });
   const yearMonth = values.yearMonth || defaultPayrollMonth(periodsQuery.data);
   const versionsQuery = useQuery({
     queryKey: payrollKeys.versions(yearMonth),
     queryFn: () => client.listPayrollVersions(yearMonth),
-    enabled: isOwner && fields.payroll && YEAR_MONTH_PATTERN.test(yearMonth),
+    enabled: canRequestPayroll && fields.payroll && YEAR_MONTH_PATTERN.test(yearMonth),
   });
   const version = values.version || defaultPayrollVersion(versionsQuery.data);
 
@@ -333,7 +337,7 @@ export function CreateReportCard() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{filterFields}</div>
 
           <p role="note" className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            {isOwner ? t("create.copyOwner") : t("create.copyManager")}
+            {financialCopy ? t("create.copyOwner") : t("create.copyManager")}
           </p>
 
           {create.isError ? (

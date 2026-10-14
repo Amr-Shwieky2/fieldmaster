@@ -6,8 +6,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { DevLoginUser, Shift } from "@fieldmaster/api-client";
 import type { OfflineSigningKeyPair } from "@fieldmaster/shared-validation";
-import { CheckInMethod, OrgRole, TaskCategory, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { CheckInMethod, OrgRole, Permission, TaskCategory, TimeEntryStatus } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useFormat } from "@/lib/use-format";
 import { useShiftTitle } from "@/lib/shift-title";
@@ -49,18 +50,21 @@ import { SupervisorPanel } from "./supervisor-panel";
 /**
  * /dev/worker-simulator: act as any seeded worker from the admin web and
  * exercise every attendance rule through the REAL API. Test mode only (the
- * route is a 404 otherwise), Owners and Field Managers only.
+ * route is a 404 otherwise), and only for a manager who approves attendance
+ * and prepares the test shifts (APPROVE_ATTENDANCE with MANAGE_SHIFTS), as the
+ * simulator does both with the signed-in admin's own session.
  */
 export function WorkerSimulator() {
   const t = useTranslations("workerSimulator");
   const { session, isReady } = useAuth();
+  const { ready, canAll } = useAccess();
   const devUsers = useDevLoginUsers();
 
-  if (!isReady || devUsers.isPending) return <LoadingState />;
+  if (!isReady || !ready || devUsers.isPending) return <LoadingState />;
   if (devUsers.isError) return <ErrorState error={devUsers.error} onRetry={() => void devUsers.refetch()} />;
   // The API left dev login mode after the page was served: same as the server-side 404.
   if (devUsers.data === null) notFound();
-  if (!session || (session.role !== OrgRole.OWNER && session.role !== OrgRole.FIELD_MANAGER)) return <AccessDenied />;
+  if (!session || !canAll([Permission.APPROVE_ATTENDANCE, Permission.MANAGE_SHIFTS])) return <AccessDenied />;
 
   return (
     <div>

@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { ShiftType, CheckInMethod } from "@fieldmaster/shared-types";
+import { ShiftType, CheckInMethod, Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useEnumLabel } from "@/i18n/enums";
 import { ArrowStartIcon } from "@/components/icons";
+import { RequirePermission } from "@/components/require-permission";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,16 @@ function InlineQueryError({ error, onRetry }: { error: unknown; onRetry: () => v
   );
 }
 
+/** Creating a shift is MANAGE_SHIFTS (VIEW_SHIFTS alone reads the schedule). */
 export default function NewShiftPage() {
+  return (
+    <RequirePermission permission={Permission.MANAGE_SHIFTS}>
+      <NewShift />
+    </RequirePermission>
+  );
+}
+
+function NewShift() {
   const router = useRouter();
   const { client } = useAuth();
   const t = useTranslations("shifts");

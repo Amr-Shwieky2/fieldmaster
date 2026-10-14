@@ -5,27 +5,52 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { OrgRole } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { isSystemRoleKind } from "@/lib/permissions";
 import { Nav } from "@/components/nav";
 import { AppHeader } from "@/components/app-header";
-import { LoadingState } from "@/components/ui/states";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { isAuthenticated, isReady, session, logout } = useAuth();
+  const { isAuthenticated, isReady, session, logout, access, accessStatus, loadAccess, refreshAccess } = useAuth();
   const t = useTranslations("workerNotice");
   const tShell = useTranslations("shell");
+  const token = session?.accessToken ?? null;
 
   useEffect(() => {
     if (isReady && !isAuthenticated) router.replace("/login");
   }, [isReady, isAuthenticated, router]);
 
-  if (!isAuthenticated) return <LoadingState />;
+  // After sign-in and on every page load: the member's role, effective permissions and project scope
+  // (GET /auth/me), read live -- a change of role or scope applies at the next request.
+  useEffect(() => {
+    if (token) void loadAccess();
+  }, [token, loadAccess]);
 
-  // The dashboard is for Owners and Field Managers; every page would only
-  // show 403 errors to a Worker (the API enforces that regardless).
-  if (session?.role === OrgRole.WORKER) {
+  // The menu and every page wait for that answer (or its failure), so nobody sees entries their permissions do not give.
+  if (!isAuthenticated || accessStatus === "idle" || accessStatus === "loading") return <LoadingState />;
+
+  // A built-in role's fixed permissions stand in when /auth/me cannot be read; a custom role's are known only from it.
+  if (accessStatus === "failed" && !isSystemRoleKind(session?.role)) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-100 px-4">
+        <Card className="w-full max-w-md">
+          <ErrorState message={tShell("accessFailed")} onRetry={() => void refreshAccess()} />
+          <CardContent className="flex justify-center pt-0">
+            <Button variant="ghost" size="sm" onClick={logout}>
+              {tShell("signOut")}
+            </Button>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  // The admin web is not for the built-in Worker role; every page would only
+  // show 403 errors (the API enforces that regardless).
+  if ((access?.role ?? session?.role) === OrgRole.WORKER) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-100 px-4">
         <Card className="w-full max-w-md">

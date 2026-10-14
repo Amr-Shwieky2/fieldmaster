@@ -4,7 +4,9 @@ import { useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useFormat } from "@/lib/use-format";
 import { LtrText, Money } from "@/components/formatted";
@@ -47,11 +49,12 @@ function MutationFeedback({ error, success }: { error: unknown; success: string 
 }
 
 export default function SitesPage() {
-  const { client, session } = useAuth();
+  const { client } = useAuth();
+  const { can } = useAccess();
   const t = useTranslations("sites");
   const format = useFormat();
   const queryClient = useQueryClient();
-  const isOwner = session?.role === "OWNER";
+  const canSeeBudget = can(Permission.VIEW_FINANCIALS);
 
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: () => client.listProjects() });
   const sitesQuery = useQuery({ queryKey: ["sites"], queryFn: () => client.listSites() });
@@ -143,8 +146,8 @@ export default function SitesPage() {
                         {p.client ? <> · {t("projects.client", { client: p.client })}</> : null}
                       </p>
                     </div>
-                    {/* Budgets are Owner-only: the API strips them for a Field Manager, and the UI also hides them. */}
-                    {isOwner && p.budgetAgorot != null && (
+                    {/* Budgets are money: the API strips them for a member without VIEW_FINANCIALS, and the UI also hides them. */}
+                    {canSeeBudget && p.budgetAgorot != null && (
                       <span className="text-xs text-slate-500">{t.rich("projects.budget", { money: () => <Money agorot={p.budgetAgorot} /> })}</span>
                     )}
                   </li>

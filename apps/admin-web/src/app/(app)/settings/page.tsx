@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { NotificationPreferenceView, OrganizationSettingsView, WorkdaySettings } from "@fieldmaster/api-client";
-import { OrgRole } from "@fieldmaster/shared-types";
+import { Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useEnumLabel } from "@/i18n/enums";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,14 +32,17 @@ const WORKDAY_NUMBERS = [
 type WorkdayNumberKey = (typeof WORKDAY_NUMBERS)[number]["key"];
 
 /**
- * Organization settings (Step 6). Owners change each section on its own (the
- * API audits every changed value, old -> new); Field Managers see the same
- * values read-only, without any amount. The fixed business rules and the
- * test-mode status are shown but never editable here.
+ * Organization settings (Step 6). Whoever holds MANAGE_ORG_SETTINGS changes
+ * each section on its own (the API audits every changed value, old -> new);
+ * with VIEW_ORG_SETTINGS alone the same values are shown read-only, without
+ * any amount. The work rules in force today and the test-mode status are
+ * shown but never edited here (the work rules have their own page, as
+ * effective-dated versions).
  */
 export default function SettingsPage() {
   const t = useTranslations("settings");
-  const { client, session } = useAuth();
+  const { client } = useAuth();
+  const { can } = useAccess();
   const settingsQuery = useQuery({ queryKey: QUERY_KEY, queryFn: () => client.getOrganizationSettings() });
   const settings = settingsQuery.data;
 
@@ -48,11 +52,21 @@ export default function SettingsPage() {
         title={t("title")}
         description={t("description")}
         actions={
-          session?.role === OrgRole.OWNER ? (
-            <Link href="/settings/users" className="text-sm font-medium text-brand-700 hover:underline">
-              {t("usersLink")}
+          <>
+            {can(Permission.MANAGE_ORG_USERS) ? (
+              <Link href="/settings/users" className="text-sm font-medium text-brand-700 hover:underline">
+                {t("usersLink")}
+              </Link>
+            ) : null}
+            {can(Permission.MANAGE_ROLES) ? (
+              <Link href="/settings/roles" className="text-sm font-medium text-brand-700 hover:underline">
+                {t("rolesLink")}
+              </Link>
+            ) : null}
+            <Link href="/settings/work-rules" className="text-sm font-medium text-brand-700 hover:underline">
+              {t("workRulesLink")}
             </Link>
-          ) : null
+          </>
         }
       />
       {settingsQuery.isPending && <LoadingState />}
@@ -344,6 +358,7 @@ function NotificationsSection({ settings }: { settings: OrganizationSettingsView
             </tbody>
           </table>
         </div>
+        <p className="text-xs text-slate-500">{tNotifications("customRolesHint")}</p>
         <p className="text-xs text-slate-500">{tNotifications("hint")}</p>
         <SectionStatus error={save.error} saved={save.isSuccess} />
         {settings.canEdit ? (
@@ -378,6 +393,7 @@ function TestModeSection({ settings }: { settings: OrganizationSettingsView }) {
   );
 }
 
+/** The work rules in force today (the API reads them from the current version), read-only; they change on the work rules page. */
 function FixedRulesSection({ settings }: { settings: OrganizationSettingsView }) {
   const tRules = useTranslations("settings.fixedRules");
   const rules = settings.fixedRules;
@@ -393,6 +409,9 @@ function FixedRulesSection({ settings }: { settings: OrganizationSettingsView })
         </li>
         <li>{tRules("emergency", { before: rules.emergencyRetroactiveMinutes, after: rules.emergencyReturnBufferMinutes })}</li>
       </ul>
+      <Link href="/settings/work-rules" className="inline-block text-sm font-medium text-brand-700 hover:underline">
+        {settings.canEdit ? tRules("editLink") : tRules("viewLink")}
+      </Link>
     </SectionCard>
   );
 }

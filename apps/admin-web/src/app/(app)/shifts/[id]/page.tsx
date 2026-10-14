@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { getErrorCode } from "@fieldmaster/i18n";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useEnumLabel } from "@/i18n/enums";
@@ -18,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { LoadingState, ErrorState } from "@/components/ui/states";
 import { TemporarySupervisorsCard } from "@/components/shifts/temporary-supervisors-card";
+import { Can } from "@/components/require-permission";
 
 function BackToShifts() {
   const t = useTranslations("shifts");
@@ -32,6 +35,7 @@ function BackToShifts() {
 export default function ShiftDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { client } = useAuth();
+  const { can } = useAccess();
   const t = useTranslations("shifts");
   const tc = useTranslations("common");
   const enumLabel = useEnumLabel();
@@ -126,50 +130,54 @@ export default function ShiftDetailPage() {
             <p className="text-sm text-slate-500">{t("detail.assigned.empty")}</p>
           )}
 
-          <form noValidate onSubmit={submitAssignment} className="space-y-2 border-t border-slate-100 pt-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="min-w-0 flex-1">
-                <Label htmlFor="assign-worker">{t("detail.assign.label")}</Label>
-                <Select
-                  id="assign-worker"
-                  value={selectedWorkerId}
-                  onChange={(e) => setSelectedWorkerId(e.target.value)}
-                  disabled={workersQuery.isLoading}
-                >
-                  <option value="">{workersQuery.isLoading ? t("detail.assign.loadingWorkers") : t("detail.assign.placeholder")}</option>
-                  {unassignedWorkers.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.fullLegalName}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <Button type="submit" disabled={!canAssign}>
-                {assignWorker.isPending ? t("detail.assign.submitting") : t("detail.assign.submit")}
-              </Button>
-            </div>
-            {workersQuery.isError && (
-              <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-red-600">
-                <span>{errorMessage(workersQuery.error)}</span>
-                <Button type="button" variant="ghost" size="sm" onClick={() => void workersQuery.refetch()}>
-                  {tc("retry")}
+          {can(Permission.MANAGE_SHIFTS) ? (
+            <form noValidate onSubmit={submitAssignment} className="space-y-2 border-t border-slate-100 pt-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <Label htmlFor="assign-worker">{t("detail.assign.label")}</Label>
+                  <Select
+                    id="assign-worker"
+                    value={selectedWorkerId}
+                    onChange={(e) => setSelectedWorkerId(e.target.value)}
+                    disabled={workersQuery.isLoading}
+                  >
+                    <option value="">{workersQuery.isLoading ? t("detail.assign.loadingWorkers") : t("detail.assign.placeholder")}</option>
+                    {unassignedWorkers.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.fullLegalName}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <Button type="submit" disabled={!canAssign}>
+                  {assignWorker.isPending ? t("detail.assign.submitting") : t("detail.assign.submit")}
                 </Button>
               </div>
-            )}
-            {workersQuery.isSuccess && unassignedWorkers.length === 0 && <p className="text-xs text-slate-500">{t("detail.assign.noneAvailable")}</p>}
-            <div aria-live="polite">
-              {assignError ? (
-                <p role="alert" className="text-sm text-red-600">
-                  {assignError}
-                </p>
-              ) : null}
-              {!assignError && assignWorker.isSuccess ? <p className="text-sm text-emerald-700">{t("detail.assign.success")}</p> : null}
-            </div>
-          </form>
+              {workersQuery.isError && (
+                <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-red-600">
+                  <span>{errorMessage(workersQuery.error)}</span>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => void workersQuery.refetch()}>
+                    {tc("retry")}
+                  </Button>
+                </div>
+              )}
+              {workersQuery.isSuccess && unassignedWorkers.length === 0 && <p className="text-xs text-slate-500">{t("detail.assign.noneAvailable")}</p>}
+              <div aria-live="polite">
+                {assignError ? (
+                  <p role="alert" className="text-sm text-red-600">
+                    {assignError}
+                  </p>
+                ) : null}
+                {!assignError && assignWorker.isSuccess ? <p className="text-sm text-emerald-700">{t("detail.assign.success")}</p> : null}
+              </div>
+            </form>
+          ) : null}
         </CardContent>
       </Card>
 
-      <TemporarySupervisorsCard shift={shift} workerNames={workerNames} />
+      <Can permission={Permission.MANAGE_TEMP_SUPERVISORS}>
+        <TemporarySupervisorsCard shift={shift} workerNames={workerNames} />
+      </Can>
     </div>
   );
 }

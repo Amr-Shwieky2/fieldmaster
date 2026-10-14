@@ -2,11 +2,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { OrgRole } from "@fieldmaster/shared-types";
+import { Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess, useRoleLabel } from "@/lib/use-access";
 import { currentYearMonth } from "@/lib/business-date";
 import { useFormat } from "@/lib/use-format";
-import { useEnumLabel } from "@/i18n/enums";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,29 +23,36 @@ import { WorkersWithoutCompensation } from "@/components/dashboard/workers-witho
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const fmt = useFormat();
-  const enumLabel = useEnumLabel();
-  const { client, session } = useAuth();
-  const isOwner = session?.role === OrgRole.OWNER;
+  const { client } = useAuth();
+  const { can, restricted } = useAccess();
+  const roleLabel = useRoleLabel();
+  const canSeeFinancials = can(Permission.VIEW_FINANCIALS) && can(Permission.VIEW_FINANCIAL_DASHBOARD);
+  const canSeeWorkers = can(Permission.MANAGE_WORKERS);
+  const canSeePending = can(Permission.APPROVE_ATTENDANCE);
   const yearMonth = currentYearMonth();
 
-  const workersQuery = useQuery({ queryKey: ["workers"], queryFn: () => client.listWorkers() });
-  const pendingQuery = useQuery({ queryKey: ["attendance-approvals-pending"], queryFn: () => client.listPendingAttendanceApprovals() });
+  // Each count only for a member whose permissions open its list (the API refuses the others).
+  const workersQuery = useQuery({ queryKey: ["workers"], queryFn: () => client.listWorkers(), enabled: canSeeWorkers });
+  const pendingQuery = useQuery({ queryKey: ["attendance-approvals-pending"], queryFn: () => client.listPendingAttendanceApprovals(), enabled: canSeePending });
   const dashboardQuery = useQuery({
     queryKey: ["financial-dashboard", yearMonth],
     queryFn: () => client.getFinancialDashboard(yearMonth),
-    enabled: isOwner,
+    enabled: canSeeFinancials,
   });
 
-  // Financial figures exist only for an Owner; a Field Manager never gets them
-  // (the query is disabled and the API answers 403 anyway).
-  const financials = isOwner ? dashboardQuery.data : undefined;
+  // Financial figures exist only for a member with the financial dashboard (VIEW_FINANCIAL_DASHBOARD);
+  // anyone else never gets them (the query is disabled and the API answers 403 anyway).
+  const financials = canSeeFinancials ? dashboardQuery.data : undefined;
 
   const header = (
-    <PageHeader
-      title={t("title")}
-      description={t("description", { month: fmt.month(yearMonth) })}
-      actions={session ? <Badge tone="info">{enumLabel("OrgRole", session.role)}</Badge> : null}
-    />
+    <>
+      <PageHeader
+        title={t("title")}
+        description={t("description", { month: fmt.month(yearMonth) })}
+        actions={roleLabel ? <Badge tone="info">{roleLabel}</Badge> : null}
+      />
+      {restricted ? <p className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{t("restrictedScope")}</p> : null}
+    </>
   );
 
   if (workersQuery.isLoading || pendingQuery.isLoading) {
@@ -80,13 +87,13 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {header}
 
-      {isOwner && dashboardQuery.isLoading && (
+      {canSeeFinancials && dashboardQuery.isLoading && (
         <Card>
           <LoadingState label={t("financial.loading")} />
         </Card>
       )}
 
-      {isOwner && dashboardQuery.isError && (
+      {canSeeFinancials && dashboardQuery.isError && (
         <Card>
           <ErrorState error={dashboardQuery.error} onRetry={() => void dashboardQuery.refetch()} />
         </Card>
@@ -96,8 +103,8 @@ export default function DashboardPage() {
 
       {/* Up to three columns: narrower cards next to the sidebar are too tight for "₪ 123,456.78". */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard label={t("stats.activeWorkers")} value={fmt.number(activeWorkers)} />
-        <StatCard label={t("stats.pendingApprovals")} value={fmt.number(pendingQuery.data?.length ?? 0)} />
+        {canSeeWorkers ? <StatCard label={t("stats.activeWorkers")} value={fmt.number(activeWorkers)} /> : null}
+        {canSeePending ? <StatCard label={t("stats.pendingApprovals")} value={fmt.number(pendingQuery.data?.length ?? 0)} /> : null}
         {financials && <FinancialStatCards data={financials} />}
       </div>
 
@@ -119,7 +126,7 @@ export default function DashboardPage() {
         </>
       )}
 
-      {!isOwner && (
+      {!canSeeFinancials && (
         <Card>
           <CardContent className="py-5 text-sm text-slate-600">{t("financial.ownersOnly")}</CardContent>
         </Card>

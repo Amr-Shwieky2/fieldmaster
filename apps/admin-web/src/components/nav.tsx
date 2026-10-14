@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { OrgRole } from "@fieldmaster/shared-types";
+import { Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
-import { useEnumLabel } from "@/i18n/enums";
+import { useAccess, useRoleLabel, type Access } from "@/lib/use-access";
+import { ADMIN_WEB_PERMISSIONS } from "@/lib/permissions";
 import { cn } from "@/lib/cn";
 import { useDevLoginUsers } from "@/components/dev-quick-login";
 import { Badge } from "@/components/ui/badge";
@@ -27,31 +28,44 @@ type NavKey =
   | "auditLog"
   | "settings"
   | "users"
+  | "roles"
   | "workerSimulator";
 
-/** `devOnly` items exist only while the API is in dev login (test) mode; with it off they are not rendered at all. */
-const NAV_ITEMS: { href: string; key: NavKey; roles: OrgRole[]; devOnly?: boolean }[] = [
-  { href: "/dashboard", key: "dashboard", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/operations", key: "operations", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/workers", key: "workers", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  // Step 8: single-use join links (Owners and Field Managers invite; only an Owner reviews the applications).
-  { href: "/workers/invitations", key: "invitations", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/sites", key: "sitesProjects", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/shifts", key: "scheduling", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/turan", key: "turanEmergency", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/attendance", key: "attendanceApproval", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/attendance/forgotten-stamps", key: "forgottenStamps", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/emergencies", key: "emergencies", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  // Payroll is intentionally Owner-only -- Field Managers must never see it (spec 6.2 / 23.5).
-  { href: "/payroll", key: "payroll", roles: [OrgRole.OWNER] },
-  { href: "/reports", key: "reports", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/notifications", key: "notifications", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/audit-log", key: "auditLog", roles: [OrgRole.OWNER] },
-  // Field Managers read the settings; only Owners change them or manage users.
-  { href: "/settings", key: "settings", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER] },
-  { href: "/settings/users", key: "users", roles: [OrgRole.OWNER] },
-  { href: "/dev/worker-simulator", key: "workerSimulator", roles: [OrgRole.OWNER, OrgRole.FIELD_MANAGER], devOnly: true },
+/**
+ * Each entry is shown to a member who holds every permission of `all` (and
+ * at least one of `any`), whatever their role is called. `devOnly` items
+ * exist only while the API is in dev login (test) mode; with it off they are
+ * not rendered at all.
+ */
+const NAV_ITEMS: { href: string; key: NavKey; all?: readonly Permission[]; any?: readonly Permission[]; devOnly?: boolean }[] = [
+  // The admin web's own pages: anyone with a permission beyond a worker's own clock-in and attendance.
+  { href: "/dashboard", key: "dashboard", any: ADMIN_WEB_PERMISSIONS },
+  { href: "/operations", key: "operations", all: [Permission.VIEW_OPERATIONS] },
+  { href: "/workers", key: "workers", all: [Permission.MANAGE_WORKERS] },
+  // Step 8: single-use join links (reviewing an application also needs the bank details).
+  { href: "/workers/invitations", key: "invitations", all: [Permission.APPROVE_ONBOARDING] },
+  { href: "/sites", key: "sitesProjects", all: [Permission.MANAGE_SITES] },
+  { href: "/shifts", key: "scheduling", all: [Permission.VIEW_SHIFTS] },
+  { href: "/turan", key: "turanEmergency", all: [Permission.MANAGE_TURAN] },
+  { href: "/attendance", key: "attendanceApproval", all: [Permission.VIEW_ATTENDANCE] },
+  { href: "/attendance/forgotten-stamps", key: "forgottenStamps", all: [Permission.VIEW_ATTENDANCE] },
+  { href: "/emergencies", key: "emergencies", all: [Permission.VIEW_ATTENDANCE] },
+  // Payroll is money: only with VIEW_PAYROLL (which needs VIEW_FINANCIALS) -- never a Field Manager's (spec 6.2 / 23.5).
+  { href: "/payroll", key: "payroll", all: [Permission.VIEW_FINANCIALS, Permission.VIEW_PAYROLL] },
+  { href: "/reports", key: "reports", any: [Permission.GENERATE_OPERATIONAL_REPORTS, Permission.GENERATE_FINANCIAL_REPORTS] },
+  { href: "/notifications", key: "notifications", any: ADMIN_WEB_PERMISSIONS },
+  { href: "/audit-log", key: "auditLog", all: [Permission.VIEW_AUDIT_LOG] },
+  // Reading the settings is VIEW_ORG_SETTINGS; changing them, managing users and roles each have their own permission.
+  { href: "/settings", key: "settings", all: [Permission.VIEW_ORG_SETTINGS] },
+  { href: "/settings/users", key: "users", all: [Permission.MANAGE_ORG_USERS] },
+  { href: "/settings/roles", key: "roles", all: [Permission.MANAGE_ROLES] },
+  // The simulator approves attendance and prepares test shifts as the signed-in manager.
+  { href: "/dev/worker-simulator", key: "workerSimulator", all: [Permission.APPROVE_ATTENDANCE, Permission.MANAGE_SHIFTS], devOnly: true },
 ];
+
+function isVisible(item: (typeof NAV_ITEMS)[number], access: Access): boolean {
+  return (!item.all || access.canAll(item.all)) && (!item.any || access.canAny(item.any));
+}
 
 /** The item to highlight: the longest href that is the path or a parent of it (`/attendance/x` is not also `/attendance`'s page when x has its own item). */
 function activeHref(pathname: string | null, hrefs: string[]): string | undefined {
@@ -63,13 +77,14 @@ function activeHref(pathname: string | null, hrefs: string[]): string | undefine
 export function Nav() {
   const pathname = usePathname();
   const { session } = useAuth();
+  const access = useAccess();
+  const roleLabel = useRoleLabel();
   const t = useTranslations("nav");
   const tShell = useTranslations("shell");
-  const enumLabel = useEnumLabel();
   // Same signal as the login page: the API answers 404 (-> null) when dev login is off.
   const devMode = useDevLoginUsers().data != null;
   if (!session) return null;
-  const visibleItems = NAV_ITEMS.filter((item) => item.roles.includes(session.role) && (!item.devOnly || devMode));
+  const visibleItems = NAV_ITEMS.filter((item) => isVisible(item, access) && (!item.devOnly || devMode));
   const current = activeHref(
     pathname,
     visibleItems.map((item) => item.href),
@@ -79,7 +94,7 @@ export function Nav() {
     <nav aria-label={t("mainNavigation")} className="flex w-60 shrink-0 flex-col border-e border-slate-200 bg-white px-4 py-6">
       <div className="mb-6 px-2">
         <p className="text-lg font-bold text-slate-900">{tShell("brand")}</p>
-        <p className="text-xs text-slate-500">{enumLabel("OrgRole", session.role)}</p>
+        <p className="text-xs text-slate-500">{roleLabel}</p>
       </div>
       <ul className="space-y-1">
         {visibleItems.map((item) => {

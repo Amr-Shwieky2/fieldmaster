@@ -3,11 +3,12 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useAuditReason } from "@/lib/use-audit-reason";
 import { EM_DASH } from "@fieldmaster/i18n";
-import { OwnerOnly } from "@/components/owner-only";
+import { RequirePermission } from "@/components/require-permission";
 import { PageHeader } from "@/components/page-header";
 import { DateTimeText, LtrText } from "@/components/formatted";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -129,8 +130,8 @@ function AuditLogContent() {
 
 export default function AuditLogPage() {
   return (
-    <OwnerOnly>
+    <RequirePermission permission={Permission.VIEW_AUDIT_LOG}>
       <AuditLogContent />
-    </OwnerOnly>
+    </RequirePermission>
   );
 }

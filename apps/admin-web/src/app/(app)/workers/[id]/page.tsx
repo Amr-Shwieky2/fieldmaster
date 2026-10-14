@@ -6,8 +6,9 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { Worker } from "@fieldmaster/api-client";
-import { AccountStatus, CompensationType, OrgRole } from "@fieldmaster/shared-types";
+import { AccountStatus, CompensationType, Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { isNotFound } from "@fieldmaster/i18n";
 import { useEnumLabel } from "@/i18n/enums";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,7 +77,7 @@ function WorkerDetail({ worker }: { worker: Worker }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { session } = useAuth();
+  const { canAll } = useAccess();
   const panelId = useId();
   const tab: WorkerTab = searchParams?.get("tab") === "attendance" ? "attendance" : "profile";
   const monthParam = searchParams?.get("month") ?? "";
@@ -115,7 +116,7 @@ function WorkerDetail({ worker }: { worker: Worker }) {
             workerId={worker.id}
             month={month}
             onMonthChange={(next) => show("attendance", next)}
-            isOwner={session?.role === OrgRole.OWNER}
+            showEarnings={canAll([Permission.VIEW_FINANCIALS, Permission.VIEW_COMPENSATION])}
           />
         )}
       </div>

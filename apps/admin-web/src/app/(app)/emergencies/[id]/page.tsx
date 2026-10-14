@@ -6,9 +6,10 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { EmergencyCalloutRecord } from "@fieldmaster/api-client";
-import { OrgRole } from "@fieldmaster/shared-types";
+import { Permission } from "@fieldmaster/shared-types";
 import { EM_DASH, isNotFound } from "@fieldmaster/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useFormat } from "@/lib/use-format";
 import { useEnumLabel } from "@/i18n/enums";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,7 +21,7 @@ import { DateTimeText, Money } from "@/components/formatted";
 import { EmergencyTimes } from "@/components/emergency-times";
 import { EvidenceMap, type EvidencePoint } from "@/components/attendance/evidence-map";
 
-/** One emergency call-out: times, authorization, start/end GPS, summary, approval and (Owner only) its estimated cost. */
+/** One emergency call-out: times, authorization, start/end GPS, summary, approval and (with VIEW_FINANCIALS) its estimated cost. */
 export default function EmergencyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("emergencies.detail");
@@ -51,10 +52,10 @@ function Callout({ callout }: { callout: EmergencyCalloutRecord }) {
   const tc = useTranslations("common");
   const label = useEnumLabel();
   const format = useFormat();
-  const { session } = useAuth();
+  const { can } = useAccess();
   const meters = (value: number | null) => (value === null ? EM_DASH : format.number(Math.round(value)));
-  // Owner DTO only: the key does not exist at all in a Field Manager's response (and the role is checked too).
-  const hasCost = session?.role === OrgRole.OWNER && "estimatedCostAgorot" in callout;
+  // Money: the key does not exist at all in the response of a member who may not see money (and the permission is checked too).
+  const hasCost = can(Permission.VIEW_FINANCIALS) && "estimatedCostAgorot" in callout;
 
   const points: EvidencePoint[] = [
     {

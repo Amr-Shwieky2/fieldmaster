@@ -6,13 +6,14 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PayrollAllowedActions, PayrollVersionDetail } from "@fieldmaster/api-client";
-import { PayrollCalculationState, PayrollPeriodStatus } from "@fieldmaster/shared-types";
+import { PayrollCalculationState, PayrollPeriodStatus, Permission } from "@fieldmaster/shared-types";
 import { getErrorCode, isNotFound } from "@fieldmaster/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useFormat } from "@/lib/use-format";
 import { useEnumLabel } from "@/i18n/enums";
-import { OwnerOnly } from "@/components/owner-only";
+import { RequirePermission } from "@/components/require-permission";
 import { PageHeader } from "@/components/page-header";
 import { DateTimeText, LtrText } from "@/components/formatted";
 import { ArrowStartIcon } from "@/components/icons";
@@ -67,19 +68,20 @@ function payrollHref(yearMonth: string, version: number | null, tab: PayrollTab)
 }
 
 /**
- * A month's payroll (Owner only). The latest version is the working one and
+ * A month's payroll (VIEW_PAYROLL). The latest version is the working one and
  * may be calculated (a background job whose progress is shown), finalized
  * (it never changes again) or reopened (a new version; the finalized one
- * stays readable). `?version=N` shows an earlier version, read-only. What the
- * Owner may do now comes from the API (`allowedActions`).
+ * stays readable). `?version=N` shows an earlier version, read-only. What may
+ * be done now comes from the API (`allowedActions`), each action also only
+ * with its own permission (MANAGE_PAYROLL / FINALIZE_PAYROLL).
  */
 export default function PayrollPeriodPage() {
   return (
-    <OwnerOnly>
+    <RequirePermission permission={[Permission.VIEW_FINANCIALS, Permission.VIEW_PAYROLL]}>
       <Suspense fallback={<LoadingState />}>
         <PayrollPeriodContent />
       </Suspense>
-    </OwnerOnly>
+    </RequirePermission>
   );
 }
 
@@ -131,6 +133,7 @@ function NeverCalculated({ yearMonth }: { yearMonth: string }) {
   const format = useFormat();
   const errorMessage = useErrorMessage();
   const queryClient = useQueryClient();
+  const { can } = useAccess();
   const start = useStartPayrollCalculation(yearMonth);
   const startCalculation = () =>
     start.mutate(newIdempotencyKey(), {
@@ -145,9 +148,11 @@ function NeverCalculated({ yearMonth }: { yearMonth: string }) {
       <PageHeader
         title={t("title", { month: format.month(yearMonth) })}
         actions={
-          <Button onClick={startCalculation} disabled={start.isPending}>
-            {start.isPending ? tActions("starting") : tActions("calculate")}
-          </Button>
+          can(Permission.MANAGE_PAYROLL) ? (
+            <Button onClick={startCalculation} disabled={start.isPending}>
+              {start.isPending ? tActions("starting") : tActions("calculate")}
+            </Button>
+          ) : null
         }
       />
       {start.isError ? (
@@ -204,6 +209,7 @@ function PayrollVersionView({
   const router = useRouter();
   const queryClient = useQueryClient();
   const { client } = useAuth();
+  const { can } = useAccess();
   const ids = useId();
   const yearMonth = detail.yearMonth;
   const monthLabel = format.month(yearMonth);
@@ -217,8 +223,14 @@ function PayrollVersionView({
   const run = useCalculationRun(yearMonth, detail, detailUpdatedAt, () => setFeedback({ kind: "succeeded" }));
   const running = isCalculationRunning(run) || (detail.isCurrent && run === null && detail.status === PayrollPeriodStatus.CALCULATING);
   const failedRun = run?.state === PayrollCalculationState.FAILED ? run : null;
-  // An earlier version is read-only, whatever the API says.
-  const actions = detail.isCurrent ? detail.allowedActions : NO_ACTIONS;
+  // An earlier version is read-only, whatever the API says; each action also needs its own permission.
+  const allowed = detail.isCurrent ? detail.allowedActions : NO_ACTIONS;
+  const actions: PayrollAllowedActions = {
+    calculate: allowed.calculate && can(Permission.MANAGE_PAYROLL),
+    finalize: allowed.finalize && can(Permission.FINALIZE_PAYROLL),
+    reopen: allowed.reopen && can(Permission.FINALIZE_PAYROLL),
+    addAdjustment: allowed.addAdjustment && can(Permission.MANAGE_PAYROLL),
+  };
   const calculated = hasResults(detail);
 
   const start = useStartPayrollCalculation(yearMonth);

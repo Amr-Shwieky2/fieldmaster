@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useEnumLabel } from "@/i18n/enums";
 import { useShiftTitle } from "@/lib/shift-title";
 import { DateTimeText } from "@/components/formatted";
@@ -18,6 +20,7 @@ const PRIMARY_LINK_CLASSES =
 
 export default function ShiftsPage() {
   const { client } = useAuth();
+  const { can } = useAccess();
   const t = useTranslations("shifts");
   const enumLabel = useEnumLabel();
   const shiftTitle = useShiftTitle();
@@ -29,9 +32,11 @@ export default function ShiftsPage() {
         title={t("list.title")}
         description={t("list.description")}
         actions={
-          <Link href="/shifts/new" className={PRIMARY_LINK_CLASSES}>
-            {t("list.newShift")}
-          </Link>
+          can(Permission.MANAGE_SHIFTS) ? (
+            <Link href="/shifts/new" className={PRIMARY_LINK_CLASSES}>
+              {t("list.newShift")}
+            </Link>
+          ) : null
         }
       />
 

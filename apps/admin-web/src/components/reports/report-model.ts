@@ -8,7 +8,7 @@ import { BUSINESS_DATE_PATTERN, YEAR_MONTH_PATTERN } from "@/lib/jerusalem-time"
  * business dates (YYYY-MM-DD, Asia/Jerusalem), inclusive.
  */
 
-/** Every report type, in the order the form offers them (the payroll report, Owner only, last). */
+/** Every report type, in the order the form offers them (the payroll report, which is money, last). */
 export const REPORT_TYPES: readonly ReportType[] = [
   ReportType.WORKER_ATTENDANCE_LEDGER,
   ReportType.OPERATIONAL_ATTENDANCE,
@@ -19,9 +19,9 @@ export const REPORT_TYPES: readonly ReportType[] = [
   ReportType.PAYROLL,
 ];
 
-/** The types a caller may request: the payroll report only for an Owner. */
-export function reportTypesFor(isOwner: boolean): ReportType[] {
-  return REPORT_TYPES.filter((type) => isOwner || type !== ReportType.PAYROLL);
+/** The types a caller may request: the payroll report only for one who may request it (financial reports and the payroll, see `canRequestPayrollReport`). */
+export function reportTypesFor(canRequestPayroll: boolean): ReportType[] {
+  return REPORT_TYPES.filter((type) => canRequestPayroll || type !== ReportType.PAYROLL);
 }
 
 export interface ReportTypeFilters {
