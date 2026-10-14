@@ -1330,9 +1330,13 @@ model AuditLog {
 
   previousHash String @map("previous_hash")
   currentHash  String @map("current_hash")
+  /// The row's place in its organization's hash chain: 1, 2, 3, ... with no
+  /// gap. The chain's order is this number, never created_at (AuditService).
+  sequenceNumber Int @map("sequence_number")
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@unique([organizationId, sequenceNumber])
   @@index([organizationId, entityType, entityId])
   @@index([organizationId, createdAt])
   @@map("audit_logs")
