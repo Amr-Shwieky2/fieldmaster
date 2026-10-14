@@ -1,0 +1,68 @@
+# خالد ناصر ends the shift flow 01 started.
+# Checks: the mandatory daily summary (sending it empty shows the Arabic error
+# and sends nothing), then a typed summary ends the shift; the receipt; Home
+# not on shift again.
+# The summary is typed in Latin letters: Maestro cannot type Unicode on
+# Android (the text is the worker's data; every label stays Arabic).
+appId: com.fieldmaster.mobile
+name: 02-clock-out-summary-required
+tags:
+  - work-flow
+---
+- runFlow: subflows/site-location.yaml
+- runFlow:
+    file: subflows/login.yaml
+    env:
+      NAME: "خالد ناصر"
+- extendedWaitUntil:
+    visible:
+      id: "home-status-on-shift"
+    timeout: 30000
+- tapOn:
+    id: "home-clock-out"
+
+# Sending without a summary: the Arabic error, next to the summary.
+- scrollUntilVisible:
+    element:
+      id: "clock-out-submit"
+    direction: DOWN
+- tapOn:
+    id: "clock-out-submit"
+- scrollUntilVisible:
+    element:
+      id: "clock-out-summary-error"
+    direction: UP
+- assertVisible: "ملخص العمل اليومي مطلوب: يُرجى كتابته أو تسجيله بالصوت."
+- assertNotVisible:
+    id: "clock-receipt"
+
+# With a typed summary the shift ends.
+- tapOn:
+    id: "clock-out-summary"
+- inputText: "Maestro: installed two traffic signals at the junction"
+- hideKeyboard
+- assertNotVisible:
+    id: "clock-out-summary-error"
+- scrollUntilVisible:
+    element:
+      id: "clock-out-submit"
+    direction: DOWN
+- tapOn:
+    id: "clock-out-submit"
+- extendedWaitUntil:
+    visible:
+      id: "clock-receipt"
+    timeout: 60000
+- assertVisible: "تم إنهاء الدوام"
+- assertVisible: "تمت المزامنة"
+- assertVisible: "حضورك الآن بانتظار الموافقة من المدير."
+- scrollUntilVisible:
+    element:
+      id: "receipt-done"
+    direction: DOWN
+- tapOn:
+    id: "receipt-done"
+- extendedWaitUntil:
+    visible:
+      id: "home-status-off-shift"
+    timeout: 30000

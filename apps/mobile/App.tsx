@@ -8,7 +8,9 @@ import { IBMPlexSansArabic_700Bold } from "@expo-google-fonts/ibm-plex-sans-arab
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { IntlRoot } from "./src/i18n/IntlRoot";
 import { RtlRoot } from "./src/components/RtlRoot";
+import { AppServices } from "./src/lib/app-services";
 import { AuthProvider } from "./src/lib/auth-context";
+import { NotificationsProvider } from "./src/lib/notifications-context";
 import { OfflineSyncProvider } from "./src/lib/offline-sync-context";
 import { ensureRtl } from "./src/lib/rtl";
 import { RootNavigator } from "./src/navigation/RootNavigator";
@@ -47,8 +49,12 @@ export default function App() {
         <IntlRoot>
           <AuthProvider>
             <OfflineSyncProvider>
-              <RootNavigator />
-              <StatusBar style="dark" />
+              <NotificationsProvider>
+                {/* Device registration and push-notification taps (renders nothing). */}
+                <AppServices />
+                <RootNavigator />
+                <StatusBar style="dark" />
+              </NotificationsProvider>
             </OfflineSyncProvider>
           </AuthProvider>
         </IntlRoot>

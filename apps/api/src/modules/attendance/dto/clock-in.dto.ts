@@ -1,6 +1,23 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsBoolean, IsIn, IsISO8601, IsLatitude, IsLongitude, IsNumber, IsOptional, IsString, Min } from "class-validator";
-import { EventOrigin } from "@fieldmaster/shared-types";
+import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsISO8601,
+  IsLatitude,
+  IsLongitude,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+  Min,
+} from "class-validator";
+import { EventOrigin, MAX_ATTENDANCE_PHOTOS, MockLocationState } from "@fieldmaster/shared-types";
+import { LOCATION_SIGNAL_PATTERN, MAX_LOCATION_SIGNALS, MAX_LOCATION_SIGNAL_LENGTH } from "./clock-event-fields";
 
 export class ClockInDto {
   @ApiProperty()
@@ -61,4 +78,33 @@ export class ClockInDto {
   @IsOptional()
   @IsString()
   appVersion?: string;
+
+  // ── Step 9: the mobile app ─────────────────────────────────────────────
+  @ApiPropertyOptional({
+    description: `The caller's own, unused ATTENDANCE_PHOTO uploads (POST /attachments), at most ${MAX_ATTENDANCE_PHOTOS}; linked to the time entry.`,
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_ATTENDANCE_PHOTOS)
+  @ArrayUnique()
+  @IsUUID("all", { each: true })
+  photoAssetIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: Object.values(MockLocationState),
+    description: "What the phone could tell about a fake location. DETECTED is refused exactly like mockLocationSuspected: true.",
+  })
+  @IsOptional()
+  @IsIn(Object.values(MockLocationState))
+  mockLocationState?: MockLocationState;
+
+  @ApiPropertyOptional({ description: "Movement heuristics that looked suspicious (e.g. IMPOSSIBLE_SPEED); recorded for review, never a refusal.", type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_LOCATION_SIGNALS)
+  @IsString({ each: true })
+  @MaxLength(MAX_LOCATION_SIGNAL_LENGTH, { each: true })
+  @Matches(LOCATION_SIGNAL_PATTERN, { each: true })
+  locationSignals?: string[];
 }

@@ -130,6 +130,18 @@ for switching a Render test deployment to `staging` + `true`.
 | Error tracking | Sentry | Optional; unset = no-op |
 | Maps | Google Maps JS SDK | Not used in this build — admin-web uses Leaflet/OpenStreetMap instead (no key needed); see `technical-decisions.md` |
 
+The mobile app (Step 9) adds two API settings:
+- `PUSH_PROVIDER`: `log` (default; nothing leaves the API) or `expo`, which
+  sends through Expo's push service once the app is built with EAS and its
+  push credentials are set in the Expo project. `EXPO_ACCESS_TOKEN` is
+  needed only with Expo's "enhanced push security".
+- `TRANSCRIPTION_PROVIDER`: `none` in production (the app asks for a typed
+  summary) or `mock` (development only: a fixed Arabic sentence; refused
+  when `APP_ENV=production`).
+
+The app itself is built with EAS (`apps/mobile/eas.json`); see
+`docs/mobile-device-testing.md`.
+
 Behind a proxy or load balancer, set `TRUST_PROXY` to the number of proxies
 in front of the API (`render.yaml` sets 1). Otherwise every client shares
 the proxy's address for rate limiting, including the public onboarding

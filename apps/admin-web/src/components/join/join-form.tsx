@@ -4,7 +4,7 @@ import { useId, useRef, useState, type ChangeEvent, type FormEvent, type InputHT
 import { useMutation } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { FieldMasterClient, JoinApplicationInput, PublicInvitation } from "@fieldmaster/api-client";
-import { FileAssetPurpose, GovernmentIdType, MAX_UPLOAD_BYTES, PRIVACY_NOTICE_VERSION, UPLOAD_CONTENT_TYPES } from "@fieldmaster/shared-types";
+import { FileAssetPurpose, GovernmentIdType, MAX_UPLOAD_BYTES, PRIVACY_NOTICE_VERSION, UPLOAD_CONTENT_TYPES, type OnboardingFilePurpose } from "@fieldmaster/shared-types";
 import { toWesternDigits } from "@fieldmaster/i18n";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useFormat } from "@/lib/use-format";
@@ -106,7 +106,7 @@ const TEXT_CHECK: Record<TextKey, JoinField | null> = {
   accountHolderName: "accountHolderName",
 };
 
-const FILE_FIELD: Record<FileAssetPurpose, JoinField> = {
+const FILE_FIELD: Record<OnboardingFilePurpose, JoinField> = {
   [FileAssetPurpose.IDENTITY_DOCUMENT]: "identityDocument",
   [FileAssetPurpose.PROFILE_PHOTO]: "profilePhoto",
 };
@@ -144,17 +144,17 @@ export function JoinForm({
   const [submitted, setSubmitted] = useState(false);
   // What the API refused on the last submit, until the field changes.
   const [refused, setRefused] = useState<Partial<Record<JoinField, JoinError>>>({});
-  const [files, setFiles] = useState<Record<FileAssetPurpose, FileStatus>>({
+  const [files, setFiles] = useState<Record<OnboardingFilePurpose, FileStatus>>({
     [FileAssetPurpose.IDENTITY_DOCUMENT]: EMPTY_FILE,
     [FileAssetPurpose.PROFILE_PHOTO]: EMPTY_FILE,
   });
   // The latest upload of each field; an older one finishing late is ignored.
-  const uploads = useRef<Record<FileAssetPurpose, number>>({ [FileAssetPurpose.IDENTITY_DOCUMENT]: 0, [FileAssetPurpose.PROFILE_PHOTO]: 0 });
+  const uploads = useRef<Record<OnboardingFilePurpose, number>>({ [FileAssetPurpose.IDENTITY_DOCUMENT]: 0, [FileAssetPurpose.PROFILE_PHOTO]: 0 });
 
   const prefilledPhoneNumber = invitation.prefilledPhoneNumber;
   const maxBytes = invitation.maxUploadBytes > 0 ? invitation.maxUploadBytes : MAX_UPLOAD_BYTES;
   const maxMegabytes = megabytes(maxBytes, format);
-  const allowedTypes = (purpose: FileAssetPurpose): readonly string[] => {
+  const allowedTypes = (purpose: OnboardingFilePurpose): readonly string[] => {
     const fromApi = invitation.allowedContentTypes?.[purpose];
     return fromApi && fromApi.length > 0 ? fromApi : UPLOAD_CONTENT_TYPES[purpose];
   };
@@ -170,7 +170,7 @@ export function JoinForm({
     });
   const update = (patch: Partial<JoinFormValues>) => setValues((previous) => ({ ...previous, ...patch }));
   const touch = (field: JoinField) => setTouched((previous) => (previous[field] ? previous : { ...previous, [field]: true }));
-  const setFile = (purpose: FileAssetPurpose, status: FileStatus) => setFiles((previous) => ({ ...previous, [purpose]: status }));
+  const setFile = (purpose: OnboardingFilePurpose, status: FileStatus) => setFiles((previous) => ({ ...previous, [purpose]: status }));
 
   const problems: Partial<Record<JoinField, JoinError>> = {
     ...validateJoinForm(values, {
@@ -187,7 +187,7 @@ export function JoinForm({
     return problem ? t.rich(`errors.${problem}`, { ltr }) : undefined;
   };
 
-  const selectFile = async (purpose: FileAssetPurpose, file: File) => {
+  const selectFile = async (purpose: OnboardingFilePurpose, file: File) => {
     touch(FILE_FIELD[purpose]);
     const sequence = ++uploads.current[purpose];
     const fileName = file.name || purpose.toLowerCase();
@@ -213,7 +213,7 @@ export function JoinForm({
       else setFile(purpose, { kind: "failed", fileName, error });
     }
   };
-  const removeFile = (purpose: FileAssetPurpose) => {
+  const removeFile = (purpose: OnboardingFilePurpose) => {
     uploads.current[purpose] += 1;
     setFile(purpose, EMPTY_FILE);
   };

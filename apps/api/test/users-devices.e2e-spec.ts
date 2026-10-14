@@ -601,7 +601,8 @@ describe("Users and devices (Step 6)", () => {
     await expectSocketRefused(phone.accessToken);
     expect(await sseStatus(openSse(phone.accessToken))).toBe(401);
     const signIn = await verifyOtp(MANAGER_PHONE, "manager-phone-2");
-    expect({ status: signIn.status, code: signIn.body.code }).toEqual({ status: 403, code: "NO_ACTIVE_MEMBERSHIP" });
+    // Step 9: after a correct code, the sign-in says why (it was NO_ACTIVE_MEMBERSHIP before).
+    expect({ status: signIn.status, code: signIn.body.code }).toEqual({ status: 403, code: "ACCOUNT_SUSPENDED" });
 
     // Other members are not affected; suspending again is a conflict.
     await get(ctx.tokens.owner, "/memberships").expect(200);
@@ -814,7 +815,8 @@ describe("Users and devices (Step 6)", () => {
 
     // After: the same device's signed clock-out is refused, and the entry stays open.
     const clockOutEvent = { ...offlineEvent(5), eventType: "CLOCK_OUT", summaryText: "Repaired a damaged sign while offline.", taskCategory: "TRAFFIC_SIGN" };
-    expect(await sync(clockOutEvent)).toEqual({ clientEventId: clockOutEvent.clientEventId, status: "REJECTED", reason: "DEVICE_KEY_NOT_REGISTERED" });
+    // Step 9: a revoked key has its own reason (it was DEVICE_KEY_NOT_REGISTERED before).
+    expect(await sync(clockOutEvent)).toEqual({ clientEventId: clockOutEvent.clientEventId, status: "REJECTED", reason: "DEVICE_KEY_REVOKED" });
     expect(await prisma.timeEntry.findUniqueOrThrow({ where: { id: clockIn.timeEntryId } })).toMatchObject({ status: "ACTIVE", clockOutAt: null });
     // The key is not the session: the device stays signed in.
     await get(session.accessToken, "/shifts").expect(200);

@@ -21,6 +21,8 @@ export interface RejectedClockAttemptInput {
   longitude: number;
   accuracyMeters: number;
   mockLocationSuspected: boolean;
+  /** Step 9: MockLocationState as the phone reported it (null when it did not say). */
+  mockLocationState?: string | null;
   distanceMeters?: number | null;
   allowedRadiusMeters?: number | null;
   requiredAccuracyMeters?: number | null;
@@ -65,6 +67,7 @@ export class RejectedClockAttemptsService {
           longitude: input.longitude,
           accuracyMeters: input.accuracyMeters,
           mockLocationSuspected: input.mockLocationSuspected,
+          mockLocationState: input.mockLocationState ?? null,
           distanceMeters: input.distanceMeters ?? null,
           allowedRadiusMeters: input.allowedRadiusMeters ?? null,
           requiredAccuracyMeters: input.requiredAccuracyMeters ?? null,

@@ -1,5 +1,5 @@
 import type { JoinApplicationInput } from "@fieldmaster/api-client";
-import { FileAssetPurpose, GovernmentIdType, PRIVACY_NOTICE_VERSION } from "@fieldmaster/shared-types";
+import { FileAssetPurpose, GovernmentIdType, PRIVACY_NOTICE_VERSION, type OnboardingFilePurpose } from "@fieldmaster/shared-types";
 import { getErrorCode } from "@fieldmaster/i18n";
 import {
   isValidBankAccountNumber,
@@ -203,7 +203,7 @@ export function classifyUploadError(error: unknown): UploadRefusal {
 export type SubmitRefusal =
   | { kind: "linkInvalid" }
   | { kind: "field"; field: JoinField; error: JoinError }
-  | { kind: "upload"; purpose: FileAssetPurpose }
+  | { kind: "upload"; purpose: OnboardingFilePurpose }
   | { kind: "phoneTaken" }
   | { kind: "other" };
 

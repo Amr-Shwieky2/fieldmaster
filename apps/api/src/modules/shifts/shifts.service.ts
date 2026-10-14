@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { NotificationType, ShiftStatus, ShiftType } from "@fieldmaster/shared-types";
+import { NotificationType, ShiftStatus, ShiftType, TemporaryPointStatus } from "@fieldmaster/shared-types";
 import { toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
@@ -86,15 +86,30 @@ export class ShiftsService {
         ...(scope ? { assignments: { some: { workerProfileId: scope.workerProfileId, removedAt: null } } } : {}),
       },
       // The project budget is Owner-only: everyone else's query never reads it.
-      include: { assignments: { where: { removedAt: null } }, site: true, project: { select: projectSelectFor(viewer) } },
+      // A worker sees only their own assignment, never who else is on the shift (Step 9: no other worker's data).
+      include: {
+        assignments: { where: { removedAt: null, ...(scope ? { workerProfileId: scope.workerProfileId } : {}) } },
+        site: true,
+        project: { select: projectSelectFor(viewer) },
+      },
       orderBy: { scheduledStart: "desc" },
       take: 200,
     });
   }
 
+  /**
+   * One shift. Step 9 adds, for everyone, `managerName` (the shift manager's
+   * full name). A Worker (only for a shift they are assigned to) gets what the
+   * app's shift screen shows: the project's name (never its budget), the site
+   * with its instructions and position, the geofence (center, radius, required
+   * GPS accuracy), the check-in method, and only the temporary check-in points
+   * usable right now (active, not revoked, not expired). Managers keep every
+   * point, as before.
+   */
   async getById(organizationId: string, id: string, viewer: AuthenticatedUser, scope?: { workerProfileId: string }) {
     // A malformed id is simply not found (a @db.Uuid column would make Prisma throw a 500).
     if (!UUID_PATTERN.test(id)) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
+    const now = new Date();
     const shift = await this.prisma.shift.findFirst({
       where: {
         id,
@@ -102,15 +117,22 @@ export class ShiftsService {
         ...(scope ? { assignments: { some: { workerProfileId: scope.workerProfileId, removedAt: null } } } : {}),
       },
       include: {
-        assignments: { where: { removedAt: null }, include: { worker: { include: { membership: { include: { user: true } } } } } },
+        // Managers get every assignment with the worker's name and phone. A worker gets only their own assignment,
+        // without user details: co-workers' names and phone numbers are not theirs to see (Step 9).
+        assignments: scope
+          ? { where: { removedAt: null, workerProfileId: scope.workerProfileId } }
+          : { where: { removedAt: null }, include: { worker: { include: { membership: { include: { user: true } } } } } },
         site: true,
         project: { select: projectSelectFor(viewer) },
         geofence: true,
-        temporaryCheckInPoints: true,
+        temporaryCheckInPoints: scope
+          ? { where: { status: TemporaryPointStatus.ACTIVE, revokedAt: null, expiresAt: { gt: now } }, orderBy: { createdAt: "asc" } }
+          : true,
       },
     });
     if (!shift) throw new AppException(404, ErrorCodes.NOT_FOUND, "Shift not found.");
-    return shift;
+    const manager = await this.prisma.user.findUnique({ where: { id: shift.managerId }, select: { fullLegalName: true } });
+    return { ...shift, managerName: manager?.fullLegalName ?? null };
   }
 
   async assignWorker(organizationId: string, shiftId: string, workerProfileId: string, actor: AuthenticatedUser, correlationId: string) {

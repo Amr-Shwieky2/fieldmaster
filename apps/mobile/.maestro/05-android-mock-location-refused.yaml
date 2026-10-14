@@ -1,0 +1,47 @@
+# Android only: a fake location is detected and refused.
+# Maestro's setLocation on Android works through a mock location provider, so
+# expo-location reports the fix as mocked: the app sends mockLocationState
+# DETECTED and the server's existing mock-location rule refuses the clock-in.
+# Checks: the Arabic refusal, and that باسل عازر is still not on shift.
+# Run it last (config.yaml): the mock provider stays active on the emulator
+# until it restarts, which would make the other flows' clock-ins refused too.
+# The refused attempt is stored as evidence (the admin web's site violations).
+appId: com.fieldmaster.mobile
+name: 05-android-mock-location-refused
+tags:
+  - work-flow
+  - android-only
+---
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - runFlow:
+          file: subflows/login.yaml
+          env:
+            NAME: "باسل عازر"
+      - setLocation:
+          latitude: 32.0853
+          longitude: 34.7818
+      - extendedWaitUntil:
+          visible:
+            id: "home-next-shift-clock-in"
+          timeout: 30000
+      - tapOn:
+          id: "home-next-shift-clock-in"
+      - scrollUntilVisible:
+          element:
+            id: "clock-in-submit"
+          direction: DOWN
+      - tapOn:
+          id: "clock-in-submit"
+      - extendedWaitUntil:
+          visible: "تم رفض الطلب لأن الجهاز يستخدم موقعًا وهميًا. أوقف تطبيقات تغيير الموقع وحاول مرة أخرى."
+          timeout: 60000
+      - assertNotVisible:
+          id: "clock-receipt"
+      - tapOn: "إلغاء"
+      - extendedWaitUntil:
+          visible:
+            id: "home-status-off-shift"
+          timeout: 30000

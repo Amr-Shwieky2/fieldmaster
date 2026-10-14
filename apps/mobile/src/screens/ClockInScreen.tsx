@@ -1,5 +1,4 @@
 import { useRef, useState } from "react";
-import * as Location from "expo-location";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Linking, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,32 +6,38 @@ import { useTranslations } from "use-intl";
 import { NetworkError } from "@fieldmaster/api-client";
 import { AppText } from "../components/AppText";
 import { Button } from "../components/Button";
+import { ClockReceipt } from "../components/ClockReceipt";
 import { ConnectionBanner } from "../components/ConnectionBanner";
+import { PhotoPicker } from "../components/PhotoPicker";
 import { ScreenHeader } from "../components/ScreenHeader";
 import { ErrorView } from "../components/StateViews";
 import { useErrorMessage, useFormat, useShiftTitle } from "../i18n/hooks";
+import { uploadPhotos } from "../lib/attachments";
 import { useAuth } from "../lib/auth-context";
-import { useOfflineSync } from "../lib/offline-sync-context";
 import { getDeviceId } from "../lib/device-id";
+import { clockLocationFields, readLocation, type LocationFailure, type LocationReading } from "../lib/location";
+import { useOfflineSync } from "../lib/offline-sync-context";
+import type { AttendancePhoto } from "../lib/photos";
 import { colors, spacing } from "../lib/theme";
 import type { RootStackParamList } from "../navigation/types";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ClockIn">;
 
-type Step = "idle" | "locating" | "submitting";
+type Step = { name: "idle" } | { name: "locating" } | { name: "uploading"; current: number; total: number } | { name: "submitting" };
 
-/**
- * Why the last attempt failed. The API error itself is kept and turned into Arabic at render time.
- * `canAskAgain: false` means the phone no longer shows the permission prompt: only the settings can fix it.
- */
-type Failure =
-  | { kind: "permission"; canAskAgain: boolean }
-  | { kind: "servicesOff" }
-  | { kind: "location" }
-  | { kind: "request"; cause: unknown };
+/** Why the last attempt failed. The API error itself is kept and turned into Arabic at render time. */
+type Failure = LocationFailure | { kind: "request"; cause: unknown };
 
-/** What happened: clocked in on the server, or saved on the phone to sync later. `at` is an ISO instant. */
-type Receipt = { kind: "success" | "queued"; at: string };
+/** What happened: clocked in on the server, or saved on the phone to sync later. Times are ISO instants. */
+type Receipt = {
+  kind: "success" | "queued";
+  /** The time shown in the body: the server's clock-in time, or the phone's time when the server sent none / while queued. */
+  at: string;
+  serverTime: string | null;
+  deviceTime: string;
+  referenceId: string;
+  photosDropped: boolean;
+};
 
 function isInstant(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && !Number.isNaN(Date.parse(value));
@@ -44,13 +49,10 @@ function serverClockInAt(result: { timeEntry?: { clockInAt?: unknown } | null } 
   return isInstant(value) ? value : null;
 }
 
-/** True only when the phone reports that its location services (GPS) are switched off. */
-async function locationServicesOff(): Promise<boolean> {
-  try {
-    return (await Location.hasServicesEnabledAsync()) === false;
-  } catch {
-    return false;
-  }
+/** The clock event's id from the answer, when present. */
+function clockEventId(result: { clockEvent?: { id?: unknown } | null } | null | undefined): string | null {
+  const id = result?.clockEvent?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 /** The app's page in the phone settings, where a permanently refused location permission is turned back on. */
@@ -65,78 +67,101 @@ async function openAppSettings() {
 export function ClockInScreen({ route, navigation }: Props) {
   const { shiftId } = route.params;
   const t = useTranslations("clockIn");
+  const tClock = useTranslations("clock");
   const tc = useTranslations("common");
   const format = useFormat();
   const errorMessage = useErrorMessage();
   const shiftTitle = useShiftTitle()({ title: route.params.shiftTitle });
   const { client } = useAuth();
   const { queueOfflineEvent } = useOfflineSync();
-  const [step, setStep] = useState<Step>("idle");
+  const [step, setStep] = useState<Step>({ name: "idle" });
   const [failure, setFailure] = useState<Failure | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [photos, setPhotos] = useState<AttendancePhoto[]>([]);
   const inFlight = useRef(false);
-  const busy = step !== "idle";
+  const busy = step.name !== "idle";
 
   async function handleClockIn() {
     if (inFlight.current) return;
     inFlight.current = true;
     setFailure(null);
-    setStep("locating");
+    setStep({ name: "locating" });
     try {
-      let position: Location.LocationObject;
-      try {
-        const permission = await Location.requestForegroundPermissionsAsync();
-        if (permission.status !== "granted") {
-          // iOS answers "denied" while location services are off for the whole phone.
-          setFailure((await locationServicesOff()) ? { kind: "servicesOff" } : { kind: "permission", canAskAgain: permission.canAskAgain !== false });
-          return;
-        }
-        position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      } catch {
-        // GPS switched off (Android rejects) versus a timeout or a weak signal.
-        setFailure((await locationServicesOff()) ? { kind: "servicesOff" } : { kind: "location" });
+      const location = await readLocation();
+      if (!location.ok) {
+        setFailure(location.failure);
         return;
       }
-      setStep("submitting");
+      const { reading } = location;
 
       const deviceId = await getDeviceId();
       const idempotencyKey = `clockin-${shiftId}-${Date.now()}`;
-      const deviceTimestamp = new Date().toISOString();
-      const locationFields = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracyMeters: position.coords.accuracy ?? 9999,
-        altitude: position.coords.altitude ?? undefined,
-        locationProvider: "expo-location",
-        mockLocationSuspected: position.mocked ?? false,
-      };
+      const locationFields = clockLocationFields(reading);
 
       try {
-        const result = await client.clockIn(
-          { shiftId, deviceId, clientEventId: idempotencyKey, deviceTimestamp, ...locationFields, origin: "ONLINE" },
-          idempotencyKey,
-        );
-        setReceipt({ kind: "success", at: serverClockInAt(result) ?? deviceTimestamp });
+        // Photos first (they need the network); an upload already done by an earlier attempt is reused.
+        const photoAssetIds = await uploadPhotos(client, photos, {
+          onProgress: (current, total) => setStep({ name: "uploading", current, total }),
+          onUploaded: (key, assetId) => setPhotos((list) => list.map((photo) => (photo.key === key ? { ...photo, assetId } : photo))),
+        });
+        setStep({ name: "submitting" });
+        const deviceTimestamp = new Date().toISOString();
+        try {
+          const result = await client.clockIn(
+            {
+              shiftId,
+              deviceId,
+              clientEventId: idempotencyKey,
+              deviceTimestamp,
+              ...locationFields,
+              origin: "ONLINE",
+              mockLocationState: reading.mockLocationState,
+              locationSignals: reading.locationSignals,
+              ...(photoAssetIds.length > 0 ? { photoAssetIds } : {}),
+            },
+            idempotencyKey,
+          );
+          const serverTime = serverClockInAt(result);
+          setReceipt({
+            kind: "success",
+            at: serverTime ?? deviceTimestamp,
+            serverTime,
+            deviceTime: deviceTimestamp,
+            referenceId: clockEventId(result) ?? idempotencyKey,
+            photosDropped: false,
+          });
+        } catch (err) {
+          if (!(err instanceof NetworkError)) throw err;
+          await queueClockIn(idempotencyKey, deviceTimestamp, locationFields, reading.mockLocationState);
+        }
       } catch (err) {
         if (!(err instanceof NetworkError)) throw err;
-        // No connectivity: capture, sign, and queue the event locally
-        // instead of failing outright (spec section 20.1). The server will
-        // validate the geofence/shift rules for real once this syncs.
-        await queueOfflineEvent({
-          clientEventId: idempotencyKey,
-          eventType: "CLOCK_IN",
-          shiftId,
-          deviceTimestamp,
-          ...locationFields,
-        });
-        setReceipt({ kind: "queued", at: deviceTimestamp });
+        // A photo upload found no connection: the clock-in is saved without the photos.
+        await queueClockIn(idempotencyKey, new Date().toISOString(), locationFields, reading.mockLocationState);
       }
     } catch (err) {
       setFailure({ kind: "request", cause: err });
     } finally {
       inFlight.current = false;
-      setStep("idle");
+      setStep({ name: "idle" });
     }
+  }
+
+  /**
+   * No connectivity: capture, sign and queue the event locally instead of
+   * failing outright (spec section 20.1). The server checks the geofence and
+   * the shift for real once it syncs. Only the signed event's own fields are
+   * queued (the mock-location state is one of them; the movement signals are
+   * not): photos are never stored for later (they need the network).
+   */
+  async function queueClockIn(
+    clientEventId: string,
+    deviceTimestamp: string,
+    locationFields: ReturnType<typeof clockLocationFields>,
+    mockLocationState: LocationReading["mockLocationState"],
+  ) {
+    await queueOfflineEvent({ clientEventId, eventType: "CLOCK_IN", shiftId, deviceTimestamp, ...locationFields, mockLocationState });
+    setReceipt({ kind: "queued", at: deviceTimestamp, serverTime: null, deviceTime: deviceTimestamp, referenceId: clientEventId, photosDropped: photos.length > 0 });
   }
 
   // Back to the Home screen already in the stack (it reloads on focus), not a second copy of it.
@@ -146,34 +171,29 @@ export function ClockInScreen({ route, navigation }: Props) {
     const queued = receipt.kind === "queued";
     const time = format.time(receipt.at);
     return (
-      <SafeAreaView style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.receiptScroll}>
-          <View
-            aria-live="polite"
-            style={[styles.receipt, { backgroundColor: queued ? colors.warningSoft : colors.successSoft }]}
-          >
-            <AppText accessibilityRole="header" size="title" weight="bold" color={queued ? colors.warning : colors.success}>
-              {queued ? t("queuedTitle") : t("successTitle")}
-            </AppText>
+      <ClockReceipt
+        action="CLOCK_IN"
+        queued={queued}
+        title={queued ? t("queuedTitle") : t("successTitle")}
+        shiftTitle={shiftTitle}
+        serverTime={receipt.serverTime}
+        deviceTime={receipt.deviceTime}
+        referenceId={receipt.referenceId}
+        notes={receipt.photosDropped ? [tClock("photosNotSent")] : []}
+        doneLabel={t("backHome")}
+        onDone={goHome}
+      >
+        {queued ? (
+          <>
+            <AppText size="large">{t("queuedBody")}</AppText>
             <AppText size="large" weight="semibold">
-              {shiftTitle}
+              {t("queuedAt", { time })}
             </AppText>
-            {queued ? (
-              <>
-                <AppText size="large">{t("queuedBody")}</AppText>
-                <AppText size="large" weight="semibold">
-                  {t("queuedAt", { time })}
-                </AppText>
-              </>
-            ) : (
-              <AppText size="large">{t("successBody", { time })}</AppText>
-            )}
-          </View>
-          <View style={styles.actions}>
-            <Button label={t("backHome")} onPress={goHome} />
-          </View>
-        </ScrollView>
-      </SafeAreaView>
+          </>
+        ) : (
+          <AppText size="large">{t("successBody", { time })}</AppText>
+        )}
+      </ClockReceipt>
     );
   }
 
@@ -190,6 +210,9 @@ export function ClockInScreen({ route, navigation }: Props) {
     }
   }
 
+  const busyLabel =
+    step.name === "uploading" ? tClock("uploadingPhotos", { current: step.current, total: step.total }) : step.name === "submitting" ? t("submitting") : t("locating");
+
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -203,6 +226,10 @@ export function ClockInScreen({ route, navigation }: Props) {
           <AppText color={colors.muted}>{t("help")}</AppText>
         </View>
 
+        <View style={styles.photos}>
+          <PhotoPicker photos={photos} onChange={setPhotos} disabled={busy} />
+        </View>
+
         {failure ? <ErrorView message={failureMessage(failure)} /> : null}
         {failure?.kind === "permission" && !failure.canAskAgain ? (
           <View style={styles.settings}>
@@ -211,12 +238,7 @@ export function ClockInScreen({ route, navigation }: Props) {
         ) : null}
 
         <View style={styles.actions}>
-          <Button
-            label={t("action")}
-            busy={busy}
-            busyLabel={step === "submitting" ? t("submitting") : t("locating")}
-            onPress={handleClockIn}
-          />
+          <Button testID="clock-in-submit" label={t("action")} busy={busy} busyLabel={busyLabel} onPress={handleClockIn} />
           <Button label={tc("cancel")} variant="secondary" disabled={busy} onPress={() => navigation.goBack()} />
         </View>
       </ScrollView>
@@ -228,8 +250,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   scroll: { flexGrow: 1, paddingBottom: spacing.xl },
   body: { paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.lg, gap: spacing.md },
+  photos: { paddingHorizontal: spacing.xl, paddingBottom: spacing.lg },
   settings: { paddingHorizontal: spacing.xl, marginBottom: spacing.md },
   actions: { paddingHorizontal: spacing.xl, gap: spacing.md },
-  receiptScroll: { flexGrow: 1, justifyContent: "center", paddingVertical: spacing.xl, gap: spacing.xl },
-  receipt: { marginHorizontal: spacing.xl, borderRadius: 16, padding: spacing.xl, gap: spacing.md },
 });

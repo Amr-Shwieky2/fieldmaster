@@ -12,6 +12,7 @@ import { ForgottenStampService } from "./forgotten-stamp.service";
 import { RejectedClockAttemptsService } from "./rejected-clock-attempts.service";
 import { AttendanceRecordsService } from "./attendance-records.service";
 import { AttendanceRecordsController } from "./attendance-records.controller";
+import { AttendanceAttachmentsService } from "./attendance-attachments.service";
 
 @Module({
   imports: [SitesModule, ShiftsModule],
@@ -25,6 +26,7 @@ import { AttendanceRecordsController } from "./attendance-records.controller";
     ForgottenStampService,
     RejectedClockAttemptsService,
     AttendanceRecordsService,
+    AttendanceAttachmentsService,
   ],
   exports: [ForgottenStampService, ClockEventsService],
 })

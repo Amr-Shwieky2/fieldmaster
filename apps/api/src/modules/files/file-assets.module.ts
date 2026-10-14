@@ -6,8 +6,9 @@ import { MALWARE_SCANNER, NoopMalwareScanner } from "./malware-scanner";
 
 /**
  * Uploaded files (Step 8): upload validation, metadata stripping and the
- * malware-scan hook (UploadsService, used by the public onboarding routes),
- * and the Owner's audited view URLs (`GET /file-assets/:id/view-url`).
+ * malware-scan hook (UploadsService, used by the public onboarding routes and,
+ * since Step 9, by the mobile app's attachments), and the Owner's audited view
+ * URLs (`GET /file-assets/:id/view-url`).
  */
 @Module({
   controllers: [FileAssetsController],

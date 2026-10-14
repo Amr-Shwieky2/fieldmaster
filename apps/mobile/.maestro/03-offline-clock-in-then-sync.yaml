@@ -1,0 +1,70 @@
+# كريم حمدان starts today's shift with no connection, then the phone syncs it.
+# Checks: the offline banner; the clock-in signed and saved on the phone; the
+# receipt «بانتظار المزامنة» with the client event id; Home's «بدء الدوام
+# بانتظار المزامنة»; after the connection is back, the queue syncs by itself
+# and Home shows the worker on shift (the server accepted the event).
+# Android only: Maestro switches airplane mode on Android (the iOS simulator
+# has none); on iOS this flow does nothing.
+appId: com.fieldmaster.mobile
+name: 03-offline-clock-in-then-sync
+tags:
+  - work-flow
+  - android-only
+---
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - runFlow:
+          file: subflows/login.yaml
+          env:
+            NAME: "كريم حمدان"
+      - extendedWaitUntil:
+          visible:
+            id: "home-next-shift-clock-in"
+          timeout: 30000
+
+      # No connection.
+      - setAirplaneMode: enabled
+      - extendedWaitUntil:
+          visible: "لا يوجد اتصال بالإنترنت"
+          timeout: 30000
+
+      - tapOn:
+          id: "home-next-shift-clock-in"
+      - scrollUntilVisible:
+          element:
+            id: "clock-in-submit"
+          direction: DOWN
+      - tapOn:
+          id: "clock-in-submit"
+      - extendedWaitUntil:
+          visible:
+            id: "clock-receipt"
+          timeout: 60000
+      - assertVisible: "تم حفظ بدء الدوام"
+      - assertVisible: "بانتظار المزامنة"
+      - assertVisible: "يُحدَّد عند المزامنة"
+      - assertVisible:
+          id: "receipt-reference-id"
+      - scrollUntilVisible:
+          element:
+            id: "receipt-done"
+          direction: DOWN
+      - tapOn:
+          id: "receipt-done"
+      - extendedWaitUntil:
+          visible:
+            id: "home-status-pending"
+          timeout: 30000
+      - assertVisible: "بدء الدوام بانتظار المزامنة"
+
+      # Back online: the queue syncs by itself (connection change, or the
+      # 60-second retry at the latest) and Home reloads from the server.
+      - setAirplaneMode: disabled
+      - extendedWaitUntil:
+          visible:
+            id: "home-status-on-shift"
+          timeout: 150000
+      - assertVisible: "أنت في الدوام الآن"
+      - assertNotVisible: "بدء الدوام بانتظار المزامنة"

@@ -16,3 +16,10 @@ process.env.NODE_ENV ||= "test";
 // (and back off) explicitly for the cases that need it.
 process.env.APP_ENV ||= "development";
 process.env.DEV_LOGIN_ENABLED ||= "false";
+
+// Node 19+ keeps client HTTP connections alive by default, and supertest starts and stops a listener per
+// request on the same server object. Twice a POST came back with a 200 it could not have produced (never
+// reproduced); a response read on a reused connection is the likely cause. One connection per request rules
+// that out; the API's own answers are untouched.
+const http = require("node:http");
+http.globalAgent = new http.Agent({ keepAlive: false });

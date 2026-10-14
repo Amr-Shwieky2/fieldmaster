@@ -280,6 +280,7 @@ describe("Offline attendance sync (e2e, spec section 20)", () => {
       .expect(201);
 
     expect(response.body.results[0].status).toBe("REJECTED");
-    expect(response.body.results[0].reason).toBe("DEVICE_KEY_NOT_REGISTERED");
+    // Step 9: a revoked key has its own reason (a key that was never registered keeps DEVICE_KEY_NOT_REGISTERED, above).
+    expect(response.body.results[0].reason).toBe("DEVICE_KEY_REVOKED");
   });
 });

@@ -392,6 +392,31 @@ async function main() {
     },
   });
 
+  // ── Step 9: a working day TODAY for the mobile app ─────────────────
+  // A shift at تقاطع تل أبيب المركزي (32.0853, 34.7818; 150 m geofence) that started an hour ago, so a
+  // worker can clock in inside the geofence right after seeding; a temporary supervisor on it; and a
+  // Night Turan covering now, so the emergency button shows. All relative to the time the seed runs.
+  console.log("Creating today's shift, temporary supervisor and Night Turan for the mobile app...");
+  const todayStart = new Date(Date.now() - 60 * 60_000);
+  const todayEnd = new Date(Date.now() + 8 * 60 * 60_000);
+  const todayShift = await createShift(ShiftType.STANDARD, 0, todayStart, todayEnd, fm1User.id);
+  for (const worker of [workers[0], workers[3], workers[4]]) {
+    await prisma.shiftAssignment.create({ data: { id: id(), shiftId: todayShift.id, workerProfileId: worker.profile.id, assignedBy: fm1User.id } });
+  }
+  await prisma.temporarySupervisorAssignment.create({
+    data: {
+      id: id(), shiftId: todayShift.id, workerProfileId: workers[3].profile.id,
+      activatedAt: todayStart, expiresAt: todayEnd, assignedBy: fm1User.id, canOpenCheckInPoints: true,
+    },
+  });
+  await prisma.turanAssignment.create({
+    data: {
+      id: id(), organizationId: org.id, turanType: TuranType.NIGHT_TURAN, status: TuranStatus.SCHEDULED,
+      startAt: new Date(Date.now() - 2 * 60 * 60_000), endAt: new Date(Date.now() + 22 * 60 * 60_000),
+      assignedWorkerProfileId: workers[1].profile.id, createdBy: fm1User.id,
+    },
+  });
+
   // ── Time entries: approved, pending, rejected ───────────────────────
   console.log("Creating attendance records...");
   async function approvedEntry(shift: any, worker: any, hoursWorked: number, fullDayCredit = false) {

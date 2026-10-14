@@ -11,6 +11,7 @@ import {
   ShiftType,
   TimeEntryStatus,
   TuranStatus,
+  TuranType,
 } from "@fieldmaster/shared-types";
 import { calculateShiftCompensation, computeEmergencyCompensation, toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -27,6 +28,25 @@ import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { StartEmergencyCalloutDto, EndEmergencyCalloutDto } from "./dto/emergency-callout.dto";
 
 const PLACEHOLDER_SHIFT_DURATION_MS = 8 * 60 * 60 * 1000;
+
+/** `GET /emergency-callouts/eligibility` answer (the contract's `EmergencyEligibility`). */
+export interface EmergencyEligibility {
+  eligible: boolean;
+  /** The error code `POST /emergency-callouts/start` would answer now; null when eligible. */
+  reason: string | null;
+  turanAssignment: {
+    id: string;
+    organizationId: string;
+    turanType: string;
+    status: string;
+    startAt: Date;
+    endAt: Date;
+    notes: string | null;
+    assignedWorkerProfileId: string;
+    backupWorkerProfileId: string | null;
+  } | null;
+  activeCallout: { calloutId: string; timeEntryId: string; actualStartClick: Date; compensatedStart: Date } | null;
+}
 
 @Injectable()
 export class EmergencyCalloutsService {
@@ -185,6 +205,65 @@ export class EmergencyCalloutsService {
     });
 
     return result.body;
+  }
+
+  /**
+   * Whether the caller may start an emergency call-out right now (Step 9),
+   * for the caller only. The same checks, in the same order, as a worker's
+   * own `start` -- a worker profile, no open entry, an ACTIVE or SCHEDULED
+   * Night Turan assignment covering now -- without creating anything.
+   * `reason` is the code `start` would answer. Also returned: the Turan
+   * assignment that makes the caller eligible (or the next one that would),
+   * and the call-out already running, if any (the app shows its timer).
+   */
+  async eligibility(organizationId: string, actor: AuthenticatedUser): Promise<EmergencyEligibility> {
+    const workerProfileId = actor.workerProfileId;
+    if (!workerProfileId) return { eligible: false, reason: ErrorCodes.FORBIDDEN, turanAssignment: null, activeCallout: null };
+
+    const now = new Date();
+    const [openEntry, eligibleAssignmentId] = await Promise.all([
+      this.prisma.timeEntry.findFirst({
+        where: { workerProfileId, status: TimeEntryStatus.ACTIVE },
+        select: { id: true, isEmergency: true, emergencyCallout: { select: { id: true, actualStartClick: true, compensatedStart: true, turanAssignmentId: true } } },
+      }),
+      this.turanAssignments.isEligibleForEmergency(workerProfileId, now),
+    ]);
+    const running = openEntry?.isEmergency && openEntry.emergencyCallout ? openEntry.emergencyCallout : null;
+    const activeCallout = running && openEntry
+      ? { calloutId: running.id, timeEntryId: openEntry.id, actualStartClick: running.actualStartClick, compensatedStart: running.compensatedStart }
+      : null;
+
+    // The assignment shown: the running call-out's, else the one covering now, else the next one coming.
+    const assignmentId = running?.turanAssignmentId ?? eligibleAssignmentId;
+    const turanAssignment = assignmentId
+      ? await this.prisma.turanAssignment.findFirst({ where: { id: assignmentId, organizationId } })
+      : await this.prisma.turanAssignment.findFirst({
+          where: {
+            organizationId,
+            assignedWorkerProfileId: workerProfileId,
+            turanType: TuranType.NIGHT_TURAN,
+            status: { in: [TuranStatus.SCHEDULED, TuranStatus.ACTIVE] },
+            endAt: { gte: now },
+          },
+          orderBy: { startAt: "asc" },
+        });
+    const assignment = turanAssignment
+      ? {
+          id: turanAssignment.id,
+          organizationId: turanAssignment.organizationId,
+          turanType: turanAssignment.turanType,
+          status: turanAssignment.status,
+          startAt: turanAssignment.startAt,
+          endAt: turanAssignment.endAt,
+          notes: turanAssignment.notes,
+          assignedWorkerProfileId: turanAssignment.assignedWorkerProfileId,
+          backupWorkerProfileId: turanAssignment.backupWorkerProfileId,
+        }
+      : null;
+
+    if (openEntry) return { eligible: false, reason: ErrorCodes.ACTIVE_TIME_ENTRY_EXISTS, turanAssignment: assignment, activeCallout };
+    if (!eligibleAssignmentId) return { eligible: false, reason: ErrorCodes.EMERGENCY_NOT_ELIGIBLE, turanAssignment: assignment, activeCallout: null };
+    return { eligible: true, reason: null, turanAssignment: assignment, activeCallout: null };
   }
 
   async end(organizationId: string, dto: EndEmergencyCalloutDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string) {

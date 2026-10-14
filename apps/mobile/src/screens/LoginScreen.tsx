@@ -10,6 +10,7 @@ import { AppTextInput } from "../components/AppTextInput";
 import { Button } from "../components/Button";
 import { LtrText } from "../components/LtrText";
 import { useEnumLabel, useErrorMessage } from "../i18n/hooks";
+import { accountStateFromError } from "../lib/account-state";
 import { useAuth } from "../lib/auth-context";
 import { getDeviceId } from "../lib/device-id";
 import { useOfflineSync } from "../lib/offline-sync-context";
@@ -63,7 +64,7 @@ function organizationsFrom(error: unknown): OrgOption[] {
 }
 
 export function LoginScreen() {
-  const { client, login } = useAuth();
+  const { client, login, showAccountState } = useAuth();
   const { isOnline } = useOfflineSync();
   const t = useTranslations("auth");
   const tApp = useTranslations("app");
@@ -123,8 +124,14 @@ export function LoginScreen() {
       const session = await client.devLogin({ membershipId: user.membershipId, deviceId, platform: currentPlatform() });
       await login(session);
     } catch (err) {
-      setQuickLoginFailure({ cause: err });
       setQuickLoginId(null);
+      // Pending approval, rejected or suspended: its own screen, nothing else is reachable.
+      const accountState = accountStateFromError(err);
+      if (accountState) {
+        showAccountState(accountState);
+        return;
+      }
+      setQuickLoginFailure({ cause: err });
     }
   }
 
@@ -166,6 +173,13 @@ export function LoginScreen() {
       });
       await login(session);
     } catch (err) {
+      // The code was right, but the application is pending approval or was rejected, or the account is
+      // suspended: the account-state screen replaces everything (NO_ACTIVE_MEMBERSHIP stays an error here).
+      const accountState = accountStateFromError(err);
+      if (accountState) {
+        showAccountState(accountState);
+        return;
+      }
       const errorCode = getErrorCode(err);
       if (errorCode === "ORGANIZATION_SELECTION_REQUIRED") {
         const options = organizationsFrom(err);

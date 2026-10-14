@@ -1,0 +1,22 @@
+# Signs in with the dev quick login (the API in test mode): taps the member's
+# name in «تسجيل دخول تجريبي سريع» on the login screen. The login screen is
+# not part of the work flow, so it is matched by its Arabic text, not testIDs.
+# The name is matched anywhere in the entry: iOS exposes the whole entry as
+# one element labelled «تسجيل الدخول باسم <name> (عامل)».
+# Usage: runFlow with env NAME (a seeded worker's full name).
+appId: com.fieldmaster.mobile
+---
+- runFlow: open-app.yaml
+- extendedWaitUntil:
+    visible: "تسجيل دخول تجريبي سريع"
+    timeout: 60000
+- scrollUntilVisible:
+    element:
+      text: ".*${NAME}.*"
+    direction: DOWN
+    timeout: 30000
+- tapOn: ".*${NAME}.*"
+- extendedWaitUntil:
+    visible:
+      id: "home-screen"
+    timeout: 30000

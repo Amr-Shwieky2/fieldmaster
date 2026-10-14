@@ -177,7 +177,9 @@ export function stripPngMetadata(bytes: Buffer): Buffer {
  * document information dictionary, XMP streams, earlier revisions kept by
  * incremental updates) safely needs a PDF parser and writer, which the API
  * does not ship. A PDF identity document is only ever shown to Owners,
- * through a short-lived signed URL.
+ * through a short-lived signed URL. Audio (Step 9 voice summaries) is stored
+ * as received too: a recording the phone just made carries no location or
+ * camera data, and rewriting a container needs a media library.
  */
 export function stripMetadata(bytes: Buffer, contentType: DetectedContentType): Buffer {
   switch (contentType) {
@@ -186,6 +188,11 @@ export function stripMetadata(bytes: Buffer, contentType: DetectedContentType): 
     case DetectedContentType.PNG:
       return stripPngMetadata(bytes);
     case DetectedContentType.PDF:
+    case DetectedContentType.MP4_AUDIO:
+    case DetectedContentType.WEBM_AUDIO:
+    case DetectedContentType.OGG_AUDIO:
+    case DetectedContentType.WAV_AUDIO:
+    case DetectedContentType.MP3_AUDIO:
       return bytes;
   }
 }

@@ -1,0 +1,116 @@
+# محمود جبارين, on a Night Turan that covers now, runs an emergency call-out.
+# Checks: the current Night Turan and the emergency button on Home (shown only
+# when the API says he is eligible); the start confirmation with «+60 دقيقة
+# قبل البدء»; the live timer; «+15 دقيقة للعودة»; ending without a summary is
+# refused in Arabic; with a summary, the breakdown (actual and compensated
+# start and end, total compensated duration); back on Home, no emergency button
+# (the Turan is completed).
+# The phone's location is only recorded with the call-out (no geofence).
+appId: com.fieldmaster.mobile
+name: 04-night-turan-emergency
+tags:
+  - work-flow
+---
+- runFlow: subflows/site-location.yaml
+- runFlow:
+    file: subflows/login.yaml
+    env:
+      NAME: "محمود جبارين"
+
+# Home: the Night Turan and the emergency button.
+- extendedWaitUntil:
+    visible:
+      id: "home-emergency-start"
+    timeout: 30000
+- assertVisible: "المناوبة الحالية: مناوبة ليلية"
+- tapOn:
+    id: "home-emergency-start"
+
+# Eligible: the explanation, then the confirmation.
+- extendedWaitUntil:
+    visible:
+      id: "emergency-start"
+    timeout: 30000
+# "+60" sits in a left-to-right isolate inside the Arabic text (invisible marks around it).
+- assertVisible: ".*\\+60.*دقيقة قبل البدء"
+- tapOn:
+    id: "emergency-start"
+- assertVisible:
+    id: "emergency-confirm"
+- assertVisible: "تأكيد بدء استدعاء الطوارئ"
+- tapOn:
+    id: "emergency-confirm-start"
+
+# Running: the live timer and the end with a mandatory summary.
+- extendedWaitUntil:
+    visible:
+      id: "emergency-timer"
+    timeout: 60000
+- assertVisible: "استدعاء الطوارئ جارٍ"
+- assertVisible: ".*\\+15.*دقيقة للعودة"
+- scrollUntilVisible:
+    element:
+      id: "emergency-end"
+    direction: DOWN
+- tapOn:
+    id: "emergency-end"
+- scrollUntilVisible:
+    element:
+      id: "emergency-summary-error"
+    direction: UP
+- assertVisible: "ملخص أعمال الطوارئ مطلوب قبل الإنهاء."
+- assertNotVisible:
+    id: "emergency-ended"
+- tapOn:
+    id: "emergency-summary"
+- inputText: "Maestro: repaired the traffic light controller"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "emergency-end"
+    direction: DOWN
+- tapOn:
+    id: "emergency-end"
+
+# The breakdown, from the server's answer.
+- extendedWaitUntil:
+    visible:
+      id: "emergency-ended"
+    timeout: 60000
+- assertVisible: "انتهى استدعاء الطوارئ"
+- assertVisible:
+    id: "emergency-actual-start"
+- assertVisible:
+    id: "emergency-compensated-start"
+- scrollUntilVisible:
+    element:
+      id: "emergency-compensated-total"
+    direction: DOWN
+- assertVisible:
+    id: "emergency-actual-end"
+- assertVisible:
+    id: "emergency-compensated-end"
+- assertVisible: "إجمالي المدة المحتسبة"
+- scrollUntilVisible:
+    element:
+      id: "emergency-done"
+    direction: DOWN
+- tapOn:
+    id: "emergency-done"
+
+# Home: the call-out is over and the Turan completed, so no emergency button.
+- extendedWaitUntil:
+    visible:
+      id: "home-screen"
+    timeout: 30000
+# (Home reloads on focus: wait for the server's answer, not the screen's previous state.)
+- extendedWaitUntil:
+    notVisible:
+      id: "home-status-emergency"
+    timeout: 30000
+- extendedWaitUntil:
+    notVisible:
+      id: "home-emergency-start"
+    timeout: 30000
+- assertVisible:
+    id: "home-status-off-shift"

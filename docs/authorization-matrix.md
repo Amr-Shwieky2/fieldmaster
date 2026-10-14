@@ -214,6 +214,29 @@ report type and role, and a refusal is a 403 on the request.
   generation (`REPORT_REQUESTED`, `REPORT_GENERATED`, `REPORT_DOWNLOADED`,
   `REPORT_VERIFIED`).
 
+## The mobile worker app (Step 9)
+
+| Route | Who | Not allowed |
+|---|---|---|
+| `PUT /devices/me` | any signed-in member (their own device) | — |
+| `POST /attachments`, `POST /attachments/:id/transcription` | members with a worker profile; transcription of their own voice note only | no worker profile: 403; someone else's file: 404 |
+| `GET /emergency-callouts/eligibility` | `CLOCK_IN_OUT`, the caller only | — |
+| `GET /time-entries/:id` (own detail), `GET /time-entries/:id/my-pay` | the entry's own worker | another worker's entry: 404 |
+| `GET /payroll-statements/me/current` | the caller's own worker profile (no id in the route) | no worker profile: 404 |
+| `GET/PATCH /notifications/preferences`, `POST /notifications/read-all` | the caller's own membership | — |
+
+- **Own pay only:** `my-pay` and `me/current` are Worker-own-money routes.
+  The leak scanner lists them as the only exceptions besides `my-payslip`
+  and `/payroll-statements/me`, and checks that another worker gets 404 or
+  nothing of the Worker's.
+- **Co-workers:** a worker's shift list and detail carry only their own
+  assignment: no co-worker's name, phone number or profile id (they did
+  before Step 9). The temporary supervisor's view is unchanged (names and
+  presence, no phone numbers).
+- **Push content:** a push carries an Arabic type label, a generic body and
+  ids for the deep link. It never carries another person's name or any
+  amount.
+
 ## Defense in depth for financial data (spec section 6.2 / 23.5)
 
 A Field Manager must never see rates, earnings, deductions, or cost

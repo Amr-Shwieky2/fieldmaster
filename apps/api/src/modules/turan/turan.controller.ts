@@ -47,6 +47,17 @@ export class TuranController {
     return this.turanAssignmentsService.cancel(user.organizationId, id, user, correlationId);
   }
 
+  /**
+   * Step 9 (declared before `emergency-callouts/:id`): whether the caller may
+   * start an emergency call-out now, with their Turan assignment and running
+   * call-out. The caller's own only: it takes no worker id.
+   */
+  @Get("emergency-callouts/eligibility")
+  @RequirePermissions(Permission.CLOCK_IN_OUT)
+  emergencyEligibility(@CurrentUser() user: AuthenticatedUser) {
+    return this.emergencyCalloutsService.eligibility(user.organizationId, user);
+  }
+
   /** Owners and Field Managers; an Owner's items also carry `estimatedCostAgorot`. */
   @Get("emergency-callouts")
   @RequirePermissions(Permission.APPROVE_ATTENDANCE)

@@ -10,7 +10,11 @@ import { HistoryScreen } from "../HistoryScreen";
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
 const mockClient = { listTimeEntries: jest.fn() };
-const mockAuth = { client: mockClient, logout: jest.fn(), session: { role: "WORKER" } };
+const mockAuth: { client: typeof mockClient; logout: jest.Mock; session: { role: string; workerProfileId?: string | null } } = {
+  client: mockClient,
+  logout: jest.fn(),
+  session: { role: "WORKER" },
+};
 jest.mock("../../lib/auth-context", () => ({ useAuth: () => mockAuth }));
 
 const mockSync: { isOnline: boolean; pendingCount: number; queue: QueuedEvent[] } = { isOnline: true, pendingCount: 0, queue: [] };
@@ -171,6 +175,7 @@ function cardOf(text: string) {
 }
 
 beforeEach(() => {
+  mockAuth.session = { role: "WORKER" };
   mockSync.isOnline = true;
   mockSync.pendingCount = 0;
   mockSync.queue = [];
@@ -450,5 +455,111 @@ describe("HistoryScreen (Arabic, RTL)", () => {
     expect(mockClient.listTimeEntries).toHaveBeenCalledTimes(2);
     expect(mockClient.listTimeEntries).toHaveBeenLastCalledWith();
     expectArabicUiOnly();
+  });
+});
+
+describe("HistoryScreen by month (Step 9)", () => {
+  const tab = (name: string) => screen.getByRole("tab", { name });
+
+  it("groups the records under month headings and offers a month picker", async () => {
+    mockClient.listTimeEntries.mockResolvedValue([
+      entry({ id: "feb", businessDate: "2026-02-03", shift: shift({ title: "وردية فبراير" }) }),
+      entry({ id: "jan", businessDate: "2026-01-20", shift: shift({ title: "وردية يناير" }) }),
+    ]);
+    await renderHistory();
+    await screen.findByText(iso("وردية فبراير"));
+
+    expect(screen.getByLabelText(ar.history.monthPickerLabel)).toHaveProp("accessibilityRole", "tablist");
+    expect(tab(ar.history.allMonths)).toBeSelected();
+    expect(screen.getByRole("header", { name: "فبراير 2026" })).toBeOnTheScreen();
+    expect(screen.getByRole("header", { name: "يناير 2026" })).toBeOnTheScreen();
+    // The months that have records are offered, besides the last twelve.
+    expect(tab("فبراير 2026")).toBeOnTheScreen();
+    expect(tab("يناير 2026")).toBeOnTheScreen();
+    expectArabicUiOnly();
+  });
+
+  it("asks the API for one month (month=YYYY-MM) when a month is picked, and goes back to every month", async () => {
+    mockClient.listTimeEntries.mockResolvedValue([entry({ id: "feb", businessDate: "2026-02-03", shift: shift({ title: "وردية فبراير" }) }), entry({ id: "jan", businessDate: "2026-01-20" })]);
+    await renderHistory();
+    await screen.findByText(iso("وردية فبراير"));
+
+    const month = deferred<TimeEntry[]>();
+    mockClient.listTimeEntries.mockReturnValueOnce(month.promise);
+    await fireEvent.press(tab("يناير 2026"));
+    expect(mockClient.listTimeEntries).toHaveBeenLastCalledWith({ month: "2026-01" });
+    expect(screen.getByLabelText(ar.states.loading)).toBeOnTheScreen();
+
+    await act(async () => month.resolve([entry({ id: "jan", businessDate: "2026-01-20", shift: shift({ title: "وردية يناير" }) })]));
+    expect(screen.getByText(iso("وردية يناير"))).toBeOnTheScreen();
+    expect(screen.queryByText(iso("وردية فبراير"))).not.toBeOnTheScreen();
+    expect(tab("يناير 2026")).toBeSelected();
+
+    mockClient.listTimeEntries.mockResolvedValue([entry({ id: "feb", businessDate: "2026-02-03", shift: shift({ title: "وردية فبراير" }) })]);
+    await fireEvent.press(tab(ar.history.allMonths));
+    expect(await screen.findByText(iso("وردية فبراير"))).toBeOnTheScreen();
+    expect(mockClient.listTimeEntries).toHaveBeenLastCalledWith();
+  });
+
+  it("shows the month picked last, even when an earlier pick answers later", async () => {
+    mockClient.listTimeEntries.mockResolvedValue([entry({ id: "feb", businessDate: "2026-02-03" }), entry({ id: "jan", businessDate: "2026-01-20" })]);
+    await renderHistory();
+    await screen.findAllByText(iso("صيانة إشارات شارع يافا"));
+
+    const slow = deferred<TimeEntry[]>();
+    mockClient.listTimeEntries.mockReturnValueOnce(slow.promise).mockResolvedValueOnce([entry({ id: "jan", businessDate: "2026-01-20", shift: shift({ title: "وردية يناير" }) })]);
+    await fireEvent.press(tab("فبراير 2026"));
+    await fireEvent.press(tab("يناير 2026"));
+    expect(await screen.findByText(iso("وردية يناير"))).toBeOnTheScreen();
+
+    await act(async () => slow.resolve([entry({ id: "feb", businessDate: "2026-02-03", shift: shift({ title: "وردية فبراير" }) })]));
+    expect(screen.queryByText(iso("وردية فبراير"))).not.toBeOnTheScreen();
+    expect(screen.getByText(iso("وردية يناير"))).toBeOnTheScreen();
+    expect(tab("يناير 2026")).toBeSelected();
+  });
+
+  it("says when a month has no records", async () => {
+    mockClient.listTimeEntries.mockResolvedValue([entry({ id: "jan", businessDate: "2026-01-20" })]);
+    await renderHistory();
+    await screen.findByText(iso("صيانة إشارات شارع يافا"));
+    mockClient.listTimeEntries.mockResolvedValue([]);
+    await fireEvent.press(tab("فبراير 2026"));
+    expect(await screen.findByText(ar.history.monthEmpty)).toBeOnTheScreen();
+    expectArabicUiOnly();
+  });
+
+  it("opens an entry's details", async () => {
+    mockClient.listTimeEntries.mockResolvedValue([entry({ id: "te-42" })]);
+    await renderHistory();
+    await fireEvent.press(await screen.findByText(iso("صيانة إشارات شارع يافا")));
+    expect(navigation.navigate).toHaveBeenCalledWith("HistoryDetail", { timeEntryId: "te-42" });
+  });
+
+  it("never shows another worker's record, and never asks for another worker's id", async () => {
+    mockAuth.session = { role: "WORKER", workerProfileId: "worker-1" };
+    mockClient.listTimeEntries.mockResolvedValue([
+      entry({ id: "mine", workerProfileId: "worker-1", shift: shift({ title: "ورديتي" }) }),
+      entry({ id: "theirs", workerProfileId: "worker-2", shift: shift({ title: "وردية عامل آخر" }) }),
+    ]);
+    await renderHistory();
+    expect(await screen.findByText(iso("ورديتي"))).toBeOnTheScreen();
+    expect(screen.queryByText(iso("وردية عامل آخر"))).not.toBeOnTheScreen();
+    for (const call of mockClient.listTimeEntries.mock.calls) expect(JSON.stringify(call)).not.toContain("worker-2");
+    expect(mockClient.listTimeEntries).toHaveBeenCalledWith();
+  });
+
+  it("asks only for the manager's own worker profile when a manager who tracks time opens it", async () => {
+    mockAuth.session = { role: "FIELD_MANAGER", workerProfileId: "worker-7" };
+    mockClient.listTimeEntries.mockResolvedValue([entry({ id: "mine", workerProfileId: "worker-7" })]);
+    await renderHistory();
+    await screen.findByText(iso("صيانة إشارات شارع يافا"));
+    expect(mockClient.listTimeEntries).toHaveBeenCalledWith({ workerProfileId: "worker-7" });
+  });
+
+  it("asks nothing for a manager without a worker profile", async () => {
+    mockAuth.session = { role: "OWNER", workerProfileId: null };
+    await renderHistory();
+    expect(await screen.findByText(ar.history.empty)).toBeOnTheScreen();
+    expect(mockClient.listTimeEntries).not.toHaveBeenCalled();
   });
 });

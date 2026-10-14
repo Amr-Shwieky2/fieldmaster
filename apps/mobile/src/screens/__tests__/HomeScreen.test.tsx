@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, within } from "@testing-library/react-native";
 import { ApiRequestError, NetworkError, type Shift, type TimeEntry } from "@fieldmaster/api-client";
 import { IntlRoot } from "../../i18n/IntlRoot";
 import ar from "../../i18n/messages";
@@ -8,9 +8,9 @@ import { HomeScreen } from "../HomeScreen";
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
-const mockClient = { listTimeEntries: jest.fn(), listShifts: jest.fn() };
+const mockClient = { listTimeEntries: jest.fn(), listShifts: jest.fn(), getEmergencyEligibility: jest.fn(), myTemporarySupervisions: jest.fn() };
 const mockLogout = jest.fn();
-const mockAuth: { client: typeof mockClient; logout: jest.Mock; session: { role: string } | null } = {
+const mockAuth: { client: typeof mockClient; logout: jest.Mock; session: { role: string; workerProfileId?: string | null } | null } = {
   client: mockClient,
   logout: mockLogout,
   session: { role: "WORKER" },
@@ -19,6 +19,9 @@ jest.mock("../../lib/auth-context", () => ({ useAuth: () => mockAuth }));
 
 const mockSync: { isOnline: boolean; pendingCount: number; queue: QueuedEvent[] } = { isOnline: true, pendingCount: 0, queue: [] };
 jest.mock("../../lib/offline-sync-context", () => ({ useOfflineSync: () => mockSync }));
+
+const mockNotifications = { unreadCount: 0, refresh: jest.fn(async () => undefined), report: jest.fn() };
+jest.mock("../../lib/notifications-context", () => ({ useNotifications: () => mockNotifications }));
 
 // Outside a navigator, "focus" is the first render; refocus() replays the screen's focus callback
 // (the worker comes back from History, ClockIn, ...).
@@ -206,6 +209,9 @@ beforeEach(() => {
   mockSync.queue = [];
   mockClient.listTimeEntries.mockResolvedValue([]);
   mockClient.listShifts.mockResolvedValue([]);
+  mockClient.getEmergencyEligibility.mockResolvedValue({ eligible: false, reason: "EMERGENCY_NOT_ELIGIBLE", turanAssignment: null, activeCallout: null });
+  mockClient.myTemporarySupervisions.mockResolvedValue([]);
+  mockNotifications.unreadCount = 0;
 });
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -230,13 +236,15 @@ describe("HomeScreen (Arabic, RTL)", () => {
     expect(navigation.navigate).toHaveBeenCalledWith("History");
   });
 
-  it("loads active entries and shifts with the same API calls as before", async () => {
+  it("loads the caller's own entries and shifts with one call each (the open entry and recent attendance come from the same list)", async () => {
     await renderHome();
     expect(await screen.findByText(ar.home.noShifts)).toBeOnTheScreen();
     expect(mockClient.listTimeEntries).toHaveBeenCalledTimes(1);
-    expect(mockClient.listTimeEntries).toHaveBeenCalledWith({ status: "ACTIVE" });
+    expect(mockClient.listTimeEntries).toHaveBeenCalledWith();
     expect(mockClient.listShifts).toHaveBeenCalledTimes(1);
     expect(mockClient.listShifts).toHaveBeenCalledWith();
+    expect(mockClient.getEmergencyEligibility).toHaveBeenCalledWith();
+    expect(mockClient.myTemporarySupervisions).toHaveBeenCalledWith();
   });
 
   it("reloads with the same API calls when the screen is focused again", async () => {
@@ -248,7 +256,7 @@ describe("HomeScreen (Arabic, RTL)", () => {
 
     expect(await screen.findByText(iso("وردية بعد العودة"))).toBeOnTheScreen();
     expect(mockClient.listTimeEntries).toHaveBeenCalledTimes(2);
-    expect(mockClient.listTimeEntries).toHaveBeenLastCalledWith({ status: "ACTIVE" });
+    expect(mockClient.listTimeEntries).toHaveBeenLastCalledWith();
     expect(mockClient.listShifts).toHaveBeenCalledTimes(2);
     expect(mockClient.listShifts).toHaveBeenLastCalledWith();
     expectArabicUiOnly();
@@ -352,7 +360,7 @@ describe("HomeScreen (Arabic, RTL)", () => {
     const clockOut = screen.getByRole("button", { name: "إنهاء الدوام" });
     expect(clockOut).toHaveStyle({ minHeight: 56 });
     await fireEvent.press(clockOut);
-    expect(navigation.navigate).toHaveBeenCalledWith("ClockOut");
+    expect(navigation.navigate).toHaveBeenCalledWith("ClockOut", { shiftTitle: "صيانة إشارات شارع يافا" });
     expectArabicUiOnly();
   });
 
@@ -549,7 +557,7 @@ describe("HomeScreen (Arabic, RTL)", () => {
     expectArabicUiOnly();
 
     await fireEvent.press(screen.getByRole("button", { name: ar.common.clockOut }));
-    expect(navigation.navigate).toHaveBeenCalledWith("ClockOut");
+    expect(navigation.navigate).toHaveBeenCalledWith("ClockOut", { shiftTitle: "صيانة إشارات شارع يافا" });
   });
 
   it("shows a clock-in waiting to sync while offline, when the shifts cannot load", async () => {
@@ -634,7 +642,7 @@ describe("HomeScreen (Arabic, RTL)", () => {
 
     expect(await screen.findByText(ar.home.activeLabel)).toBeOnTheScreen();
     expect(mockClient.listTimeEntries).toHaveBeenCalledTimes(2);
-    expect(mockClient.listTimeEntries).toHaveBeenLastCalledWith({ status: "ACTIVE" });
+    expect(mockClient.listTimeEntries).toHaveBeenLastCalledWith();
     expect(mockClient.listShifts).toHaveBeenLastCalledWith();
     expect(screen.queryByText(ar.home.pendingClockIn)).not.toBeOnTheScreen();
     expect(screen.queryByText(ar.home.pendingClockOut)).not.toBeOnTheScreen();
@@ -690,5 +698,261 @@ describe("HomeScreen (Arabic, RTL)", () => {
     await renderHome();
     expect(await screen.findByText("مدير ميدان")).toBeOnTheScreen();
     expectArabicUiOnly();
+  });
+});
+
+// ── Step 9: the worker's home ────────────────────────────────────────────────
+
+const NIGHT_TURAN = {
+  id: "turan-1",
+  organizationId: "org-1",
+  turanType: "NIGHT_TURAN",
+  status: "SCHEDULED",
+  // 22:00 on 15 January to 06:00 on 16 January in Jerusalem.
+  startAt: "2026-01-15T20:00:00.000Z",
+  endAt: "2026-01-16T04:00:00.000Z",
+  notes: null,
+  assignedWorkerProfileId: "worker-1",
+  backupWorkerProfileId: null,
+};
+
+function finishedEntry(id: string, overrides: Partial<TimeEntry> = {}): TimeEntry {
+  return activeEntry({ id, status: "APPROVED", clockOutAt: "2026-01-14T15:00:00.000Z", clockInAt: "2026-01-14T06:00:00.000Z", businessDate: "2026-01-14", ...overrides });
+}
+
+describe("HomeScreen: the worker's home (Step 9)", () => {
+  it("shows the emergency button only when the API says a call-out may start, and opens the emergency screen", async () => {
+    mockClient.getEmergencyEligibility.mockResolvedValue({ eligible: true, reason: null, turanAssignment: NIGHT_TURAN, activeCallout: null });
+    await renderHome();
+
+    const start = await screen.findByRole("button", { name: ar.home.emergencyStart });
+    expect(screen.getByText(ar.home.emergencyAvailable)).toBeOnTheScreen();
+    expect(start).toHaveStyle({ minHeight: 56 });
+    expectArabicUiOnly();
+    await fireEvent.press(start);
+    expect(navigation.navigate).toHaveBeenCalledWith("Emergency");
+  });
+
+  it("hides the emergency button when the worker is not eligible", async () => {
+    await renderHome();
+    expect(await screen.findByText(ar.home.noShifts)).toBeOnTheScreen();
+    expect(screen.queryByRole("button", { name: ar.home.emergencyStart })).not.toBeOnTheScreen();
+    expect(screen.queryByText(ar.home.emergencyAvailable)).not.toBeOnTheScreen();
+  });
+
+  it("hides the emergency button when eligibility cannot be loaded (never shown by guess)", async () => {
+    mockClient.getEmergencyEligibility.mockRejectedValue(networkError());
+    await renderHome();
+    expect(await screen.findByText(ar.home.noShifts)).toBeOnTheScreen();
+    expect(screen.queryByRole("button", { name: ar.home.emergencyStart })).not.toBeOnTheScreen();
+    // The rest of Home is not blocked by it.
+    expect(screen.queryByText(ar.home.loadError, { exact: false })).not.toBeOnTheScreen();
+  });
+
+  it("shows a running call-out with its timer instead of the start button; ending it opens the emergency screen", async () => {
+    // 01:05:09 after the press.
+    jest.spyOn(Date, "now").mockReturnValue(new Date("2026-01-16T00:10:00.000Z").getTime());
+    mockClient.listTimeEntries.mockResolvedValue([
+      activeEntry({ id: "te-9", isEmergency: true, clockInAt: "2026-01-15T22:04:51.000Z", shift: shift({ id: "em", title: "Emergency Call-out", shiftType: "EMERGENCY_CALLOUT" }) }),
+    ]);
+    mockClient.getEmergencyEligibility.mockResolvedValue({
+      eligible: false,
+      reason: "ACTIVE_TIME_ENTRY_EXISTS",
+      turanAssignment: NIGHT_TURAN,
+      activeCallout: { calloutId: "callout-9", timeEntryId: "te-9", actualStartClick: "2026-01-15T23:04:51.000Z", compensatedStart: "2026-01-15T22:04:51.000Z" },
+    });
+    await renderHome();
+
+    expect(await screen.findByText(ar.home.emergencyRunning)).toBeOnTheScreen();
+    expect(screen.getByTestId("home-emergency-timer")).toHaveTextContent(fill(ar.home.emergencyElapsed, { elapsed: "01:05:09" }));
+    // Pay counts from 60 minutes before the press: 00:04 in Jerusalem.
+    expect(screen.getByText(fill(ar.home.emergencyCompensatedFrom, { time: "00:04" }))).toBeOnTheScreen();
+    expect(screen.queryByRole("button", { name: ar.home.emergencyStart })).not.toBeOnTheScreen();
+    // Not a normal clock-out: the call-out ends on its own screen (mandatory summary, +15 minutes).
+    expect(screen.queryByRole("button", { name: ar.common.clockOut })).not.toBeOnTheScreen();
+    expect(screen.queryByRole("button", { name: /^بدء الدوام في / })).not.toBeOnTheScreen();
+    expectArabicUiOnly();
+
+    await fireEvent.press(screen.getByRole("button", { name: ar.home.emergencyEnd }));
+    expect(navigation.navigate).toHaveBeenCalledWith("Emergency");
+  });
+
+  it("shows the current Night Turan with its hours, and an upcoming one as upcoming", async () => {
+    setNow("2026-01-15T21:00:00.000Z");
+    mockClient.getEmergencyEligibility.mockResolvedValue({ eligible: true, reason: null, turanAssignment: NIGHT_TURAN, activeCallout: null });
+    await renderHome();
+
+    expect(await screen.findByText(fill(ar.home.turanCurrent, { type: "مناوبة ليلية" }))).toBeOnTheScreen();
+    expect(screen.getByText(fill(ar.home.turanHours, { start: "15 يناير 2026 في 22:00", end: "16 يناير 2026 في 06:00" }))).toBeOnTheScreen();
+    expectArabicUiOnly();
+
+    setNow("2026-01-15T12:00:00.000Z");
+    mockClient.getEmergencyEligibility.mockResolvedValue({ eligible: false, reason: "EMERGENCY_NOT_ELIGIBLE", turanAssignment: NIGHT_TURAN, activeCallout: null });
+    await refocus();
+    expect(await screen.findByText(fill(ar.home.turanUpcoming, { type: "مناوبة ليلية" }))).toBeOnTheScreen();
+  });
+
+  it("shows no Turan card without one", async () => {
+    await renderHome();
+    expect(await screen.findByText(ar.home.noShifts)).toBeOnTheScreen();
+    expect(screen.queryByTestId("home-turan")).not.toBeOnTheScreen();
+  });
+
+  it("shows the temporary-supervisor card only while the assignment is active, and opens the supervisor screen", async () => {
+    mockClient.myTemporarySupervisions.mockResolvedValue([
+      {
+        id: "tsa-1",
+        activatedAt: "2026-01-15T06:00:00.000Z",
+        expiresAt: "2026-01-15T15:00:00.000Z",
+        canOpenCheckInPoints: true,
+        shift: { id: "shift-1", title: "وردية عادية — تقاطع تل أبيب المركزي", shiftType: "STANDARD", scheduledStart: "2026-01-15T06:00:00.000Z", scheduledEnd: "2026-01-15T15:00:00.000Z", siteName: null },
+      },
+      // Already over: no card.
+      {
+        id: "tsa-old",
+        activatedAt: "2026-01-14T06:00:00.000Z",
+        expiresAt: "2026-01-14T15:00:00.000Z",
+        canOpenCheckInPoints: false,
+        shift: { id: "shift-0", title: "وردية أمس", shiftType: "STANDARD", scheduledStart: "2026-01-14T06:00:00.000Z", scheduledEnd: "2026-01-14T15:00:00.000Z", siteName: null },
+      },
+    ]);
+    await renderHome();
+
+    expect(await screen.findByText(ar.home.supervisorTitle)).toBeOnTheScreen();
+    expect(screen.getAllByTestId("home-supervisor")).toHaveLength(1);
+    expect(screen.getByText(fill(ar.home.supervisorShift, { shift: iso("وردية عادية — تقاطع تل أبيب المركزي") }))).toBeOnTheScreen();
+    expect(screen.getByText(fill(ar.home.supervisorUntil, { time: "17:00" }))).toBeOnTheScreen();
+    expect(screen.queryByText("وردية أمس", { exact: false })).not.toBeOnTheScreen();
+    expectArabicUiOnly();
+
+    await fireEvent.press(screen.getByRole("button", { name: ar.home.supervisorOpen }));
+    expect(navigation.navigate).toHaveBeenCalledWith("Supervisor", { assignmentId: "tsa-1" });
+  });
+
+  it("shows no supervisor card without an active assignment (or when the call fails)", async () => {
+    mockClient.myTemporarySupervisions.mockRejectedValue(new ApiRequestError(403, { code: "FORBIDDEN", message: "Forbidden" } as never));
+    await renderHome();
+    expect(await screen.findByText(ar.home.noShifts)).toBeOnTheScreen();
+    expect(screen.queryByText(ar.home.supervisorTitle)).not.toBeOnTheScreen();
+  });
+
+  it("shows the unread notifications count, refreshes it on focus, and opens the notifications", async () => {
+    mockNotifications.unreadCount = 3;
+    await renderHome();
+
+    const bell = await screen.findByRole("button", { name: fill(ar.home.notificationsUnread, { count: 3 }) });
+    expect(screen.getByTestId("home-unread-badge")).toHaveTextContent("3");
+    expect(mockNotifications.refresh).toHaveBeenCalled();
+    expectArabicUiOnly();
+    await fireEvent.press(bell);
+    expect(navigation.navigate).toHaveBeenCalledWith("Notifications");
+  });
+
+  it("shows no badge without unread notifications, and caps a large count", async () => {
+    await renderHome();
+    expect(await screen.findByRole("button", { name: ar.home.notifications })).toBeOnTheScreen();
+    expect(screen.queryByTestId("home-unread-badge")).not.toBeOnTheScreen();
+
+    mockNotifications.unreadCount = 140;
+    await screen.rerender(homeElement());
+    expect(screen.getByTestId("home-unread-badge")).toHaveTextContent("99+");
+  });
+
+  it("lists recent attendance: the last three finished entries, newest first, with Arabic status badges", async () => {
+    mockClient.listTimeEntries.mockResolvedValue([
+      finishedEntry("e-1", { businessDate: "2026-01-10", status: "APPROVED", shift: shift({ id: "s1", title: "وردية الأحد" }) }),
+      finishedEntry("e-2", { businessDate: "2026-01-13", status: "REJECTED", shift: shift({ id: "s2", title: "وردية الثلاثاء" }) }),
+      finishedEntry("e-3", { businessDate: "2026-01-14", status: "PENDING_APPROVAL", shift: shift({ id: "s3", title: "وردية الأربعاء" }) }),
+      finishedEntry("e-4", { businessDate: "2026-01-12", status: "CORRECTION_REQUESTED", shift: shift({ id: "s4", title: "وردية الاثنين" }) }),
+    ]);
+    await renderHome();
+
+    expect(await screen.findByRole("header", { name: ar.home.recentTitle })).toBeOnTheScreen();
+    const entries = screen.getAllByTestId("home-recent-entry");
+    expect(entries).toHaveLength(3);
+    expect(within(entries[0]).getByText(iso("وردية الأربعاء"))).toBeOnTheScreen();
+    expect(within(entries[0]).getByText(ar.enums.TimeEntryStatus.PENDING_APPROVAL)).toBeOnTheScreen();
+    expect(within(entries[1]).getByText(iso("وردية الثلاثاء"))).toBeOnTheScreen();
+    expect(within(entries[1]).getByText("مرفوض")).toBeOnTheScreen();
+    expect(within(entries[2]).getByText(iso("وردية الاثنين"))).toBeOnTheScreen();
+    expect(within(entries[2]).getByText("مطلوب تصحيح")).toBeOnTheScreen();
+    // 06:00Z-15:00Z is 08:00-17:00 in Jerusalem.
+    expect(within(entries[0]).getByText(`14 يناير 2026 · ${fill(ar.home.recentHours, { start: "08:00", end: "17:00" })}`)).toBeOnTheScreen();
+    expect(screen.queryByText(iso("وردية الأحد"))).not.toBeOnTheScreen();
+    expectArabicUiOnly();
+
+    await fireEvent.press(entries[0]);
+    expect(navigation.navigate).toHaveBeenCalledWith("HistoryDetail", { timeEntryId: "e-3" });
+    await fireEvent.press(screen.getByRole("button", { name: ar.home.recentSeeAllLabel }));
+    expect(navigation.navigate).toHaveBeenLastCalledWith("History");
+  });
+
+  it("keeps the open entry out of recent attendance, and says when there is none yet", async () => {
+    mockClient.listTimeEntries.mockResolvedValue([activeEntry()]);
+    await renderHome();
+    expect(await screen.findByText(ar.home.activeLabel)).toBeOnTheScreen();
+    expect(screen.getByText(ar.home.recentEmpty)).toBeOnTheScreen();
+    expect(screen.queryByTestId("home-recent-entry")).not.toBeOnTheScreen();
+  });
+
+  it("marks the next shift, opens its details on tap, and leaves out shifts that are already over", async () => {
+    mockClient.listShifts.mockResolvedValue([
+      shift({ id: "later", title: "وردية الغد", scheduledStart: "2026-01-16T06:00:00.000Z", scheduledEnd: "2026-01-16T15:00:00.000Z" }),
+      shift({ id: "today", title: "وردية اليوم", scheduledStart: "2026-01-15T11:00:00.000Z", scheduledEnd: "2026-01-15T20:00:00.000Z" }),
+      // Published but over (ended at 11:00Z, it is 12:00Z): not offered any more.
+      shift({ id: "over", title: "وردية انتهت", scheduledStart: "2026-01-15T02:00:00.000Z", scheduledEnd: "2026-01-15T11:00:00.000Z" }),
+    ]);
+    await renderHome();
+
+    const next = await screen.findByTestId("home-next-shift");
+    expect(within(next).getByText(ar.home.nextShift)).toBeOnTheScreen();
+    expect(within(next).getByText(iso("وردية اليوم"))).toBeOnTheScreen();
+    expect(screen.getAllByTestId("home-shift")).toHaveLength(1);
+    expect(screen.queryByText(iso("وردية انتهت"))).not.toBeOnTheScreen();
+    expectArabicUiOnly();
+
+    await fireEvent.press(screen.getByTestId("home-next-shift-details"));
+    expect(navigation.navigate).toHaveBeenCalledWith("ShiftDetails", { shiftId: "today" });
+    await fireEvent.press(screen.getByTestId("home-next-shift-clock-in"));
+    expect(navigation.navigate).toHaveBeenLastCalledWith("ClockIn", { shiftId: "today", shiftTitle: "وردية اليوم" });
+  });
+
+  it("opens the salary screen from the footer", async () => {
+    await renderHome();
+    const salary = await screen.findByRole("button", { name: ar.home.salary });
+    expect(salary).toHaveStyle({ minHeight: 56 });
+    await fireEvent.press(salary);
+    expect(navigation.navigate).toHaveBeenCalledWith("Salary");
+  });
+
+  it("calls only the caller's own endpoints, never with another worker's id", async () => {
+    await renderHome();
+    expect(await screen.findByText(ar.home.noShifts)).toBeOnTheScreen();
+    for (const method of Object.values(mockClient)) {
+      for (const args of method.mock.calls) expect(JSON.stringify(args)).not.toContain("workerProfileId");
+    }
+    expect(mockClient.listTimeEntries).toHaveBeenCalledWith();
+    expect(mockClient.listShifts).toHaveBeenCalledWith();
+  });
+
+  it("a manager signed in to the app sees only their own entries and shifts, never the organization's", async () => {
+    mockAuth.session = { role: "FIELD_MANAGER", workerProfileId: "manager-profile" };
+    mockClient.listTimeEntries.mockResolvedValue([
+      activeEntry({ id: "other-active", workerProfileId: "worker-7", shift: shift({ id: "x", title: "وردية عامل آخر" }) }),
+      finishedEntry("other-done", { workerProfileId: "worker-8", shift: shift({ id: "y", title: "حضور عامل آخر" }) }),
+      finishedEntry("own-done", { workerProfileId: "manager-profile", shift: shift({ id: "z", title: "حضوري" }) }),
+    ]);
+    mockClient.listShifts.mockResolvedValue([
+      shift({ id: "own", title: "ورديتي", assignments: [{ id: "a1", workerProfileId: "manager-profile" }] }),
+      shift({ id: "theirs", title: "وردية فريق آخر", assignments: [{ id: "a2", workerProfileId: "worker-7" }] }),
+    ]);
+    await renderHome();
+
+    expect(await screen.findByText(iso("ورديتي"))).toBeOnTheScreen();
+    expect(screen.getByText(ar.home.noActive)).toBeOnTheScreen();
+    expect(screen.getByText(iso("حضوري"))).toBeOnTheScreen();
+    for (const other of ["وردية عامل آخر", "حضور عامل آخر", "وردية فريق آخر"]) {
+      expect(screen.queryByText(other, { exact: false })).not.toBeOnTheScreen();
+    }
   });
 });

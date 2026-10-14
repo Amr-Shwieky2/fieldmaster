@@ -26,6 +26,7 @@ export class TimeEntriesController {
     private readonly forgottenStampService: ForgottenStampService,
   ) {}
 
+  /** Workers get their own entries only; `?month=YYYY-MM` (Step 9) narrows to a business month. */
   @Get("time-entries")
   @RequirePermissions(Permission.VIEW_OWN_ATTENDANCE)
   list(
@@ -33,10 +34,12 @@ export class TimeEntriesController {
     @Query("workerProfileId") workerProfileId?: string,
     @Query("status") status?: TimeEntryStatus,
     @Query("businessDate") businessDate?: string,
+    @Query("month") month?: string,
   ) {
-    return this.timeEntriesService.list(user.organizationId, user, { workerProfileId, status, businessDate });
+    return this.timeEntriesService.list(user.organizationId, user, { workerProfileId, status, businessDate, month });
   }
 
+  /** The caller's own entry: the worker's detail (Step 9, no money). Managers: any entry, as before. Anyone else: 404. */
   @Get("time-entries/:id")
   @RequirePermissions(Permission.VIEW_OWN_ATTENDANCE)
   getById(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {

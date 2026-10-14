@@ -1,0 +1,15 @@
+# Maestro workspace for the FieldMaster worker app (see README.md).
+# `maestro test apps/mobile/.maestro/` runs the top-level flows below, in this
+# order (02 ends the shift 01 started; 05 must run last on Android, because
+# Maestro's mock location stays active on the emulator afterwards).
+# The subflows/ folder holds shared steps; they are not run on their own.
+flows:
+  - "*.yaml"
+executionOrder:
+  continueOnFailure: false
+  flowsOrder:
+    - 01-clock-in-inside-geofence
+    - 02-clock-out-summary-required
+    - 03-offline-clock-in-then-sync
+    - 04-night-turan-emergency
+    - 05-android-mock-location-refused

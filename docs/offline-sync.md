@@ -84,13 +84,26 @@ leave it `undefined` on both the signing and verifying side.
    private key, append it to the local queue, and show the worker a
    "queued — will sync automatically" receipt instead of a hard failure.
 
-3. **Local queue** (`offline-queue.ts`): AsyncStorage-backed array of
-   signed events, each carrying a `localStatus`
-   (`PENDING`/`SYNCING`/`VERIFIED`/`FLAGGED`/`REJECTED`/`DUPLICATE`). Not
-   SQLCipher-encrypted SQLite as the spec names — see
-   `technical-decisions.md` for why, and note that the tamper-evidence
-   property the spec actually cares about (a verifiable, unforgeable
-   record) comes from the signature, not the local storage engine.
+3. **Local queue** (`offline-queue.ts`): signed events, each carrying a
+   `localStatus` (`PENDING`/`SYNCING`/`VERIFIED`/`FLAGGED`/`REJECTED`/`DUPLICATE`).
+   - **Encrypted at rest since Step 9** (`queue-crypto.ts`): the queue is
+     one JSON document sealed with tweetnacl `secretbox` (XSalsa20-Poly1305)
+     under a random 32-byte key kept only in the Keychain/Keystore
+     (`fieldmaster.offlineQueueKey`). AsyncStorage holds only
+     `{ v: 1, nonce, box }`, with a fresh nonce on every write.
+   - A changed byte or a wrong key fails authentication: the bytes are kept
+     aside and the worker is told; nothing is silently dropped. A plaintext
+     queue from before Step 9 is encrypted on first read, with its waiting
+     events kept.
+   - Not SQLCipher/expo-sqlite as the spec names: see
+     `technical-decisions.md`. The signature still gives the property the
+     spec cares most about (an unforgeable record); the encryption adds
+     confidentiality on a lost phone.
+   - Fixed in Step 9:
+     - an event queued during a running sync was lost;
+     - events left `SYNCING` by a killed app were never retried;
+     - events were sent before the device key was registered, which made
+       the server refuse them for good.
 
 4. **Sync trigger**: `OfflineSyncProvider` watches `NetInfo` connectivity
    changes, retries on a 60-second interval as a fallback, and re-syncs on
@@ -156,8 +169,17 @@ tested, rather than a parallel implementation:
   `VALIDATION_FAILED`, same check the online path uses.
 - **Device key revoked mid-flight**: an Owner-revoked key
   (`POST /devices/:userId/:deviceId/revoke-key`) makes every subsequent
-  event from that device `REJECTED` with `DEVICE_KEY_NOT_REGISTERED`,
-  tested explicitly.
+  event from that device `REJECTED`, tested explicitly.
+  - Since Step 9 the reason is `DEVICE_KEY_REVOKED`; a key that was never
+    registered keeps `DEVICE_KEY_NOT_REGISTERED`.
+  - The app then clears its queue state (telling the worker how many
+    records could not be sent), its signing key and its session, and asks
+    for a new sign-in.
+  - A new key for that device is accepted only from a session started
+    after the revocation.
+- **Mock location (Step 9):** an offline event may carry `mockLocationState`
+  inside the signed payload. Canonicalization includes only the fields an
+  event has, so events without it sign and verify exactly as before.
 
 All of this is preserved as evidence — an `OfflineSyncEvent` row is
 persisted for every outcome, `REJECTED` included, never silently dropped.

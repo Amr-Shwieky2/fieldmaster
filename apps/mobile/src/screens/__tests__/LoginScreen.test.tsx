@@ -15,10 +15,11 @@ const mockClient = {
   verifyOtp: jest.fn(),
 };
 const mockLogin = jest.fn();
+const mockShowAccountState = jest.fn();
 const mockOfflineSync = { isOnline: true };
 
 jest.mock("../../lib/auth-context", () => ({
-  useAuth: () => ({ client: mockClient, login: mockLogin }),
+  useAuth: () => ({ client: mockClient, login: mockLogin, showAccountState: mockShowAccountState }),
 }));
 jest.mock("../../lib/offline-sync-context", () => ({
   useOfflineSync: () => mockOfflineSync,
@@ -662,6 +663,52 @@ describe("LoginScreen (Arabic, RTL)", () => {
       expect(await screen.findByText(ar.errors.network)).toBeOnTheScreen();
       expect(screen.queryByText(/Network request failed|Check your connection/)).not.toBeOnTheScreen();
       expectArabicOnly();
+    });
+  });
+
+  describe("account states (Step 9)", () => {
+    it.each([
+      ["ACCOUNT_PENDING_APPROVAL", "PENDING_APPROVAL"],
+      ["ACCOUNT_REJECTED", "REJECTED"],
+      ["ACCOUNT_SUSPENDED", "SUSPENDED"],
+    ] as const)("opens the account-state screen when a right code answers %s (no session, no error box)", async (code, kind) => {
+      mockClient.verifyOtp.mockRejectedValue(apiError(403, code, "Your application is waiting for the employer's approval."));
+      await renderLogin();
+      await goToCodeStep();
+      await fireEvent.changeText(screen.getByLabelText(ar.auth.codeLabel), "123456");
+      await fireEvent.press(screen.getByRole("button", { name: ar.auth.verify }));
+
+      await waitFor(() => expect(mockShowAccountState).toHaveBeenCalledWith(kind));
+      expect(mockShowAccountState).toHaveBeenCalledTimes(1);
+      expect(mockLogin).not.toHaveBeenCalled();
+      expect(screen.queryByRole("alert")).not.toBeOnTheScreen();
+      expect(screen.queryByText(/approval/)).not.toBeOnTheScreen();
+      expectArabicOnly([PHONE]);
+    });
+
+    it("opens the account-state screen from the test quick login too", async () => {
+      mockClient.listDevLoginUsers.mockResolvedValue(DEV_USERS);
+      mockClient.devLogin.mockRejectedValue(apiError(403, "ACCOUNT_SUSPENDED", "This account is suspended."));
+      await renderLogin();
+
+      await fireEvent.press(screen.getByRole("button", { name: signInAs(worker1) }));
+
+      await waitFor(() => expect(mockShowAccountState).toHaveBeenCalledWith("SUSPENDED"));
+      expect(mockLogin).not.toHaveBeenCalled();
+      expect(screen.queryByText(ar.errors.ACCOUNT_SUSPENDED)).not.toBeOnTheScreen();
+      expect(screen.getByRole("button", { name: signInAs(worker1) })).toBeEnabled();
+    });
+
+    it("keeps NO_ACTIVE_MEMBERSHIP as an Arabic error on the sign-in screen", async () => {
+      mockClient.verifyOtp.mockRejectedValue(apiError(403, "NO_ACTIVE_MEMBERSHIP", "This account has no active organization membership."));
+      await renderLogin();
+      await goToCodeStep();
+      await fireEvent.changeText(screen.getByLabelText(ar.auth.codeLabel), "123456");
+      await fireEvent.press(screen.getByRole("button", { name: ar.auth.verify }));
+
+      expect(await screen.findByText(ar.errors.NO_ACTIVE_MEMBERSHIP)).toBeOnTheScreen();
+      expect(mockShowAccountState).not.toHaveBeenCalled();
+      expectArabicOnly([PHONE]);
     });
   });
 });

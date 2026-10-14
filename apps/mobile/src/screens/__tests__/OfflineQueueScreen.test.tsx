@@ -2,7 +2,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { act, fireEvent, screen, within } from "@testing-library/react-native";
 import { isolateLtr } from "../../components/LtrText";
 import ar from "../../i18n/messages";
-import type { QueuedEvent, QueuedEventLocalStatus } from "../../lib/offline-queue";
+import { QueueStorageUnavailableError, type QueueNotice, type QueuedEvent, type QueuedEventLocalStatus } from "../../lib/offline-queue";
 import { useOfflineSync } from "../../lib/offline-sync-context";
 import type { RootStackParamList } from "../../navigation/types";
 import { OfflineQueueScreen } from "../OfflineQueueScreen";
@@ -14,7 +14,8 @@ type Navigation = NativeStackScreenProps<RootStackParamList, "OfflineQueue">["na
 
 let navigation: { navigate: jest.Mock; replace: jest.Mock; goBack: jest.Mock };
 let syncNow: jest.Mock;
-let syncState: { isOnline: boolean; queue: QueuedEvent[] };
+let dismissNotice: jest.Mock;
+let syncState: { isOnline: boolean; queue: QueuedEvent[]; notice?: QueueNotice | null; storageAvailable?: boolean };
 
 function queued(overrides: Partial<QueuedEvent> & { clientEventId: string; queuedAt: string }): QueuedEvent {
   return {
@@ -35,10 +36,11 @@ function queued(overrides: Partial<QueuedEvent> & { clientEventId: string; queue
 beforeEach(() => {
   navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   syncNow = jest.fn(async () => undefined);
+  dismissNotice = jest.fn(async () => undefined);
   syncState = { isOnline: true, queue: [] };
   jest
     .mocked(useOfflineSync)
-    .mockImplementation(() => ({ ...syncState, pendingCount: 0, queueOfflineEvent: jest.fn(), syncNow }) as unknown as ReturnType<typeof useOfflineSync>);
+    .mockImplementation(() => ({ ...syncState, pendingCount: 0, queueOfflineEvent: jest.fn(), syncNow, dismissNotice }) as unknown as ReturnType<typeof useOfflineSync>);
 });
 
 function renderScreen() {
@@ -263,5 +265,47 @@ describe("OfflineQueueScreen (Arabic, RTL)", () => {
     await fireEvent.press(back);
 
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("OfflineQueueScreen: the encrypted queue and a revoked key (Step 9)", () => {
+  it.each([
+    ["UNREADABLE", null, ar.queue.notice.UNREADABLE],
+    ["KEY_LOST", null, ar.queue.notice.KEY_LOST],
+    ["DEVICE_KEY_REVOKED", 3, fill(ar.queue.notice.DEVICE_KEY_REVOKED, { count: "3" })],
+  ] as const)("tells the worker clearly when saved records were affected (%s), until dismissed", async (kind, count, message) => {
+    syncState = { isOnline: true, queue: [], notice: { kind, count, at: "2026-01-15T08:30:00.000Z" } };
+    await renderScreen();
+
+    expect(screen.getByText(message)).toBeOnTheScreen();
+    expectArabicOnly();
+    await fireEvent.press(screen.getByRole("button", { name: ar.queue.noticeDismiss }));
+    expect(dismissNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it("says when the phone's secure storage cannot be read right now (the records are kept)", async () => {
+    syncState = { isOnline: true, queue: [], storageAvailable: false };
+    await renderScreen();
+    expect(screen.getByText(ar.queue.storageUnavailable)).toBeOnTheScreen();
+    expectArabicOnly();
+  });
+
+  it("explains a manual sync that could not read the secure storage", async () => {
+    syncNow.mockRejectedValueOnce(new QueueStorageUnavailableError(new Error("locked")));
+    await renderScreen();
+    await fireEvent.press(syncButton());
+    expect(await screen.findByText(ar.queue.storageUnavailable)).toBeOnTheScreen();
+    expect(screen.queryByText(ar.errors.unknown)).not.toBeOnTheScreen();
+  });
+
+  it("explains a record refused because this phone's key was revoked", async () => {
+    syncState = {
+      isOnline: true,
+      queue: [queued({ clientEventId: "a", queuedAt: "2026-01-15T08:30:00.000Z", localStatus: "REJECTED", reason: "DEVICE_KEY_REVOKED" })],
+    };
+    await renderScreen();
+    expect(screen.getByText(ar.queue.revokedReason)).toBeOnTheScreen();
+    expect(screen.queryByText(/DEVICE_KEY_REVOKED/)).not.toBeOnTheScreen();
+    expectArabicOnly();
   });
 });

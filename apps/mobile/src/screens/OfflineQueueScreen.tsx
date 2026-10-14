@@ -11,7 +11,7 @@ import { ScreenHeader } from "../components/ScreenHeader";
 import { EmptyView, ErrorView } from "../components/StateViews";
 import { useCodeMessage, useEnumLabel, useErrorMessage, useFormat } from "../i18n/hooks";
 import { useOfflineSync } from "../lib/offline-sync-context";
-import type { QueuedEvent, QueuedEventLocalStatus } from "../lib/offline-queue";
+import { QueueStorageUnavailableError, type QueueNotice, type QueuedEvent, type QueuedEventLocalStatus } from "../lib/offline-queue";
 import { colors, spacing } from "../lib/theme";
 import type { RootStackParamList } from "../navigation/types";
 
@@ -28,8 +28,9 @@ const STATUS_COLORS: Record<QueuedEventLocalStatus, string> = {
 
 export function OfflineQueueScreen({ navigation }: Props) {
   const t = useTranslations("offlineQueue");
+  const tQueue = useTranslations("queue");
   const errorMessage = useErrorMessage();
-  const { queue, isOnline, syncNow } = useOfflineSync();
+  const { queue, isOnline, syncNow, notice, storageAvailable, dismissNotice } = useOfflineSync();
   const [syncing, setSyncing] = useState(false);
   // The thrown error itself (wrapped, since it can be any value), turned into Arabic at render time.
   const [syncFailure, setSyncFailure] = useState<{ cause: unknown } | null>(null);
@@ -68,7 +69,22 @@ export function OfflineQueueScreen({ navigation }: Props) {
         <Button label={t("syncNow")} busy={syncing} busyLabel={t("syncing")} disabled={!isOnline} onPress={handleSync} />
       </View>
 
-      {syncFailure ? <ErrorView message={errorMessage(syncFailure.cause)} onRetry={handleSync} /> : null}
+      {notice ? <NoticeCard notice={notice} onDismiss={dismissNotice} /> : null}
+
+      {storageAvailable === false ? (
+        <View accessible accessibilityRole="alert" style={[styles.statusBanner, { backgroundColor: colors.warningSoft }]}>
+          <AppText weight="semibold" color={colors.warning}>
+            {tQueue("storageUnavailable")}
+          </AppText>
+        </View>
+      ) : null}
+
+      {syncFailure ? (
+        <ErrorView
+          message={syncFailure.cause instanceof QueueStorageUnavailableError ? tQueue("storageUnavailable") : errorMessage(syncFailure.cause)}
+          onRetry={handleSync}
+        />
+      ) : null}
 
       <FlatList
         style={styles.list}
@@ -85,8 +101,25 @@ export function OfflineQueueScreen({ navigation }: Props) {
 const keyExtractor = (item: QueuedEvent) => item.clientEventId;
 const renderItem = ({ item }: ListRenderItemInfo<QueuedEvent>) => <QueueRow item={item} />;
 
+/** Something the worker must know about the saved records (unreadable, key lost, this phone's key revoked), until dismissed. */
+function NoticeCard({ notice, onDismiss }: { notice: QueueNotice; onDismiss: () => Promise<void> }) {
+  const tQueue = useTranslations("queue");
+  const format = useFormat();
+  return (
+    <View style={[styles.statusBanner, styles.notice]}>
+      <AppText accessibilityRole="alert" weight="semibold" color={colors.danger}>
+        {notice.kind === "DEVICE_KEY_REVOKED"
+          ? tQueue("notice.DEVICE_KEY_REVOKED", { count: format.number(notice.count ?? 0) })
+          : tQueue(`notice.${notice.kind}`)}
+      </AppText>
+      <Button label={tQueue("noticeDismiss")} variant="secondary" onPress={() => void onDismiss()} />
+    </View>
+  );
+}
+
 function QueueRow({ item }: { item: QueuedEvent }) {
   const t = useTranslations("offlineQueue");
+  const tQueue = useTranslations("queue");
   const format = useFormat();
   const enumLabel = useEnumLabel();
   const codeMessage = useCodeMessage();
@@ -99,7 +132,9 @@ function QueueRow({ item }: { item: QueuedEvent }) {
   // waiting records are sent again): explain what was wrong at the time, never the raw code.
   const reason = item.reason;
   const reasonText = reason
-    ? t.has(`reasons.${reason}`)
+    ? reason === "DEVICE_KEY_REVOKED"
+      ? tQueue("revokedReason")
+      : t.has(`reasons.${reason}`)
       ? t(`reasons.${reason}`)
       : (codeMessage(reason) ?? t("unknownReason"))
     : null;
@@ -135,4 +170,5 @@ const styles = StyleSheet.create({
   row: { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, gap: spacing.xs },
   rowHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.sm, flexWrap: "wrap" },
   rowType: { flexShrink: 1 },
+  notice: { backgroundColor: colors.dangerSoft, gap: spacing.sm },
 });

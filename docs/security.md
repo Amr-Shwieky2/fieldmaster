@@ -99,6 +99,57 @@ delivery. A real malware scanner is not bound yet: the scan hook exists
   - The leak scanner (below) searches every non-Owner GET response for the
     same values.
 
+## The mobile app (Step 9)
+
+- **Secrets on the phone:** the session (access and refresh tokens), the
+  offline-signing private key, the offline queue's encryption key and the
+  install id live only in the iOS Keychain / Android Keystore
+  (expo-secure-store). There is no AsyncStorage path on iOS or Android, not
+  even as a fallback; tests run the storage code as iOS and as Android and
+  assert AsyncStorage is never touched. The web target, a development
+  stand-in, uses AsyncStorage and offers no protection.
+- **The offline queue is encrypted at rest:** XSalsa20-Poly1305 with a
+  Keychain/Keystore key, a fresh nonce per write, and tampering detected.
+  See `offline-sync.md`.
+- **Sessions refresh themselves:** an expired access token is refreshed once
+  and the call retried. Concurrent failures share one refresh, because the
+  API revokes the whole session family when a refresh token is reused.
+- **A revoked device key ends the device's trust:**
+  - the app clears its queue state, its key and its session;
+  - offline events signed with the old key are rejected
+    (`DEVICE_KEY_REVOKED`);
+  - only a session started after the revocation may register a new key.
+- **Mock location:**
+  - Android's `mocked` flag is sent as DETECTED, and the existing rule
+    refuses it.
+  - iOS and the web send UNAVAILABLE: the platform cannot tell, and the
+    app never claims otherwise.
+  - Movement heuristics (impossible speed, zero accuracy, a frozen
+    position) are recorded for review, never a refusal.
+- **Attestation:** an adapter interface only. It reports `DEV_MOCK` in
+  development and `UNAVAILABLE` otherwise; Play Integrity / App Attest are
+  not implemented, and nothing claims a verified device.
+- **Push content:**
+  - The lock screen shows only the type's Arabic label and a generic
+    «عرض التفاصيل».
+  - The data holds ids for the deep link only: never another person's
+    name and never an amount.
+  - Push follows each member's own preferences. A token that Expo reports
+    as unregistered is removed, and signing out removes the device's token.
+- **Attendance photos and voice notes:**
+  - private storage, type checked by content, image metadata removed;
+  - unattached uploads bounded per worker;
+  - attached only by their own uploader;
+  - viewable only by an Owner (an audited 60-second URL).
+- **Transcripts** are never logged; production has no transcription
+  provider by default (`TRANSCRIPTION_PROVIDER=none`).
+- **Co-workers' data:** before Step 9 a worker's shift list and detail
+  carried every co-worker's name and phone number; now only the worker's
+  own assignment. The leak scanner checks it.
+- **Android cleartext:** allowed only in builds whose API address is plain
+  `http://` (a phone testing against a computer on the LAN). Production
+  builds (`https://`) keep Android's default.
+
 ## Sensitive logging
 
 Pino structured logging is used throughout the API. OTP codes are only
@@ -165,6 +216,14 @@ drill-down, the calculation run, and `GET /payroll-statements/me`.
   statement is the Worker's own item and that the response contains no other
   worker's id; the same month seen by a worker without pay in it has no
   statement at all.
+
+Step 9 added 4 GET routes (60 in all): emergency eligibility, the
+notification preferences, and the worker's own pay routes
+(`GET /time-entries/:id/my-pay`, `GET /payroll-statements/me/current`).
+The pay routes join the Worker-own-money exceptions,
+with own-data checks (another worker's entry is 404; the open-month
+estimate takes no worker id). It also checks that a worker's shift list and
+detail hold no co-worker's profile id, phone or name.
 
 Step 8 added 6 GET routes (56 in all):
 - the invitation list and the public join page;

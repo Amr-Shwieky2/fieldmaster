@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import {
   AccountStatus,
   FileAssetPurpose,
+  type OnboardingFilePurpose,
   InvitationStatus,
   MAX_UPLOAD_BYTES,
   NotificationType,
@@ -58,7 +59,7 @@ export interface PublicInvitation {
   expiresAt: string;
   privacyNoticeVersion: string;
   maxUploadBytes: number;
-  allowedContentTypes: Record<FileAssetPurpose, string[]>;
+  allowedContentTypes: Record<OnboardingFilePurpose, string[]>;
 }
 
 /** The single answer to every unusable token (invalid, unknown, used, expired, revoked): nothing tells them apart. */

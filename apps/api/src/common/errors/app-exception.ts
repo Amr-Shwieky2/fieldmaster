@@ -72,4 +72,15 @@ export const ErrorCodes = {
   UPLOAD_NOT_FOUND: "UPLOAD_NOT_FOUND",
   INVITATION_ALREADY_USED: "INVITATION_ALREADY_USED",
   REPORT_NOT_READY: "REPORT_NOT_READY",
+  // Step 9: the mobile worker app.
+  /** Sign-in with a valid code, for an application still waiting for the Owner's decision. */
+  ACCOUNT_PENDING_APPROVAL: "ACCOUNT_PENDING_APPROVAL",
+  /** Sign-in with a valid code, for an application the Owner rejected. */
+  ACCOUNT_REJECTED: "ACCOUNT_REJECTED",
+  /** Sign-in with a valid code (or any call), for a suspended member. */
+  ACCOUNT_SUSPENDED: "ACCOUNT_SUSPENDED",
+  /** An offline event signed with a key an Owner revoked (the app clears its queue and signs in again). */
+  DEVICE_KEY_REVOKED: "DEVICE_KEY_REVOKED",
+  /** The transcription provider failed or is not configured. */
+  TRANSCRIPTION_UNAVAILABLE: "TRANSCRIPTION_UNAVAILABLE",
 } as const;

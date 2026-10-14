@@ -1,11 +1,14 @@
 import { Injectable } from "@nestjs/common";
+import type { Shift } from "@prisma/client";
 import {
   CheckInMethod,
   ClockEventType,
   EventOrigin,
   LocationValidationStatus,
+  MockLocationState,
   NotificationType,
   ShiftStatus,
+  SummarySource,
   TimeEntryStatus,
 } from "@fieldmaster/shared-types";
 import { calculateShiftCompensation, rawDurationMinutes as minutesBetween, toBusinessDate } from "@fieldmaster/shared-validation";
@@ -23,6 +26,7 @@ import { loadWorkerName, withoutFinancialData, type NotificationData } from "../
 import { OrganizationSettingsService } from "../../common/settings/organization-settings.service";
 import { LocationValidationService } from "./location-validation.service";
 import { RejectedClockAttemptsService, type RejectedClockAttemptInput } from "./rejected-clock-attempts.service";
+import { AttendanceAttachmentsService } from "./attendance-attachments.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { ClockInDto } from "./dto/clock-in.dto";
 import type { ClockOutDto } from "./dto/clock-out.dto";
@@ -41,6 +45,7 @@ export class ClockEventsService {
     private readonly settings: OrganizationSettingsService,
     private readonly notificationAudience: NotificationAudienceService,
     private readonly realtime: RealtimeEventsService,
+    private readonly attachments: AttendanceAttachmentsService,
   ) {}
 
   async clockIn(organizationId: string, dto: ClockInDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string) {
@@ -87,7 +92,7 @@ export class ClockEventsService {
 
     const deviceTimestamp = new Date(dto.deviceTimestamp);
     const origin = dto.origin ?? EventOrigin.ONLINE;
-    const mockSuspected = dto.mockLocationSuspected ?? false;
+    const mockSuspected = isMockLocationSuspected(dto);
 
     // The organization's limits (settings), read on every clock event.
     const settings = await this.settings.get(organizationId);
@@ -114,6 +119,7 @@ export class ClockEventsService {
         longitude: dto.longitude,
         accuracyMeters: dto.accuracyMeters,
         mockLocationSuspected: mockSuspected,
+        mockLocationState: dto.mockLocationState ?? null,
         ...evidence,
       });
       return error;
@@ -190,6 +196,11 @@ export class ClockEventsService {
       distanceFromSiteMeters = distanceCheck.distanceMeters;
     }
 
+    // Step 9: the photos must be the worker's own, unused uploads (400 UPLOAD_NOT_FOUND otherwise).
+    const attachmentOwner = { organizationId, workerProfileId: actor.workerProfileId };
+    const attachments = { photoAssetIds: dto.photoAssetIds };
+    await this.attachments.assertUsable(attachmentOwner, attachments);
+
     const serverReceivedAt = new Date();
     // Server time is authoritative for *deviation detection* (spec 19.1),
     // but the business-relevant clock-in instant for an offline event is
@@ -232,6 +243,8 @@ export class ClockEventsService {
           altitude: dto.altitude,
           locationProvider: dto.locationProvider,
           mockLocationSuspected: mockSuspected,
+          mockLocationState: dto.mockLocationState ?? null,
+          locationSignals: dto.locationSignals ?? [],
           distanceFromSiteMeters,
           locationValidationStatus,
           temporaryCheckInPointId,
@@ -240,6 +253,7 @@ export class ClockEventsService {
       });
 
       await this.rejectedAttempts.linkToNewEntry(tx, timeEntry);
+      await this.attachments.attach(tx, attachmentOwner, timeEntry.id, attachments);
 
       return { timeEntry, clockEvent };
     });
@@ -271,7 +285,8 @@ export class ClockEventsService {
       ownerData: clockInData,
     });
 
-    return { status: 201, body: { timeEntry, clockEvent } };
+    // The receipt (Step 9): the clock event (its id is the reference, with the server and device times), the entry and its shift.
+    return { status: 201, body: { timeEntry: { ...timeEntry, shift: shiftColumns(shift) }, clockEvent } };
   }
 
   async clockOut(organizationId: string, dto: ClockOutDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string) {
@@ -295,14 +310,17 @@ export class ClockEventsService {
       throw new AppException(409, ErrorCodes.NO_ACTIVE_TIME_ENTRY, "You do not have an open clock-in to close.");
     }
 
-    const hasSummary = (dto.summaryText && dto.summaryText.trim().length > 0) || (dto.voiceNoteUrl && dto.voiceNoteUrl.trim().length > 0);
-    if (!hasSummary) {
+    // The mandatory summary (spec 21): typed text, or a voice note (Step 9: an uploaded VOICE_SUMMARY; the
+    // legacy voiceNoteUrl still counts for older clients).
+    const hasText = (dto.summaryText?.trim().length ?? 0) > 0;
+    const hasVoiceNote = Boolean(dto.voiceNoteAssetId) || (dto.voiceNoteUrl?.trim().length ?? 0) > 0;
+    if (!hasText && !hasVoiceNote) {
       throw new AppException(400, ErrorCodes.SUMMARY_REQUIRED, "A task summary (text or voice note) is required to clock out.");
     }
 
     const deviceTimestamp = new Date(dto.deviceTimestamp);
     const origin = dto.origin ?? EventOrigin.ONLINE;
-    const mockSuspected = dto.mockLocationSuspected ?? false;
+    const mockSuspected = isMockLocationSuspected(dto);
 
     // The organization's limits (settings), read on every clock event.
     const settings = await this.settings.get(organizationId);
@@ -329,6 +347,7 @@ export class ClockEventsService {
         longitude: dto.longitude,
         accuracyMeters: dto.accuracyMeters,
         mockLocationSuspected: mockSuspected,
+        mockLocationState: dto.mockLocationState ?? null,
       });
       return error;
     };
@@ -357,6 +376,11 @@ export class ClockEventsService {
     }
     const rawDurationMinutes = minutesBetween(timeEntry.clockInAt!, effectiveAt);
 
+    // Step 9: the photos and the voice note must be the worker's own, unused uploads (400 UPLOAD_NOT_FOUND otherwise).
+    const attachmentOwner = { organizationId, workerProfileId: actor.workerProfileId };
+    const attachments = { photoAssetIds: dto.photoAssetIds, voiceNoteAssetId: dto.voiceNoteAssetId };
+    await this.attachments.assertUsable(attachmentOwner, attachments);
+
     const clockEvent = await this.prisma.$transaction(async (tx) => {
       const clockEvent = await tx.clockEvent.create({
         data: {
@@ -376,10 +400,14 @@ export class ClockEventsService {
           altitude: dto.altitude,
           locationProvider: dto.locationProvider,
           mockLocationSuspected: mockSuspected,
+          mockLocationState: dto.mockLocationState ?? null,
+          locationSignals: dto.locationSignals ?? [],
           locationValidationStatus,
           appVersion: dto.appVersion,
         },
       });
+
+      await this.attachments.attach(tx, attachmentOwner, timeEntry.id, attachments);
 
       await tx.dailySummary.create({
         data: {
@@ -387,6 +415,9 @@ export class ClockEventsService {
           timeEntryId: timeEntry.id,
           text: dto.summaryText,
           voiceNoteUrl: dto.voiceNoteUrl,
+          voiceNoteAssetId: dto.voiceNoteAssetId ?? null,
+          summarySource: dto.summarySource ?? (dto.voiceNoteAssetId ? SummarySource.VOICE : SummarySource.TYPED),
+          transcription: dto.transcription ?? null,
           taskCategory: dto.taskCategory,
           materialsUsed: dto.materialsUsed,
           problemsEncountered: dto.problemsEncountered,
@@ -419,10 +450,10 @@ export class ClockEventsService {
     });
 
     const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: timeEntry.id }, include: { dailySummary: true } });
-    // `clockEvent` is exposed alongside `body` for internal callers (offline
-    // sync needs its locationValidationStatus/id); the public controller
-    // response is `body` alone, unchanged from before this refactor.
-    return { status: 200, body: updated, clockEvent };
+    // The public response is the closed entry, as before, plus (Step 9) what the app's receipt shows: the
+    // clock-out event (its id is the reference, with the server and device times) and the shift.
+    // `clockEvent` is also exposed beside `body` for internal callers (offline sync reads its status and id).
+    return { status: 200, body: { ...updated, shift: shiftColumns(timeEntry.shift), clockEvent }, clockEvent };
   }
 
   /**
@@ -518,4 +549,19 @@ export class ClockEventsService {
       ownerData,
     });
   }
+}
+
+/**
+ * The phone's mock-location verdict. Step 9: `mockLocationState: DETECTED`
+ * is refused exactly like `mockLocationSuspected: true` (the existing rule);
+ * NOT_DETECTED and UNAVAILABLE never refuse anything on their own.
+ */
+function isMockLocationSuspected(dto: { mockLocationSuspected?: boolean; mockLocationState?: string }): boolean {
+  return (dto.mockLocationSuspected ?? false) || dto.mockLocationState === MockLocationState.DETECTED;
+}
+
+/** The shift's own columns for the receipt, without the geofence and site loaded with it. */
+function shiftColumns(shift: Shift & { geofence?: unknown; site?: unknown }): Shift {
+  const { geofence: _geofence, site: _site, ...columns } = shift;
+  return columns;
 }

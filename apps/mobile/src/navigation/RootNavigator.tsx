@@ -10,6 +10,15 @@ import { ClockInScreen } from "../screens/ClockInScreen";
 import { ClockOutScreen } from "../screens/ClockOutScreen";
 import { HistoryScreen } from "../screens/HistoryScreen";
 import { OfflineQueueScreen } from "../screens/OfflineQueueScreen";
+import { ShiftDetailsScreen } from "../screens/ShiftDetailsScreen";
+import { EmergencyScreen } from "../screens/EmergencyScreen";
+import { AccountStateScreen } from "../screens/AccountStateScreen";
+import { HistoryDetailScreen } from "../screens/HistoryDetailScreen";
+import { NotificationPreferencesScreen } from "../screens/NotificationPreferencesScreen";
+import { NotificationsScreen } from "../screens/NotificationsScreen";
+import { SalaryScreen } from "../screens/SalaryScreen";
+import { SupervisorScreen } from "../screens/SupervisorScreen";
+import { flushPendingLink, navigationRef } from "../lib/linking";
 import type { RootStackParamList } from "./types";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -27,21 +36,32 @@ const theme: Theme = {
 };
 
 export function RootNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, accountState } = useAuth();
 
   if (isLoading) return <LoadingView />;
 
   // React Navigation reads RTL from I18nManager, which react-native-web never sets: pass it explicitly.
+  // The ref and flushPendingLink open a tapped notification's screen once the signed-in screens exist (linking.ts).
   return (
-    <NavigationContainer theme={theme} direction={isLayoutRTL() ? "rtl" : "ltr"}>
+    <NavigationContainer ref={navigationRef} onReady={flushPendingLink} onStateChange={flushPendingLink} theme={theme} direction={isLayoutRTL() ? "rtl" : "ltr"}>
       <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-        {isAuthenticated ? (
+        {accountState ? (
+          // Pending approval, rejected, suspended or a revoked device key: nothing else is mounted.
+          <Stack.Screen name="AccountState" component={AccountStateScreen} />
+        ) : isAuthenticated ? (
           <>
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="ClockIn" component={ClockInScreen} options={{ presentation: "modal" }} />
             <Stack.Screen name="ClockOut" component={ClockOutScreen} options={{ presentation: "modal" }} />
             <Stack.Screen name="History" component={HistoryScreen} />
             <Stack.Screen name="OfflineQueue" component={OfflineQueueScreen} />
+            <Stack.Screen name="ShiftDetails" component={ShiftDetailsScreen} />
+            <Stack.Screen name="Emergency" component={EmergencyScreen} />
+            <Stack.Screen name="HistoryDetail" component={HistoryDetailScreen} />
+            <Stack.Screen name="Salary" component={SalaryScreen} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
+            <Stack.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} />
+            <Stack.Screen name="Supervisor" component={SupervisorScreen} />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />

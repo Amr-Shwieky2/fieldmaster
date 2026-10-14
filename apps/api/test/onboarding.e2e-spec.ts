@@ -303,7 +303,8 @@ describe("Worker onboarding (Step 8)", () => {
       expiresAt: created.body.expiresAt,
       privacyNoticeVersion: PRIVACY_NOTICE_VERSION,
       maxUploadBytes: MAX_UPLOAD_BYTES,
-      allowedContentTypes: UPLOAD_CONTENT_TYPES,
+      // Only the onboarding purposes (Step 9: the app's attendance photos and voice summaries are never offered here).
+      allowedContentTypes: { IDENTITY_DOCUMENT: UPLOAD_CONTENT_TYPES.IDENTITY_DOCUMENT, PROFILE_PHOTO: UPLOAD_CONTENT_TYPES.PROFILE_PHOTO },
     });
 
     // The identity document: a phone photo with Exif (GPS) -- stored without it, the image itself unchanged.
