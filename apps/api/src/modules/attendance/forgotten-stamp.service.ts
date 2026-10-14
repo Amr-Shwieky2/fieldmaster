@@ -37,8 +37,8 @@ const INFRACTION_FIELDS_WITHOUT_DEDUCTION = {
  * deducts the penalty (1000 agorot by default), recorded as a standing
  * PayrollAdjustment that gets attached to that month's PayrollItem once
  * payroll is calculated. How many are free and how much the penalty is come
- * from the work rules in force on the date of the infraction's time entry;
- * an adjustment already recorded keeps the amount it was created with.
+ * from the work rules in force on the day of the infraction; an adjustment
+ * already recorded keeps the amount it was created with.
  */
 @Injectable()
 export class ForgottenStampService {
@@ -58,12 +58,13 @@ export class ForgottenStampService {
     businessMonth: string,
     actor: AuthenticatedUser,
     correlationId: string,
+    /** The day the infraction happens on (the added clock-in's date, or today for a correction to an existing entry): picks the work rules. */
+    ruleDate?: string,
   ) {
     const existingCount = await tx.forgottenStampInfraction.count({ where: { workerProfileId, businessMonth } });
     const monthlySequenceNumber = existingCount + 1;
-    // The rules in force on the day of the entry the correction is about (or, with no entry date, the first day of the month).
-    const entry = await tx.timeEntry.findUnique({ where: { id: timeEntryId }, select: { businessDate: true } });
-    const rules = await this.workRules.rulesOn(organizationId, entry?.businessDate ?? `${businessMonth}-01`, tx);
+    // The work rules in force on the day of the infraction (a month's first day when the caller gives none).
+    const rules = await this.workRules.rulesOn(organizationId, ruleDate ?? `${businessMonth}-01`, tx);
     const evaluation = evaluateForgottenStampInfraction(monthlySequenceNumber, rules);
 
     const infraction = await tx.forgottenStampInfraction.create({

@@ -103,6 +103,7 @@ export class ManualCorrectionsService {
             forgottenStampInfractionMonth({ createsTimeEntry: true, clockInAt }),
             actor,
             meta.correlationId,
+            toBusinessDate(clockInAt),
           );
         }
 
@@ -196,6 +197,7 @@ export class ManualCorrectionsService {
           forgottenStampInfractionMonth({ createsTimeEntry: false }),
           actor,
           meta.correlationId,
+          toBusinessDate(new Date()),
         );
       }
 

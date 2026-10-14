@@ -1576,6 +1576,8 @@ export interface MyAccess {
   permissions: Permission[];
   isTimeTrackable: boolean;
   workerProfileId: string | null;
+  /** The rules in force today that apps show or apply (never money: the forgotten-stamp penalty is not here). */
+  workRules: Pick<WorkRules, "standardDayMinutes" | "overtimeThresholdMinutes" | "emergencyMinutesBefore" | "emergencyMinutesAfter" | "clockInEarlyWindowMinutes">;
   scope: { restricted: boolean; projectIds: string[]; siteIds: string[]; visibleProjectIds: string[] };
 }
 

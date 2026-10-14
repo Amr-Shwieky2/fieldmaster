@@ -27,15 +27,20 @@ export function shiftScopeWhere(scope: MemberScope): Prisma.ShiftWhereInput | un
   return { OR: [{ projectId: { in: scope.projectIds } }, { siteId: { in: scope.siteIds } }] };
 }
 
-/** A project the member can see (selected whole, or holding a site they selected). */
+/**
+ * A project the member can see (selected whole, or holding a site they selected).
+ * Wrapped in `AND` on purpose: spread next to a lookup by `id`, a bare `id`
+ * condition would replace the requested id and answer a project that was not asked for.
+ */
 export function projectScopeWhere(scope: MemberScope): Prisma.ProjectWhereInput | undefined {
   if (!scope.restricted) return undefined;
-  return { id: { in: scope.visibleProjectIds } };
+  return { AND: [{ id: { in: scope.visibleProjectIds } }] };
 }
 
+/** A visible site (wrapped in `AND` for the same reason as `projectScopeWhere`). */
 export function siteScopeWhere(scope: MemberScope): Prisma.SiteWhereInput | undefined {
   if (!scope.restricted) return undefined;
-  return { id: { in: scope.siteIds } };
+  return { AND: [{ id: { in: scope.siteIds } }] };
 }
 
 /** A time entry of an in-scope shift. */

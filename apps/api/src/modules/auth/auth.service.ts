@@ -15,6 +15,7 @@ import type { OtpProvider } from "./otp-providers/otp-provider.interface";
 import type { VerifyOtpDto } from "./dto/verify-otp.dto";
 import type { DevLoginDto } from "./dto/dev-login.dto";
 import { parseDurationMs } from "./duration.util";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 
 const OTP_TTL_MS = Number(process.env.OTP_TTL_SECONDS ?? 300) * 1000;
@@ -71,6 +72,7 @@ export class AuthService {
     private readonly auditService: AuditService,
     @Inject(OTP_PROVIDER) private readonly otpProvider: OtpProvider,
     @Inject(APP_ENVIRONMENT) private readonly appEnvironment: AppEnvironment,
+    private readonly workRules: WorkRulesService,
   ) {}
 
   async requestOtp(phoneNumber: string): Promise<void> {
@@ -400,6 +402,8 @@ export class AuthService {
   async me(user: AuthenticatedUser) {
     const permissions = [...(user.permissions ?? [])];
     const scope = user.scope ?? { restricted: false as const };
+    // The rules in force today that the app shows or applies (no money: the penalty is not here).
+    const rules = await this.workRules.current(user.organizationId);
     return {
       userId: user.sub,
       membershipId: user.membershipId,
@@ -410,6 +414,13 @@ export class AuthService {
       permissions,
       isTimeTrackable: user.isTimeTrackable,
       workerProfileId: user.workerProfileId,
+      workRules: {
+        standardDayMinutes: rules.standardDayMinutes,
+        overtimeThresholdMinutes: rules.overtimeThresholdMinutes,
+        emergencyMinutesBefore: rules.emergencyMinutesBefore,
+        emergencyMinutesAfter: rules.emergencyMinutesAfter,
+        clockInEarlyWindowMinutes: rules.clockInEarlyWindowMinutes,
+      },
       scope: scope.restricted ? { restricted: true, projectIds: scope.projectIds, siteIds: scope.siteIds, visibleProjectIds: scope.visibleProjectIds } : { restricted: false, projectIds: [], siteIds: [], visibleProjectIds: [] },
     };
   }
