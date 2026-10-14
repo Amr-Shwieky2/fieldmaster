@@ -11,22 +11,30 @@ pnpm --filter @fieldmaster/api test:e2e   # integration tests against a real dat
 
 `pnpm test` (root) runs, in parallel via Turborepo:
 
-- `packages/shared-validation` — 103 pure-function unit tests (Jest),
+- `packages/shared-validation` — 115 pure-function unit tests (Jest),
   including the identity-document rules of Step 8 (Israeli check digit, the
-  Palestinian ID's 9 digits, all zeros refused for every type)
-- `apps/api` — 128 unit tests (Jest: RBAC, location validation, app
+  Palestinian ID's 9 digits, all zeros refused for every type) and, since
+  the flexible organization model, the work rules (validation, the version
+  in force on a date, every formula with other rules), a month calculated
+  per worker equal to each worker alone, and month date ranges
+- `apps/api` — 147 unit tests (Jest: RBAC and the permission catalog
+  (built-in roles, what each permission needs, the money group), report
+  access by permission, location validation, app
   environment, notification money stripping; Step 8: report access, filters,
   hashing, CSV and templates, PDF rendering; upload type detection, metadata
   stripping, invitation tokens and status; Step 9: audio type detection,
   transcription config, the push provider and its content, notification
   preferences, the offline canonical form)
-- `packages/i18n` — 85 tests (Vitest): the shared Arabic formatter (including a
+- `packages/i18n` — 88 tests (Vitest): the shared Arabic formatter (including a
   check that its built-in Israel time-zone rules match Intl for every hour of
   2024-2030), error-code mapping, enum labels, ICU validity of the shared
   messages and the translation-check library
-- `apps/admin-web` — 697 tests (Vitest + React Testing Library), all in
+- `apps/admin-web` — 789 tests (Vitest + React Testing Library), all in
   Arabic: every page, notification text, the admin messages and the
-  financial-isolation guards
+  financial-isolation guards; since the flexible organization model, every
+  page and menu item decided by permission (built-in and custom roles, a
+  member restricted to some projects), the roles and work-rules pages, and
+  the users page's role, scope and Owner limit
 - `apps/mobile` — 496 tests (Jest + jest-expo + React Native Testing Library),
   all in Arabic.
   - Every screen and state: loading, empty, error from the API code,
@@ -42,7 +50,7 @@ pnpm --filter @fieldmaster/api test:e2e   # integration tests against a real dat
     (every package at once), so the timeout is 15 s.
 
 `apps/api`'s `test:e2e` (not part of `pnpm test` — it's slower and needs a
-live database) runs 176 integration tests (Jest + Supertest) against a real
+live database) runs 210 integration tests (Jest + Supertest) against a real
 NestJS app instance, a dedicated `fieldmaster_test` Postgres database, Redis
 and MinIO (the upload and report tests store real files; CI starts a MinIO
 container for them). Run it with the machine awake: a sleep in the middle
@@ -119,13 +127,41 @@ Against a real running NestJS app + Postgres, covering (see
 - **The leak scanner (Step 8, 60 GET routes since Step 9):** It now also searches every
   response for the seeded ID numbers, bank details and invitation tokens,
   as values in any string, not only as keys.
+- **Flexible organization model** (28 new tests in 5 new files, plus 2 in
+  the leak scanner):
+  - `roles-permissions.e2e-spec.ts` (8): built-in roles unchanged, custom
+    roles created from the catalog, money behind `VIEW_FINANCIALS`, changes
+    applied on the next request, last-administrator protection (including
+    two simultaneous demotions, decided by the advisory lock), audit old →
+    new;
+  - `member-scope.e2e-spec.ts` (7): a member restricted to one project, in
+    lists, by id (not found, cannot change), reports, notifications (new and
+    old), the live channel, the organization-wide permissions gone while
+    restricted, and no Turan call-outs or onboarding applicants;
+  - `work-rules.e2e-spec.ts` (7): 540 → 480 from next month (this month
+    still 540, next month 480, a finalized month unchanged); a new penalty
+    leaving the adjustments already recorded as they were; a change needs a
+    date after today, valid values, a reason and a real change; only a money
+    viewer changes the penalty; the months a change reaches; the clock-in
+    window and the emergency minutes from the rules in force;
+  - `query-counts.e2e-spec.ts` (1): the heavy pages and jobs send the same
+    number of SQL statements for 4 workers as for 40 (and log the counts);
+  - `pagination.e2e-spec.ts` (3): every growing list as a page and whole,
+    malformed values refused;
+  - the leak scanner adds custom roles (one with every permission but money,
+    one restricted to another project) and a positive control with money;
+  - changed on purpose: the 2-Owner limit test in `auth-and-rbac` became
+    the configurable-limit test, and two tests in `users-devices` set the
+    limit to 2 to keep checking the limit reached.
+- **Load test** (not part of `test:e2e`): `apps/api/scripts/load-test/`, see
+  `scalability.md` for how to run it and the numbers.
 - **Offline sync** (5 tests, added this pass): full offline clock-in/out
   round trip using genuine Ed25519 signatures and the device timestamp as
   the authoritative business time; invalid-signature rejection creating no
   attendance record; unregistered-device rejection; duplicate-submission
   detection; Owner-revoked-key rejection
 
-### Admin web (`apps/admin-web`, 697 tests)
+### Admin web (`apps/admin-web`, 789 tests)
 
 The app is Arabic only, so every test renders the real `ar.json`
 (`src/test/render-with-intl.tsx`). Each page has tests for its content,
@@ -139,7 +175,10 @@ not implying zero pay). `owner-only.test.tsx` — 3 tests proving the
 `OwnerOnly` wrapper genuinely never puts financial children in the DOM for
 a Field Manager or Worker session (not just CSS-hidden) and redirects,
 using a real `AuthProvider` + seeded `localStorage` session, not a mocked
-auth hook.
+auth hook. Since the flexible organization model `OwnerOnly` is
+`RequirePermission` with the financial permission, and
+`require-permission.test.tsx` adds custom roles, a restricted member and the
+wait for `GET /auth/me`.
 
 ## What's not covered
 

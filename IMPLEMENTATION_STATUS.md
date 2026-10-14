@@ -1,5 +1,79 @@
 # FieldMaster — Implementation Status
 
+## Flexible organization model — configurable roles, limits and work rules (2026-10-14)
+
+Scope: API, database and the admin web's settings screens (the mobile app
+uses it in the next step). Arabic only in the UI. Not Step 10A. Built on main
+after PRs #16 and #17. Design: `docs/technical-decisions.md` ("Flexible
+organization model"); rules: `docs/authorization-matrix.md`,
+`docs/payroll-calculations.md`; scale: `docs/scalability.md`.
+
+**What became configurable:**
+- **Roles are permission sets.** The built-in roles (المالك، مدير ميدان، عامل)
+  are system roles with exactly today's permissions; an Owner builds custom
+  roles from a grouped Arabic checklist (الحضور، الجدولة، المواقع، العمال،
+  الرواتب والمالية، التقارير، الإعدادات، سجل التدقيق). A member has one role;
+  time tracking stays a separate flag. Every "is Owner" check for money now
+  checks `VIEW_FINANCIALS` («رؤية المبالغ المالية»).
+- **Project scope per member**: all projects, or selected projects/sites —
+  applied to lists, by-id reads, the operations map, approvals, reports,
+  notifications and the real-time channels; a restricted member loses the
+  organization-wide permissions.
+- **The Owner limit** «الحد الأقصى للمالكين» replaces the fixed two (empty =
+  no limit; existing organizations keep 2), enforced by the service and the
+  `enforce_max_owners` trigger under one advisory lock.
+- **Work rules in effective-dated versions**: standard day (540), overtime
+  threshold (540), free forgotten stamps (2), penalty (1,000 agorot),
+  emergency minutes before/after (60/15), clock-in early window (60).
+- **Safety:** at least one active member always manages roles and settings
+  (`LAST_ADMIN` / `LAST_ACTIVE_OWNER`, advisory lock); every change audited
+  old → new; changes apply on the next request.
+
+**How history is protected:** a rule change is a new version effective after
+today (a trigger refuses updates and deletes); each calculation uses the
+version in force on the entry's business date (the infraction's day, the
+call-out's start, the shift's date); a finalized month keeps its snapshot
+(the versions are stored in it and in its fingerprint); a penalty change
+never touches adjustments already recorded. The settings page shows the
+history and which open months a change will recalculate.
+
+**Admin web:** Settings → «الأدوار والصلاحيات» (`/settings/roles`) and
+«قواعد العمل» (`/settings/work-rules`); the users page assigns any role,
+the project scope and the Owner limit; menus and pages decide from
+`GET /auth/me`'s permissions.
+
+**Scalability:** opt-in pagination on every growing list; indexes for the
+organization and scope filters (`20261015090200_scale_indexes`); month
+filters as date ranges; constant query counts (tested); the payroll job
+batches per worker; the load test (`apps/api/scripts/load-test/`): 1
+organization, 500 workers, 50 sites, 6 months — every interactive p95 under
+one second with 10 requests in flight (the full table:
+`docs/scalability.md`).
+
+**Migrations:** `20261015090000_org_role_custom`,
+`20261015090100_flexible_organization`, `20261015090200_scale_indexes` (new
+ones only; nothing on main edited).
+
+**Tests:** 1,698 → 1,845 (shared-validation 103 → 115, i18n 85 → 88, mobile
+496, API unit 135 → 147, admin web 697 → 789, e2e 182 → 210). Changed on
+purpose, as the spec allows: the 2-Owner limit test in `auth-and-rbac`
+became the configurable-limit test; two tests in `users-devices` set the
+limit to 2 (and were retitled). Nothing removed or weakened.
+
+**Known gaps (for later):**
+- The admin dashboard's pending count still reads the whole list (its
+  existing test mocks that call); `?pageSize=1` gives the total for 20 ms.
+- `fixedRules` on `GET /organizations/me/settings` has no overtime
+  threshold (its existing test asserts the exact shape); the work-rules
+  page shows it.
+- The correction dialog's penalty preview uses the default rules.
+- The scope editor can pick projects only for a member who also holds
+  `MANAGE_SITES` (`GET /projects` and `/sites` need it).
+- Some Arabic copy still says «للمالك فقط» where it now means "whoever may
+  see money" (left so the existing tests stay unchanged).
+- The mobile app still decides by role (next step); a custom role with no
+  admin-web permission sees an empty menu.
+
 ## Step 9 of 10 — the complete mobile worker app (2026-10-13)
 
 Scope: `apps/mobile` and the small API additions it needs. Arabic only, RTL,
@@ -571,7 +645,9 @@ checks. No business rule changed. Design and reasoning are in
 **Users and devices (`/settings/users`, Owner only):**
 - **Members:** name, phone, role, status, time tracking, last active.
 - **Actions, each with a reason and audited:**
-  - change role (at most 2 active Owners; never the last active Owner);
+  - change role (at most 2 active Owners; never the last active Owner —
+    since the flexible organization model: the organization's own Owner
+    limit, and never the last member who manages roles and settings);
   - suspend / reactivate / archive;
   - time tracking on/off (on creates a worker profile; off refused for a
     WORKER or with an open entry).
@@ -1506,7 +1582,7 @@ the same org; a Field Manager gets `403` on every financial route).
 
 - ✅ `Permission` catalog + `PermissionsGuard`, enforced per-route
 - ✅ Financial fields (`VIEW_COMPENSATION`, `VIEW_PAYROLL`, `VIEW_FINANCIAL_DASHBOARD`, …) are **never** in the Field Manager's permission set — enforced at the guard layer *and* the DTO-serialization layer (`worker-response.mapper.ts` strips `compensation` unless the viewer is an Owner or the worker themself)
-- ✅ Max-2-active-Owners enforced twice: `OwnerLimitService` inside the same transaction, and a Postgres trigger (`trg_enforce_max_two_owners`) as the DB-level backstop — both paths tested
+- ✅ The Owner limit enforced twice: `OwnerLimitService` inside the same transaction, and a Postgres trigger as the DB-level backstop — both paths tested. It was a fixed two (`trg_enforce_max_two_owners`) until the flexible organization model made it the setting «الحد الأقصى للمالكين» (`trg_enforce_max_owners`, empty = no limit, existing organizations keep 2)
 - ✅ Temporary Supervisor implemented as a time-boxed capability (`TemporarySupervisorAssignment` with `activatedAt`/`expiresAt`/`revokedAt`), checked live rather than granted as a static role
 - ✅ (Step 6) A Temporary Supervisor's read scope is their shift's workers only, through `GET /temporary-supervisors/:assignmentId/shift` (operational data, no money or phone numbers), checked live on every call; the leak scanner scans it as a third role
 

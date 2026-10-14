@@ -1768,3 +1768,126 @@ against a computer on the LAN needs it, production must not.
 (`android.usesCleartextTraffic`) only when `EXPO_PUBLIC_API_URL` starts with
 `http://`, so a build with an `https://` API keeps Android's default.
 `app.json` stays the base config, where `eas init` writes the projectId.
+
+## Flexible organization model: configurable roles, limits and work rules
+
+One app for every member: what a member sees and may do comes from their
+permissions, and the business numbers that were constants are organization
+settings that never change the past. See `authorization-matrix.md` and
+`payroll-calculations.md` for the rules themselves.
+
+### The built-in roles' permissions live in code, custom roles' in the database
+
+The three built-in roles are rows of `roles` (so a member always points at a
+role record and the users page lists them like any other), but their
+permission sets come from `SYSTEM_ROLE_PERMISSIONS` in
+`@fieldmaster/shared-types`, not from stored arrays. They are exactly the
+sets the code enforced before, so migrating every existing member is only
+filling `role_id` — no behavior changes, proven by the existing suites
+passing unchanged — and a later code change to a built-in role reaches every
+organization at once. Custom roles store their checked permissions
+(`roles.permissions`), validated against the catalog and completed with what
+each permission needs (`PERMISSION_REQUIRES`).
+
+The membership keeps its `role` column as the role's kind (OWNER,
+FIELD_MANAGER, WORKER or the new CUSTOM): the Owner limit, the token's `role`
+claim, the mobile app and the notification toggles ("notify Owners" /
+"notify Field Managers") read it. A trigger fills `role_id` from the kind
+for built-in kinds, so code that still creates memberships by kind (seed,
+onboarding, fixtures) keeps working.
+
+### Permissions are resolved per request, not carried in the token
+
+The JWT guard loads the membership with its role record and scope in one
+query (`relationLoadStrategy: "join"`, Prisma's `relationJoins` preview) and
+puts the effective permissions and the scope on the request. A role, a
+permission list or a scope change therefore applies to the very next
+request, like the role and status checks of Step 6, and a stolen token never
+carries more than the member currently has.
+
+### Project scope: one filter per kind of record, applied in the query
+
+`common/scope/scope-filters.ts` turns a member's scope into Prisma `where`
+fragments for shifts, projects, sites, time entries and workers. The
+fragments are applied in the query (never fetch-then-filter), wrapped in an
+`AND` so they cannot overwrite the id a route asks for — the first version
+spread `{ id: { in } }` into a by-id query and let a restricted member read
+another project's site; the scope tests caught it. Organization-wide
+permissions (users, roles, settings changes, the audit log, payroll,
+compensation changes, onboarding approval, bank details, the Turan rota) are
+removed from a restricted member whatever the role says, because none of
+them can be cut to a project. Real-time follows the same scope: the gateway
+joins a member to `ops:{org}` or to per-project and per-site rooms, and
+operations events carry the shift's project and site.
+
+### "At least one administrator" and the Owner limit use advisory locks
+
+Counting the members who hold `MANAGE_ROLES` + `MANAGE_ORG_SETTINGS` and then
+changing one of them is a check-then-act race; two concurrent demotions
+could each see "one other admin left". Every change that can remove an
+administrator takes `pg_advisory_xact_lock(hashtextextended('admins:'||org))`
+first. The Owner limit takes `owners:'||org` the same way, in the service
+and in the `enforce_max_owners` trigger, which replaces
+`trg_enforce_max_two_owners` (the fixed limit of two). Existing
+organizations keep 2 so nothing changes for them; a new organization has no
+limit until an Owner sets one.
+
+### Work rules: effective-dated, immutable versions
+
+A rule change is a new version effective from a future date; there is no
+"edit". This keeps three promises at once: a day that already happened is
+never repriced, a finalized payroll month keeps its stored snapshot, and the
+history page can show exactly what applied when. The alternative — editable
+current values plus a change log — would have needed every calculation to
+replay the log. The penalty is money, so it is hidden from and refused to
+members without `VIEW_FINANCIALS`, including its limits.
+
+### Pagination is opt-in, for compatibility
+
+Every list that grows with the organization accepts `?page=` / `?pageSize=`
+and then answers `{ items, total, page, pageSize }`
+(`common/validation/page-query.ts`). Without them it answers exactly what it
+answered before (with the caps some lists already had: shifts 200, time
+entries 200, reports 100, offline batches 50), because the admin web, the
+mobile app and the existing tests read those shapes. New screens use pages;
+the admin web's pending-approvals count reads one row and the total.
+
+### Scalability measures
+
+- **No query per row.** `prisma.service.ts` counts statements in tests;
+  `query-counts.e2e-spec.ts` asserts the heavy pages and jobs send the same
+  number for 4 workers as for 40. The payroll job writes its items in
+  batches (`INSERT … ON CONFLICT` of 200 rows), links adjustments with one
+  `UPDATE`, and writes progress at most once a second.
+- **Month filters are ranges.** `businessDate: { startsWith: "2026-10-" }`
+  became `businessMonthDates("2026-10")` (`>= 2026-10-01 AND < 2026-11-01`):
+  a LIKE prefix cannot use a b-tree index under the database's `en_US`
+  collation with a prepared statement, a range can.
+- **Indexes for the organization and scope filters** (migration
+  `20261015090200_scale_indexes`): entries by organization + status +
+  business date (replacing organization + status), by organization +
+  business date, by shift; shifts and sites by project/site; forgotten
+  stamps by organization + month.
+- **Flat rows for big lists.** With `relationJoins` every nested relation
+  is built as JSON per row, so a payroll month's entries are read flat and
+  their few hundred shifts once, instead of nesting the shift, project and
+  site in each of thousands of entries (three times cheaper to load). The
+  whole pending-approvals list is assembled the same way (one query each for
+  the shifts, summaries, corrections and names): ten times faster under
+  load. Each entry keeps its keys; its nested shift now carries the fields a
+  review queue shows (title, type, status, date, times, project and site
+  ids) rather than the whole shift record, and the worker only their name
+  (no client read more; the admin web counts the list).
+- **The dashboard reads less.** `PayrollInputsService.loadFigures` reads a
+  month for its figures only: no clock times or last-change stamps, which
+  only a stored calculation keeps (`load`) and which were half the cost of
+  reading 11,000 entries. The previous month is reduced to its totals, and
+  a month that is not finalized never loads its stored snapshot.
+- **No correlated subquery on the live page.** The operations snapshot asks
+  for the shifts of the open entries by id; the "has an open entry" `EXISTS`
+  per shift had a cost estimate above Postgres's `jit_above_cost` and spent
+  5–40 ms compiling on every call.
+- **Load test with autocannon** (`apps/api/scripts/load-test/`): a plain
+  Node library, so the test is a TypeScript script in the repository with
+  no extra runtime (k6 is a separate binary). Results and how to read them:
+  `docs/scalability.md`.

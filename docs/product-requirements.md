@@ -20,9 +20,18 @@ for the done/partial/not-started breakdown per section, and
 
 ## Who uses it
 
-- **Owner** (max 2 per organization, enforced at the DB and service layer):
-  full access, including compensation, bank details, payroll, and the
-  financial dashboard.
+Since the flexible organization model, what each member sees and can do
+comes from their role's **permissions**, not from the role's name; the four
+kinds below are the built-in roles (and a capability), and an Owner can
+build custom roles from a grouped checklist (for example «محاسب» or «مدير
+مشروع»), optionally restricted to selected projects or sites. Money is one
+explicit permission group (`VIEW_FINANCIALS`). See
+`authorization-matrix.md`.
+
+- **Owner** (as many per organization as the setting «الحد الأقصى للمالكين»
+  allows — empty = no limit; enforced at the DB and service layer; it was a
+  fixed two before): full access, including compensation, bank details,
+  payroll, and the financial dashboard.
 - **Field Manager**: operational access — scheduling, approvals, corrections
   — with every monetary figure structurally excluded from their view (guard,
   service, DTO, and frontend layers all strip it independently; see

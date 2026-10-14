@@ -1,7 +1,7 @@
 # Seed accounts and how to log in
 
 `pnpm db:seed` wipes the development database and recreates one fictional
-organization, **شركة الميدان للمقاولات وأعمال الطرق**, with the 16 accounts
+organization, **شركة الميدان للمقاولات وأعمال الطرق**, with the 18 accounts
 below. Re-run it any time an account ends up in an odd state from manual
 testing.
 
@@ -25,6 +25,16 @@ title/body text stay in English.
 |---|---|---|
 | يوسف الخطيب | `+972500000011` | Also time-trackable (has a worker profile, can clock in) |
 | رنا عودة | `+972500000012` | |
+
+### Custom roles (flexible organization model)
+
+Two roles an Owner could have built on Settings → الأدوار والصلاحيات, to try
+what a member sees from their permissions rather than a role name:
+
+| Name | Phone | Role | What they see |
+|---|---|---|---|
+| سمر الحداد | `+972500020001` | «محاسب» | Attendance, shifts and settings read-only, and the money: payroll, compensation, the financial dashboard, financial reports. Changes nothing operational. |
+| طارق منصور | `+972500020002` | «مدير مشروع», restricted to the project «تنظيم حركة السير على شارع 6» | Operations of that project only (its shifts, sites, workers, attendance, approvals, live map and reports), no money, no users or settings. |
 
 ### Workers (mobile app: clock in/out, own shifts and history)
 

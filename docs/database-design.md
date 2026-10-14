@@ -7,10 +7,11 @@ live dev database, then applied with `prisma migrate deploy` — this
 environment's non-interactive shell doesn't support `prisma migrate dev`;
 see `troubleshooting.md`).
 
-## Tables (42)
+## Tables (46)
 
 Organizations & RBAC: `organizations`, `organization_settings`, `users`,
-`organization_memberships`.
+`organization_memberships`, `roles`, `member_scopes`, `work_rule_versions`
+(the last three since the flexible organization model, below).
 
 Workers & sensitive data: `worker_profiles`, `encrypted_bank_accounts`,
 `identity_documents` (written by onboarding since Step 8: the encrypted
@@ -158,6 +159,35 @@ Additive only:
 - Push deliveries are rows in the existing `notification_deliveries`
   (channel `PUSH_LOG` / `PUSH_EXPO`, status DELIVERED / SKIPPED / FAILED).
 
+### Flexible organization model (migrations `20261015090000_org_role_custom`, `20261015090100_flexible_organization`, `20261015090200_scale_indexes`)
+
+- `OrgRole` gains `CUSTOM` (its own migration: Postgres cannot use a new
+  enum value in the transaction that adds it).
+- `roles`: per organization, a name, `system_key` (OWNER / FIELD_MANAGER /
+  WORKER for the built-in roles, null for custom ones; one of each per
+  organization), the custom role's `permissions` (text array), `archived_at`.
+  Names are unique among active roles, case-insensitively
+  (`roles_organization_id_name_active_key` on `lower(name)`). The migration
+  creates the three built-in roles for every existing organization.
+- `organization_memberships.role_id` (→ `roles`) and `restricted_to_scope`.
+  The migration fills `role_id` for every existing member from its kind;
+  the trigger `trg_fill_membership_role_id` does the same for new rows that
+  give only a built-in kind, and a CHECK requires a role record for CUSTOM.
+- `member_scopes`: one project or one site per row (a CHECK enforces exactly
+  one), unique per member and target, cascading with the project or site.
+- `organization_settings.max_owners` (null = no limit, at least 1). Existing
+  organizations get 2 (the previous fixed limit).
+- `work_rule_versions`: organization, version number (unique per
+  organization), `effective_from` (a business date), the seven rule values
+  (a CHECK keeps each in its allowed range and the overtime threshold at or
+  above the standard day), reason, created by/at. The trigger
+  `trg_work_rule_versions_immutable` refuses every UPDATE and DELETE.
+- Scale indexes (`20261015090200`): `time_entries (organization_id, status,
+  business_date)` replacing `(organization_id, status)`, `time_entries
+  (organization_id, business_date)`, `time_entries (shift_id)`, `shifts
+  (project_id)`, `shifts (site_id)`, `sites (project_id)`,
+  `forgotten_stamp_infractions (organization_id, business_month)`.
+
 Notifications: `notifications`, `notification_deliveries`.
 
 Platform: `audit_logs`, `idempotency_records`, `generated_reports`.
@@ -180,10 +210,16 @@ migration on Postgres ≥ 11).
 
 ## Key constraints actually enforced (not just documented)
 
-- **Max two active Owners per organization** — both a Postgres trigger
-  (`trg_enforce_max_two_owners`) and an application-level
-  `OwnerLimitService` check inside the same transaction. Tested at both
-  layers.
+- **The organization's Owner limit** (`organization_settings.max_owners`,
+  no limit when null) — both a Postgres trigger (`trg_enforce_max_owners`,
+  which replaced the fixed-two `trg_enforce_max_two_owners`) and an
+  application-level `OwnerLimitService` check inside the same transaction,
+  both under the advisory lock `owners:<organization>` so concurrent
+  promotions are counted one after the other. Tested at both layers.
+- **Work-rule versions are never edited** — a trigger refuses UPDATE and
+  DELETE on `work_rule_versions`; a change is a new row.
+- **A scope row names exactly one project or site** — a CHECK on
+  `member_scopes`.
 - **No overlapping compensation profiles** — a Postgres `EXCLUDE USING
   gist` constraint on `compensation_profiles` (worker + date range), not
   just an application-level check.

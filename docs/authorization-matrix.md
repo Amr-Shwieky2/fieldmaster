@@ -1,52 +1,134 @@
 # Authorization Matrix
 
-Source of truth: `apps/api/src/common/auth/permissions.ts`. Every
-protected route declares its required `Permission`(s) via
-`@RequirePermissions(...)`; `PermissionsGuard` checks the caller's role
-against `ROLE_PERMISSIONS` before the handler runs. Financial permissions
-are additionally tracked in a separate `FINANCIAL_PERMISSIONS` set, checked
-redundantly at the service and DTO-serialization layers (see "Defense in
-depth" below) — the permission catalog alone is not the only thing standing
-between a Field Manager and a compensation figure.
+Source of truth: the permission catalog in
+`packages/shared-types/src/permissions.ts`, re-exported by
+`apps/api/src/common/auth/permissions.ts`. Every protected route declares its
+required `Permission`(s) via `@RequirePermissions(...)`; `PermissionsGuard`
+checks them against the caller's **effective permissions**, which the JWT
+guard works out from the membership on every request (flexible organization
+model, see below). Financial permissions are additionally checked redundantly
+at the service and DTO-serialization layers (see "Defense in depth" below) —
+the permission catalog alone is not the only thing standing between a member
+without money access and a compensation figure.
 
-## Permission catalog
+## Roles are permission sets (flexible organization model)
 
-| Permission | Owner | Field Manager | Worker |
-|---|---|---|---|
-| `MANAGE_ORG_USERS` | ✅ | | |
-| `MANAGE_WORKERS` | ✅ | ✅ | |
-| `APPROVE_ONBOARDING` | ✅ | ✅ | |
-| `VIEW_COMPENSATION` **(financial)** | ✅ | | |
-| `MANAGE_COMPENSATION` **(financial)** | ✅ | | |
-| `VIEW_BANK_INFO` **(financial)** | ✅ | | |
-| `MANAGE_SITES` | ✅ | ✅ | |
-| `MANAGE_SHIFTS` | ✅ | ✅ | |
-| `MANAGE_TURAN` | ✅ | ✅ | |
-| `APPROVE_ATTENDANCE` | ✅ | ✅ | |
-| `CORRECT_TIME_ENTRIES` | ✅ | ✅ | |
-| `APPLY_FULL_DAY_CREDIT` | ✅ | ✅ | |
-| `MANAGE_TEMP_SUPERVISORS` | ✅ | ✅ | |
-| `VIEW_PAYROLL` **(financial)** | ✅ | | |
-| `MANAGE_PAYROLL` **(financial)** | ✅ | | |
-| `FINALIZE_PAYROLL` **(financial)** | ✅ | | |
-| `VIEW_AUDIT_LOG` | ✅ | | |
-| `VIEW_FINANCIAL_DASHBOARD` **(financial)** | ✅ | | |
-| `CLOCK_IN_OUT` | ✅ | ✅ | ✅ |
-| `VIEW_OWN_ATTENDANCE` | ✅ | ✅ | ✅ |
-| `VIEW_OPERATIONS` (Step 6) | ✅ | ✅ | |
-| `VIEW_ORG_SETTINGS` (Step 6) | ✅ | ✅ | |
-| `MANAGE_ORG_SETTINGS` (Step 6) | ✅ | | |
+What a member sees and may do comes from their permissions, never from a
+role name:
 
-Owner holds every permission (`OWNER_PERMISSIONS = Object.values(Permission)`).
+- **Built-in (system) roles** — المالك (Owner), مدير ميدان (Field Manager),
+  عامل (Worker) — exist in every organization as rows of `roles` with a
+  `system_key`. Their permissions are fixed in code
+  (`SYSTEM_ROLE_PERMISSIONS`), exactly today's sets, and cannot be edited or
+  archived (`SYSTEM_ROLE_IMMUTABLE`).
+- **Custom roles** have a name and a checklist of permissions grouped in
+  Arabic: الحضور، الجدولة، المواقع، العمال، الرواتب والمالية، التقارير،
+  الإعدادات، سجل التدقيق. A permission that needs another one gets it too
+  (`PERMISSION_REQUIRES`: approving needs seeing attendance, every money
+  permission needs `VIEW_FINANCIALS`, …); a list that leaves one out is 400
+  `INVALID_ROLE_PERMISSIONS`. Names are unique among active roles
+  (`ROLE_NAME_TAKEN`); a role still assigned cannot be archived
+  (`ROLE_IN_USE`).
+- **A member has one role** (`organization_memberships.role_id`; the `role`
+  column keeps the kind: OWNER, FIELD_MANAGER, WORKER or CUSTOM). Time
+  tracking stays a separate flag (`isTimeTrackable`).
+- **Money is one explicit group.** `VIEW_FINANCIALS` («رؤية المبالغ
+  المالية») and the permissions that need it (compensation, bank details,
+  payroll, the financial dashboard, financial reports). Every place that
+  used to check "is Owner" for money now checks `VIEW_FINANCIALS`
+  (`canViewFinancials`). The financial leak scanner runs for every role
+  without it — the Field Manager, the Worker, the Temporary Supervisor and a
+  custom role with everything but money — and finds no amount.
+- **Optional project scope.** A member is either unrestricted or restricted
+  to selected projects and/or sites (`member_scopes` rows plus
+  `restricted_to_scope`). A restricted member:
+  - sees only their projects' shifts, sites, workers, attendance, approvals,
+    corrections, operations map, reports, notifications and real-time
+    events (another project's record answers 404, like an unknown id);
+  - loses every organization-wide permission whatever the role says
+    (`ORG_WIDE_PERMISSION_LIST`: users, roles, settings changes, audit log,
+    payroll, the financial dashboard, compensation changes, onboarding
+    approval, bank details, the Turan rota);
+  - cannot create a project (`SCOPE_RESTRICTED`) or a shift outside the scope.
+- **Changes apply on the next request.** The guard reads the role record and
+  the scope from the database on every call; tokens carry no permissions.
+- **Safety rules:**
+  - at least one active member always holds both «إدارة الأدوار»
+    (`MANAGE_ROLES`) and «إدارة الإعدادات» (`MANAGE_ORG_SETTINGS`), counted
+    under an advisory lock: changing a role, the role's permissions, the
+    scope, suspending or archiving the last such member is 409 `LAST_ADMIN`
+    (`LAST_ACTIVE_OWNER` when that member is an Owner) — so an Owner cannot
+    lock themselves out either;
+  - every change is audited old → new with its reason (`MEMBERSHIP_ROLE_CHANGED`
+    with the role as `OWNER` or `CUSTOM:<name>`, `MEMBERSHIP_SCOPE_CHANGED`
+    as `all` or `projects:…;sites:…`, `ROLE_CREATED` / `ROLE_UPDATED` /
+    `ROLE_ARCHIVED`).
+- **The Owner limit is a setting**: «الحد الأقصى للمالكين»
+  (`organization_settings.max_owners`, empty = no limit; organizations that
+  existed before keep 2). It is enforced by the service and by the database
+  trigger `enforce_max_owners`, both under the same advisory lock, so two
+  concurrent promotions cannot both pass (`MAX_OWNERS_REACHED`). Lowering it
+  below the current number of active Owners is 409
+  `OWNER_LIMIT_BELOW_CURRENT`.
+
+### Built-in roles
+
+| Permission | Group | Owner | Field Manager | Worker |
+|---|---|---|---|---|
+| `CLOCK_IN_OUT` | الحضور | ✅ | ✅ | ✅ |
+| `VIEW_OWN_ATTENDANCE` | الحضور | ✅ | ✅ | ✅ |
+| `VIEW_ATTENDANCE` (new: reading everyone's attendance) | الحضور | ✅ | ✅ | |
+| `VIEW_OPERATIONS` | الحضور | ✅ | ✅ | |
+| `APPROVE_ATTENDANCE` | الحضور | ✅ | ✅ | |
+| `CORRECT_TIME_ENTRIES` | الحضور | ✅ | ✅ | |
+| `APPLY_FULL_DAY_CREDIT` | الحضور | ✅ | ✅ | |
+| `VIEW_SHIFTS` (new: the organization's shift list) | الجدولة | ✅ | ✅ | |
+| `MANAGE_SHIFTS` | الجدولة | ✅ | ✅ | |
+| `MANAGE_TURAN` | الجدولة | ✅ | ✅ | |
+| `MANAGE_TEMP_SUPERVISORS` | الجدولة | ✅ | ✅ | |
+| `MANAGE_SITES` | المواقع | ✅ | ✅ | |
+| `MANAGE_WORKERS` | العمال | ✅ | ✅ | |
+| `APPROVE_ONBOARDING` | العمال | ✅ | ✅ | |
+| `VIEW_FINANCIALS` **(financial, new)** | الرواتب والمالية | ✅ | | |
+| `VIEW_COMPENSATION` **(financial)** | الرواتب والمالية | ✅ | | |
+| `MANAGE_COMPENSATION` **(financial)** | الرواتب والمالية | ✅ | | |
+| `VIEW_BANK_INFO` **(financial)** | الرواتب والمالية | ✅ | | |
+| `VIEW_PAYROLL` **(financial)** | الرواتب والمالية | ✅ | | |
+| `MANAGE_PAYROLL` **(financial)** | الرواتب والمالية | ✅ | | |
+| `FINALIZE_PAYROLL` **(financial)** | الرواتب والمالية | ✅ | | |
+| `VIEW_FINANCIAL_DASHBOARD` **(financial)** | الرواتب والمالية | ✅ | | |
+| `GENERATE_OPERATIONAL_REPORTS` (new) | التقارير | ✅ | ✅ | |
+| `GENERATE_FINANCIAL_REPORTS` **(financial, new)** | التقارير | ✅ | | |
+| `VIEW_ORG_SETTINGS` | الإعدادات | ✅ | ✅ | |
+| `MANAGE_ORG_SETTINGS` | الإعدادات | ✅ | | |
+| `MANAGE_ORG_USERS` | الإعدادات | ✅ | | |
+| `MANAGE_ROLES` (new) | الإعدادات | ✅ | | |
+| `VIEW_AUDIT_LOG` | سجل التدقيق | ✅ | | |
+
+The new permissions only name what the built-in roles could already do
+(`VIEW_ATTENDANCE` and `VIEW_SHIFTS` were "is a manager" checks,
+`GENERATE_*_REPORTS` were role checks in the report rules), so every existing
+member keeps exactly the access they had — the existing test suites pass
+unchanged.
 
 Since Step 6 the guard takes the role and the time-tracking flag from the
 membership on every request, not from the token. A role change on the users
 page applies to the very next request; turning time tracking off removes the
 worker profile from the request context (no clock-in).
-A Field Manager or Worker who is also time-trackable (`isTimeTrackable`)
-gets `CLOCK_IN_OUT`/`VIEW_OWN_ATTENDANCE` through their role's own set —
-there's no separate "time-trackable" permission layer, since role already
-determines what else that clock-in unlocks.
+
+### Roles, scope and limits routes
+
+| Route | Permission |
+|---|---|
+| `GET /roles/catalog`, `GET /roles`, `GET /roles/:id` | `MANAGE_ROLES` or `MANAGE_ORG_USERS` |
+| `POST /roles`, `PATCH /roles/:id`, `POST /roles/:id/archive` | `MANAGE_ROLES` (reason required, audited) |
+| `GET /memberships/access` | `MANAGE_ORG_USERS` |
+| `PATCH /memberships/:id/role` (`role` or `roleId`), `PATCH /memberships/:id/scope` | `MANAGE_ORG_USERS` (reason required, audited) |
+| `GET /organizations/me/owner-limit` | `VIEW_ORG_SETTINGS` |
+| `PATCH /organizations/me/settings/owners` | `MANAGE_ORG_SETTINGS` (audited) |
+| `GET /organizations/me/work-rules`, `GET /organizations/me/work-rules/impact` | `VIEW_ORG_SETTINGS` (the penalty only with `VIEW_FINANCIALS`) |
+| `POST /organizations/me/work-rules` | `MANAGE_ORG_SETTINGS`; changing the penalty also needs `VIEW_FINANCIALS` (403) |
+| `GET /auth/me` | any member: their permissions, scope and the non-money work rules |
 
 ## Attendance screens (Step 5)
 
@@ -118,10 +200,13 @@ its third role.
 | `PATCH /memberships/:id/role`, `PATCH /memberships/:id/time-tracking`, `POST /memberships/:id/suspend` / `reactivate` / `archive` | `MANAGE_ORG_USERS` | ✅ (reason required, audited) | 403 | 403 |
 | `POST /memberships/:id/sessions/:sessionId/revoke`, `POST /memberships/:id/devices/:deviceId/revoke-key` | `MANAGE_ORG_USERS` | ✅ (reason required, audited) | 403 | 403 |
 
-- **Owners:** an organization keeps at least one active Owner. Demoting,
-  suspending or archiving the last one is 409 `LAST_ACTIVE_OWNER`. The
-  existing maximum of two active Owners also applies to role changes and
-  reactivation (`MAX_OWNERS_REACHED` plus the database trigger).
+- **Owners:** an organization keeps at least one active member who can
+  manage roles and settings. Demoting, suspending or archiving the last one
+  is 409 `LAST_ACTIVE_OWNER` (an Owner) or `LAST_ADMIN` (a custom role).
+  The organization's Owner limit («الحد الأقصى للمالكين», no limit unless
+  set) also applies to role changes and reactivation (`MAX_OWNERS_REACHED`
+  plus the database trigger). Until the flexible organization model the
+  limit was a fixed two.
 - **Suspending or archiving a member** ends their sessions at once:
   - refresh-token families revoked;
   - REST calls refused by the guard's live status check;
@@ -188,7 +273,13 @@ its third role.
 ## Reports (Step 8)
 
 The routes carry no permission decorator: `report-access.ts` decides per
-report type and role, and a refusal is a 403 on the request.
+report type and permission (`GENERATE_FINANCIAL_REPORTS` with
+`VIEW_FINANCIALS` for a financial copy, `GENERATE_OPERATIONAL_REPORTS` for an
+operational one), and a refusal is a 403 on the request. The columns below
+are the built-in roles; a custom role gets the column its permissions match.
+A member restricted to some projects gets reports of their projects only, and
+the reports that cover the whole organization (emergency call-outs, payroll)
+are 403 `SCOPE_RESTRICTED` for them.
 
 | Report | Owner | Field Manager | Worker |
 |---|---|---|---|
@@ -203,11 +294,12 @@ report type and role, and a refusal is a 403 on the request.
   two copies use different functions and that operational PDFs and CSVs
   contain no ₪ and no amounts).
 - **Who sees a generated report:**
-  - in the list, the details, the download and the verify: an Owner, the
-    worker it is about, and whoever requested it;
-  - a requester who is neither an Owner nor its subject never sees a
-    financial copy (for example, one they requested as an Owner before
-    becoming a Field Manager);
+  - in the list, the details, the download and the verify: an unrestricted
+    member who may generate financial reports, the worker it is about, and
+    whoever requested it;
+  - a requester without the financial permission who is not its subject
+    never sees a financial copy (for example, one they requested as an Owner
+    before becoming a Field Manager);
   - for anyone else every `/reports/:id*` route is a 404, so nothing tells
     the report exists.
 - **Every request, download and verification is audited**, and so is the
@@ -239,41 +331,53 @@ report type and role, and a refusal is a 403 on the request.
 
 ## Defense in depth for financial data (spec section 6.2 / 23.5)
 
-A Field Manager must never see rates, earnings, deductions, or cost
-figures. This is enforced independently at every layer, not once:
+A member without `VIEW_FINANCIALS` (a Field Manager, a Worker, a Temporary
+Supervisor, any custom role without the money group) must never see rates,
+earnings, deductions, budgets or cost figures. This is enforced
+independently at every layer, not once:
 
-1. **Guard** — `PermissionsGuard` rejects any route requiring a
-   `FINANCIAL_PERMISSIONS` member outright (`GET /payroll-periods` → `403`
-   for a Field Manager token, verified in `auth-and-rbac.e2e-spec.ts`).
-2. **Service** — services that serve both roles (e.g. worker list) never
-   fetch compensation columns when the caller isn't authorized, rather
-   than fetching-then-filtering. The same applies to every other money
-   column: a project's `budgetAgorot` (project endpoints and the project
-   nested in `GET /shifts`, via `PROJECT_FIELDS_WITHOUT_BUDGET` in
-   `sites/project-fields.ts`) and a forgotten-stamp infraction's
-   `deductionAgorot` are only selected for an Owner. The attendance
-   screens' estimates are separate Owner-only responses
+1. **Guard** — `PermissionsGuard` rejects any route requiring a financial
+   permission outright (`GET /payroll-periods` → `403` for a Field Manager
+   token, verified in `auth-and-rbac.e2e-spec.ts`).
+2. **Service** — services that serve both kinds of member (e.g. worker
+   list) never fetch compensation columns when the caller isn't authorized,
+   rather than fetching-then-filtering. The same applies to every other
+   money column: a project's `budgetAgorot` (project endpoints and the
+   project nested in `GET /shifts`, via `PROJECT_FIELDS_WITHOUT_BUDGET` in
+   `sites/project-fields.ts`), a forgotten-stamp infraction's
+   `deductionAgorot` and the penalty rule (settings, work rules and their
+   limits) are only selected for a member with `VIEW_FINANCIALS`
+   (`canViewFinancials`). The attendance screens' estimates are separate
+   responses behind a financial permission
    (`GET /time-entries/:id/estimated-cost`,
    `GET /workers/:id/estimated-earnings`). The attendance list and evidence
-   carry no money for anyone, and only an Owner's emergency call-out DTO is
-   built with a cost.
+   carry no money for anyone, and only a money viewer's emergency call-out
+   DTO is built with a cost. Audit-log rows about money (deductions,
+   adjustments, the penalty rule, any `*Agorot` field) are redacted for a
+   viewer without it (`audit-redaction.ts`).
 3. **DTO/response mapper** — `worker-response.mapper.ts` strips
-   `compensation` from the serialized response unless the viewer is an
-   Owner or the worker themself, even if a service accidentally included it.
+   `compensation` from the serialized response unless the viewer may see
+   compensation or is the worker themself, even if a service accidentally
+   included it.
 4. **Notification content** — `ClockEventsService.notifyClockOut()` builds
-   two different message bodies from the same event: the Owner's includes
-   an estimated cost (computed via the same `calculateShiftCompensation`
-   payroll uses), the Field Manager's never does.
+   two different message bodies from the same event: the copy for
+   recipients with `VIEW_FINANCIALS` includes an estimated cost (computed via
+   the same `calculateShiftCompensation` payroll uses), the other one never
+   does, and the shift's manager always gets the copy without money.
 5. **PDF and CSV reports** (Step 8) — the financial copy of a report is
-   generated only for an Owner or the report's subject worker. A Field
-   Manager's copy comes from a separate loader and template without money
-   fields: the same evidence (timestamps, GPS, approvals, summaries) and
-   no monetary figure, in the PDF and in the CSV.
-6. **Frontend** — `apps/admin-web`'s `OwnerOnly` wrapper and role-aware nav
-   hide financial routes/widgets client-side, but this is UX polish, not
-   the security boundary — verified by
-   `owner-only.test.tsx` asserting the financial content is never in the
-   rendered DOM for a non-Owner session, on top of the API's own `403`.
+   generated only for a member with the financial report permission or the
+   report's subject worker. Everyone else's copy comes from a separate
+   loader and template without money fields: the same evidence (timestamps,
+   GPS, approvals, summaries) and no monetary figure, in the PDF and in the
+   CSV.
+6. **Frontend** — the admin web hides financial routes and widgets by the
+   session's permissions, but this is UX polish, not the security boundary
+   — the rendered-DOM tests assert the financial content is never there for
+   a session without the permission, on top of the API's own `403`.
+7. **The leak scanner** (`financial-leak-scanner.e2e-spec.ts`) calls every
+   GET route as each role without `VIEW_FINANCIALS` — the built-in ones and
+   custom roles created through the API, including one restricted to
+   another project — and fails on any money key or amount in any response.
 
 ## Cross-organization isolation
 

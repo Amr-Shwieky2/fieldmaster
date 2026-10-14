@@ -13,10 +13,67 @@ calculation in this codebase uses floating-point arithmetic for money —
 every formula does integer multiplication/division with exactly one
 rounding step.
 
+## Work rules: organization settings, in versions
+
+The numbers below were fixed constants until the flexible organization
+model. They are now the organization's **work rules**
+(`packages/shared-types/src/work-rules.ts`), with these defaults:
+
+| Rule | Key | Default |
+|---|---|---|
+| Standard day | `standardDayMinutes` | 540 (9 h) |
+| Overtime threshold | `overtimeThresholdMinutes` | 540 |
+| Free forgotten stamps per month | `freeForgottenStampsPerMonth` | 2 |
+| Penalty per further forgotten stamp **(money)** | `forgottenStampPenaltyAgorot` | 1,000 (10.00 ₪) |
+| Emergency: minutes credited before the start click | `emergencyMinutesBefore` | 60 |
+| Emergency: minutes credited after the end click | `emergencyMinutesAfter` | 15 |
+| Clock-in opens this many minutes before the shift | `clockInEarlyWindowMinutes` | 60 |
+
+How history is protected:
+
+- **Versions, never edits.** A change is a new row of `work_rule_versions`
+  with an effective date (Settings → قواعد العمل). A database trigger
+  refuses any UPDATE or DELETE of a version. The effective date must be
+  after today (`WORK_RULES_EFFECTIVE_DATE_PAST`), so a change never reaches
+  a day that already happened. The first change also stores the starting
+  values as version 1 (effective 2000-01-01, «القيم الأصلية»), so the
+  history is whole. An organization that never changed a rule has no rows
+  and uses the defaults.
+- **Each calculation uses the version in force on the date it is about**
+  (`pickWorkRules`: the latest effective date on or before it):
+  - an entry's standard day, threshold and split (approval, payroll,
+    estimates, reports): the entry's business date;
+  - a forgotten stamp's free count and penalty: the infraction's day (the
+    added clock-in's date, or the day of the correction); the penalty is
+    stored on the adjustment when it is created, so a later change of the
+    penalty never touches existing adjustments;
+  - an emergency's minutes before and after: the day of the start click
+    (the minutes before are stored on the call-out at the start);
+  - the clock-in window: the shift's business date.
+  A change in the middle of a month applies from its date only: earlier
+  days of the same month keep the earlier version.
+- **Finalized payroll keeps its snapshot.** A calculation stores the
+  versions it used in its snapshot (`inputs.workRules`), and its inputs
+  fingerprint includes the version ids, so a new version makes an open
+  month "changed since calculation" while a finalized month is read from
+  its stored calculation, never recalculated.
+- **The settings page warns** which open months the change will recalculate
+  and which finalized months keep their snapshot
+  (`GET /organizations/me/work-rules/impact?effectiveFrom=`).
+- **Money stays money:** the penalty and its limits are only shown to, and
+  only changeable by, a member with `VIEW_FINANCIALS`.
+
+The formulas below use the default numbers; read 540 as "the standard day
+(or overtime threshold) in force on the entry's business date", 60 / 15 as
+the emergency minutes in force, and so on.
+
 ## The nine-hour standard day
 
-`STANDARD_DAY_MINUTES = 540` (9 hours), defined once in
-`packages/shared-types`.
+`STANDARD_DAY_MINUTES = 540` (9 hours) is the default standard day
+(`DEFAULT_WORK_RULES` in `packages/shared-types`); each organization's
+versions can change it from a future date. Daily pay counts a full day from
+the standard day and overtime beyond the overtime threshold (equal by
+default); hourly pay counts regular minutes up to the threshold.
 
 ### Daily compensation
 
@@ -97,6 +154,9 @@ of 4 hours 15 minutes (01:00–05:15).
 ```text
 sequence 1, 2  -> deductionAgorot = 0
 sequence 3+    -> deductionAgorot = 1000   (10.00 ILS, exactly, every time)
+
+(defaults: the free count and the penalty are the work rules in force on
+the infraction's day)
 ```
 
 The sequence number is per worker, per calendar month, in `Asia/Jerusalem`
@@ -207,10 +267,14 @@ their own rows (see `database-design.md`).
 
 ## The Owner dashboard (Step 7)
 
-`GET /payroll-periods/:yearMonth/dashboard`, Owner only. A month whose
-latest version is FINALIZED is shown from that version's snapshot (`source:
-FINALIZED`); any other month is calculated live, with the same engine, from
-its approved attendance and adjustments (`source: LIVE`). It returns the
+`GET /payroll-periods/:yearMonth/dashboard`, `VIEW_FINANCIAL_DASHBOARD`
+(an Owner, or a custom role with the money group, never a member restricted
+to some projects). A month whose latest version is FINALIZED is shown from
+that version's snapshot (`source: FINALIZED`); any other month is
+calculated live, with the same engine, from its approved attendance and
+adjustments (`source: LIVE`). The previous month, only compared by its
+totals, reads only the stored totals of a finalized version, or calculates
+just the totals. It returns the
 month's net payable and labor cost against the previous month, labor cost
 per project, per site and per worker (net after adjustments), the five top
 earners, overtime (agorot, minutes, spikes), forgotten-stamp deductions

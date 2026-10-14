@@ -9,9 +9,16 @@ conventions the Swagger UI doesn't make obvious at a glance.
 Everything is under `/api/v1`. Implemented route groups:
 
 ```text
-/auth                  OTP request/verify, refresh, logout
-/organizations         org settings: GET /me/settings; PATCH /me/settings/workday|onboarding|notifications (Owner, audited)
-/memberships           members, roles, suspend/reactivate/archive, time tracking, devices and sessions (Owner)
+/auth                  OTP request/verify, refresh, logout; GET /me: the caller's permissions, project scope
+                        and the work rules in force (no money)
+/organizations         org settings: GET /me/settings; PATCH /me/settings/workday|onboarding|notifications (audited);
+                        GET /me/owner-limit, PATCH /me/settings/owners (the Owner limit); GET|POST /me/work-rules,
+                        GET /me/work-rules/impact?effectiveFrom= (work-rule versions)
+/roles                 the permission catalog (GET /catalog), built-in and custom roles: list, details with
+                        members, create, PATCH (name, permissions, reason), POST /:id/archive
+/memberships           members, their role (built-in or custom: PATCH /:id/role with role or roleId) and project
+                        scope (PATCH /:id/scope, GET /access), suspend/reactivate/archive, time tracking, devices
+                        and sessions (MANAGE_ORG_USERS)
 /workers                roster, onboarding approval/rejection; /:id/estimated-earnings and
                         /:id/onboarding-review (Owner only)
 /onboarding-invitations single-use invite links (Step 8): create (the token is returned once), list
@@ -300,6 +307,23 @@ web is Arabic only and never displays `message`: it shows the Arabic text
 for `code` (or for the HTTP status when it doesn't know the code), and its
 `pnpm lint` fails if a code the API can send has no Arabic message.
 
+Codes added by the flexible organization model:
+
+| Code | Status | When |
+|---|---|---|
+| `ROLE_NAME_TAKEN` | 409 | another active role of the organization has the name |
+| `SYSTEM_ROLE_IMMUTABLE` | 409 | editing or archiving a built-in role |
+| `ROLE_IN_USE` | 409 | archiving a role members still have |
+| `INVALID_ROLE_PERMISSIONS` | 400 | an unknown permission, or one without what it needs |
+| `LAST_ADMIN` | 409 | the change would leave no active member who manages roles and settings (`LAST_ACTIVE_OWNER` when that member is an Owner) |
+| `MAX_OWNERS_REACHED` | 409 | the organization's Owner limit is reached |
+| `OWNER_LIMIT_BELOW_CURRENT` | 409 | a limit below the number of active Owners |
+| `SCOPE_TARGET_NOT_FOUND` | 404 | a scope names a project or site that is not in the organization |
+| `SCOPE_RESTRICTED` | 403 | a member restricted to some projects asks for something organization-wide (a new project, the payroll or call-out reports) |
+| `WORK_RULES_INVALID` | 400 | a rule out of its range, or the overtime threshold below the standard day (`details.problems`) |
+| `WORK_RULES_EFFECTIVE_DATE_PAST` | 400 | a work-rule change effective today or earlier |
+| `CLOCK_IN_TOO_EARLY` | 409 | clock-in before the window opens (`details.opensAt`, `details.windowMinutes`); recorded as a refused attempt |
+
 ## Idempotency
 
 Required (`Idempotency-Key` header) on: clock-in, clock-out, offline-sync
@@ -316,6 +340,28 @@ Cursor-based on high-volume lists (`/audit-logs`): response shape is
 `{ items, nextCursor }`, pass `nextCursor` back as `?cursor=...` for the
 next page.
 
+Every other list that grows with the organization takes an **optional**
+page (flexible organization model): `GET /attendance-approvals/pending`,
+`/time-entries`, `/forgotten-stamp-infractions`, `/workers`,
+`/workers/pending-approval`, `/onboarding-invitations`,
+`/onboarding-invitations/pending-workers`, `/memberships`,
+`/memberships/access`, `/shifts`, `/projects`, `/sites`,
+`/turan-assignments`, `/reports`, `/offline-sync/batches`:
+- with `?page=` and/or `?pageSize=` (page 1 and 20 rows by default, at most
+  100) the response is `{ items, total, page, pageSize }`, in the same order
+  as the whole list, with a stable tie-breaker (the id);
+- without either, the response is exactly what it always was: the whole
+  array (the lists that were already capped keep their cap: `/shifts` and
+  `/time-entries` 200, `/reports` 100, `/offline-sync/batches` 50), so older
+  clients keep working;
+- a malformed value (`0`, `-1`, `abc`, `1.5`, an empty value, more than 100)
+  is a 400.
+
+`/notifications` keeps its newest 100 (a member's inbox; older ones are
+read). The per-entity lists (a shift's supervisors, a worker's
+compensation profiles, a member's devices, roles, payroll months) are
+bounded by nature.
+
 Page-based on the admin attendance lists (`GET /attendance/entries`,
 `GET /emergency-callouts`):
 - `?page=` (from 1) and `?pageSize=` (default 20, at most 100);
@@ -325,9 +371,6 @@ Page-based on the admin attendance lists (`GET /attendance/entries`,
 - a page past the end returns `items: []` with the real `total`;
 - filters are validated (UUIDs, `YYYY-MM-DD` business dates, enum values)
   and an invalid value is a 400.
-
-Other list endpoints (workers, shifts, sites) are simple arrays: the data
-volumes in this deployment shape don't yet justify pagination there.
 
 ## Offline sync specifics
 
@@ -340,8 +383,8 @@ the whole batch.
 
 ## Rate limiting
 
-A global `@nestjs/throttler` rule (300 requests/minute per client and route;
-over it, `429 RATE_LIMITED`) plus a stricter, separate limit on OTP requests
+A global `@nestjs/throttler` rule (`RATE_LIMIT_PER_MINUTE` requests a
+minute per client and route, 300 by default; over it, `429 RATE_LIMITED`) plus a stricter, separate limit on OTP requests
 (5 per 15-minute window per phone number, enforced in
 `AuthService.requestOtp`). The public onboarding routes have their own
 limit (Step 8): `ONBOARDING_RATE_LIMIT` requests per minute per IP address
