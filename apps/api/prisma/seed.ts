@@ -57,10 +57,12 @@ const prisma = new PrismaClient();
 const id = () => uuidv7();
 
 const AUDIT_GENESIS_HASH = "0".repeat(64);
-const auditChainTip = new Map<string, string>();
+const auditChainTip = new Map<string, { hash: string; sequenceNumber: number }>();
 
 async function recordAudit(organizationId: string, actorUserId: string, action: string, entityType: string, entityId: string, extra: Record<string, unknown> = {}) {
-  const previousHash = auditChainTip.get(organizationId) ?? AUDIT_GENESIS_HASH;
+  const tip = auditChainTip.get(organizationId);
+  const previousHash = tip?.hash ?? AUDIT_GENESIS_HASH;
+  const sequenceNumber = (tip?.sequenceNumber ?? 0) + 1;
   const correlationId = id();
   const canonicalPayload = JSON.stringify({
     organizationId,
@@ -76,7 +78,7 @@ async function recordAudit(organizationId: string, actorUserId: string, action: 
     correlationId,
   });
   const currentHash = createHash("sha256").update(previousHash + canonicalPayload).digest("hex");
-  auditChainTip.set(organizationId, currentHash);
+  auditChainTip.set(organizationId, { hash: currentHash, sequenceNumber });
 
   await prisma.auditLog.create({
     data: {
@@ -92,6 +94,7 @@ async function recordAudit(organizationId: string, actorUserId: string, action: 
       reason: extra.reason as string | undefined,
       note: extra.note as string | undefined,
       correlationId,
+      sequenceNumber,
       previousHash,
       currentHash,
     },

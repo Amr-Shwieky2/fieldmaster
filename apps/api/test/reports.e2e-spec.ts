@@ -750,7 +750,7 @@ describe("Reports: Arabic PDF + CSV as background jobs (e2e, Step 8)", () => {
       ],
     });
 
-    const audit = await prisma.auditLog.findMany({ where: { entityType: "GeneratedReport", entityId: report.id }, orderBy: { createdAt: "asc" } });
+    const audit = await prisma.auditLog.findMany({ where: { entityType: "GeneratedReport", entityId: report.id }, orderBy: { sequenceNumber: "asc" } });
     expect(audit.map((event) => [event.action, event.field, event.newValue])).toEqual([
       ["REPORT_REQUESTED", null, null],
       ["REPORT_GENERATED", null, report.sha256Hash],
@@ -776,7 +776,7 @@ describe("Reports: Arabic PDF + CSV as background jobs (e2e, Step 8)", () => {
     expect(row).toMatchObject({ storageKey: null, csvStorageKey: null, errorMessage: "Simulated failure while reading the report data" });
     expect(await files.getObject(`reports/${ctx.organizationId}/${created.body.id}.pdf`)).toBeNull();
     expect((await get(ctx.tokens.owner, `/reports/${created.body.id}/download`).expect(409)).body.code).toBe("REPORT_NOT_READY");
-    const audit = await prisma.auditLog.findMany({ where: { entityType: "GeneratedReport", entityId: created.body.id }, orderBy: { createdAt: "asc" } });
+    const audit = await prisma.auditLog.findMany({ where: { entityType: "GeneratedReport", entityId: created.body.id }, orderBy: { sequenceNumber: "asc" } });
     expect(audit.map((event) => event.action)).toEqual(["REPORT_REQUESTED", "REPORT_GENERATION_FAILED"]);
 
     // The next report is unaffected.

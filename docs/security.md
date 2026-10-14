@@ -276,9 +276,33 @@ pnpm --filter @fieldmaster/api verify-audit
 curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/v1/audit-logs/verify
 ```
 
+The chain's order is explicit: each row has a `sequence_number` (1, 2, 3, …
+per organization, unique, no gaps) and links to the row numbered one less.
+Both checks walk the chain in that order, never by `created_at`: rows
+written in the same millisecond, or by processes whose clocks differ, can
+share or swap timestamps, and walking by them reported untampered chains as
+broken.
+
+Writers cannot fork the chain. `AuditService.record()` takes a
+transaction-scoped advisory lock on the organization
+(`pg_advisory_xact_lock`), reads the highest-numbered row and appends the
+next one. The lock is held until the writer's transaction ends, so a
+concurrent request or BullMQ job waits, then links to the row just
+committed; a rolled-back row leaves no gap. The unique
+`(organization_id, sequence_number)` index refuses a second row at the same
+place. `audit-chain.e2e-spec.ts` runs 40 concurrent writers and a writer
+whose transaction is still open.
+
 A tampered row (edited directly in the database, bypassing the
-application) breaks the chain at that row and every row after it — the
-verification response reports exactly where (`brokenAtId`).
+application) breaks the chain at that row; a deleted row breaks it at the
+row after it. The verification response reports exactly where
+(`brokenAtId`). Deleting the newest rows cannot be detected from the chain
+alone: what remains still verifies.
+
+Chains written before `sequence_number` existed were numbered by the
+migration `20261014120000_audit_chain_sequence`, following each row's
+`previous_hash` link. Nothing was re-hashed, so a chain that was already
+broken (or forked by the old race) is still reported where it breaks.
 
 ## Offline event anti-tampering
 

@@ -1,10 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { generateId } from "../ids";
-
-export const AUDIT_GENESIS_HASH = "0".repeat(64);
+import { AUDIT_GENESIS_HASH, auditChainHash, findChainBreak, readOrganizationChain } from "./audit-chain";
 
 export interface RecordAuditEventInput {
   organizationId: string;
@@ -26,41 +24,37 @@ type PrismaTx = Prisma.TransactionClient;
 
 /**
  * Append-only audit log with a SHA-256 hash chain (spec section 31.4):
- * currentHash = SHA256(previousHash + canonicalPayload). The chain is
- * scoped per organization. Concurrent writers to the *same* organization
- * within the same millisecond could in principle race on "previous hash" --
- * acceptable for this deployment's write volume; see technical-decisions.md.
+ * currentHash = SHA256(previousHash + canonicalPayload), one chain per
+ * organization. The chain's order is explicit: each row carries the next
+ * sequence number (1, 2, 3, ...) and links to the row numbered one less.
+ *
+ * An organization's writers take turns: record() holds a transaction-scoped
+ * advisory lock on the organization until the writer's transaction ends, so
+ * the next writer (another request, a BullMQ job) waits, then links to the
+ * row just committed. A rolled-back row leaves no gap. The unique
+ * (organization_id, sequence_number) index refuses a second row at the same
+ * place. A caller passing its transaction records the audit as its last
+ * write: the organization's other writers wait until that transaction ends.
  */
 @Injectable()
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
   async record(input: RecordAuditEventInput, tx?: PrismaTx) {
-    const client = tx ?? this.prisma;
-    const previous = await client.auditLog.findFirst({
+    if (!tx) return this.prisma.$transaction((ownTx) => this.append(input, ownTx));
+    return this.append(input, tx);
+  }
+
+  private async append(input: RecordAuditEventInput, tx: PrismaTx) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`audit_logs:${input.organizationId}`}, 0))`;
+    const previous = await tx.auditLog.findFirst({
       where: { organizationId: input.organizationId },
-      orderBy: { createdAt: "desc" },
-      select: { currentHash: true },
+      orderBy: { sequenceNumber: "desc" },
+      select: { sequenceNumber: true, currentHash: true },
     });
     const previousHash = previous?.currentHash ?? AUDIT_GENESIS_HASH;
 
-    const canonicalPayload = JSON.stringify({
-      organizationId: input.organizationId,
-      actorUserId: input.actorUserId,
-      action: input.action,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      field: input.field ?? null,
-      oldValue: input.oldValue ?? null,
-      newValue: input.newValue ?? null,
-      reason: input.reason ?? null,
-      note: input.note ?? null,
-      correlationId: input.correlationId,
-    });
-
-    const currentHash = createHash("sha256").update(previousHash + canonicalPayload).digest("hex");
-
-    return client.auditLog.create({
+    return tx.auditLog.create({
       data: {
         id: generateId(),
         organizationId: input.organizationId,
@@ -76,40 +70,16 @@ export class AuditService {
         requestIp: input.requestIp,
         userAgent: input.userAgent,
         correlationId: input.correlationId,
+        sequenceNumber: (previous?.sequenceNumber ?? 0) + 1,
         previousHash,
-        currentHash,
+        currentHash: auditChainHash(previousHash, input),
       },
     });
   }
 
-  /** Walks an organization's chain and confirms every link's hash is valid. */
+  /** Walks an organization's chain in its order (sequence number, never created_at) and confirms every link's hash is valid. */
   async verifyOrganizationChain(organizationId: string): Promise<{ valid: boolean; brokenAtId?: string }> {
-    const events = await this.prisma.auditLog.findMany({
-      where: { organizationId },
-      orderBy: { createdAt: "asc" },
-    });
-
-    let expectedPrevious = AUDIT_GENESIS_HASH;
-    for (const event of events) {
-      const canonicalPayload = JSON.stringify({
-        organizationId: event.organizationId,
-        actorUserId: event.actorUserId,
-        action: event.action,
-        entityType: event.entityType,
-        entityId: event.entityId,
-        field: event.field ?? null,
-        oldValue: event.oldValue ?? null,
-        newValue: event.newValue ?? null,
-        reason: event.reason ?? null,
-        note: event.note ?? null,
-        correlationId: event.correlationId,
-      });
-      const expectedHash = createHash("sha256").update(expectedPrevious + canonicalPayload).digest("hex");
-      if (event.previousHash !== expectedPrevious || event.currentHash !== expectedHash) {
-        return { valid: false, brokenAtId: event.id };
-      }
-      expectedPrevious = event.currentHash;
-    }
-    return { valid: true };
+    const brokenAtId = findChainBreak(await readOrganizationChain(this.prisma, organizationId));
+    return brokenAtId ? { valid: false, brokenAtId } : { valid: true };
   }
 }

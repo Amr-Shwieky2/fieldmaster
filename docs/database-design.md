@@ -216,9 +216,22 @@ query time via a raw `ST_DWithin`/`ST_Distance` call
 
 `audit_logs` is append-only at the application level with a SHA-256 hash
 chain: `current_hash = SHA256(previous_hash + canonical_event_payload)`,
-scoped per organization. `AuditService.verifyOrganizationChain()` walks the
-chain and confirms every link; exposed via `GET /audit-logs/verify` and the
-standalone `pnpm --filter @fieldmaster/api verify-audit` CLI script.
+scoped per organization. `sequence_number` is the row's place in its
+organization's chain: 1, 2, 3, … with no gaps, unique per organization
+(`audit_logs_organization_id_sequence_number_key`). The row before it is
+the one numbered one less, and its `previous_hash` is that row's
+`current_hash`. Neither `sequence_number` nor `created_at` is part of the
+hash. `AuditService.record()` appends under a per-organization advisory
+lock held until the writer's transaction ends (see `security.md`).
+`AuditService.verifyOrganizationChain()` walks the chain by
+`sequence_number`, never by `created_at`, and confirms every number, link
+and hash; exposed via `GET /audit-logs/verify` and the standalone
+`pnpm --filter @fieldmaster/api verify-audit` CLI script, which share
+`common/audit/audit-chain.ts`. The migration
+`20261014120000_audit_chain_sequence` numbered the existing rows by
+following their `previous_hash` links; rows those links do not reach (a
+chain already broken, or forked by concurrent writers before this column
+existed) come after them, oldest first.
 
 ## Money and time
 
