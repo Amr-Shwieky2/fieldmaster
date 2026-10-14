@@ -56,6 +56,18 @@ import type {
   MyTemporarySupervision,
   OperationsSnapshot,
   OrganizationSettingsView,
+  MyAccess,
+  Role,
+  RoleDetail,
+  PermissionCatalog,
+  CreateRoleInput,
+  UpdateRoleInput,
+  MemberAccess,
+  SetMemberScopeInput,
+  OwnerLimit,
+  WorkRulesView,
+  WorkRulesImpact,
+  CreateWorkRuleVersionInput,
   SupervisedShift,
   TemporarySupervisorListItem,
   WorkdaySettings,
@@ -351,12 +363,65 @@ export class FieldMasterClient {
     return this.request<OrganizationSettingsView>("PATCH", "/organizations/me/settings/notifications", { preferences });
   }
 
-  // ── Users, roles and devices (Owners) ───────────────────────────────
+  /** The limit of active Owners (null = none) and how many there are. */
+  getOwnerLimit() {
+    return this.request<OwnerLimit>("GET", "/organizations/me/owner-limit");
+  }
+  updateOwnerLimit(maxOwners: number | null, reason?: string) {
+    return this.request<OwnerLimit>("PATCH", "/organizations/me/settings/owners", { maxOwners, reason });
+  }
+
+  // ── Work rules: effective-dated versions, never edited in place ──────
+  getWorkRules() {
+    return this.request<WorkRulesView>("GET", "/organizations/me/work-rules");
+  }
+  /** Which payroll months a change effective on this date reaches (default date: tomorrow). */
+  getWorkRulesImpact(effectiveFrom?: string) {
+    return this.request<WorkRulesImpact>("GET", `/organizations/me/work-rules/impact${effectiveFrom ? `?effectiveFrom=${encodeURIComponent(effectiveFrom)}` : ""}`);
+  }
+  createWorkRuleVersion(input: CreateWorkRuleVersionInput) {
+    return this.request<WorkRulesView>("POST", "/organizations/me/work-rules", input);
+  }
+
+  // ── Roles and permissions ───────────────────────────────────────────
+  /** The caller's role, effective permissions and project scope, read live. */
+  getMyAccess() {
+    return this.request<MyAccess>("GET", "/auth/me");
+  }
+  getPermissionCatalog() {
+    return this.request<PermissionCatalog>("GET", "/roles/catalog");
+  }
+  listRoles(options: { includeArchived?: boolean } = {}) {
+    return this.request<Role[]>("GET", `/roles${options.includeArchived ? "?includeArchived=true" : ""}`);
+  }
+  getRole(roleId: string) {
+    return this.request<RoleDetail>("GET", `/roles/${roleId}`);
+  }
+  createRole(input: CreateRoleInput) {
+    return this.request<Role>("POST", "/roles", input);
+  }
+  updateRole(roleId: string, input: UpdateRoleInput) {
+    return this.request<Role>("PATCH", `/roles/${roleId}`, input);
+  }
+  archiveRole(roleId: string, reason?: string) {
+    return this.request<Role>("POST", `/roles/${roleId}/archive`, { reason });
+  }
+
+  // ── Users, roles and devices (whoever holds MANAGE_ORG_USERS) ───────
   listMembers() {
     return this.request<Member[]>("GET", "/memberships");
   }
-  changeMemberRole(membershipId: string, role: OrgRole, reason: string) {
-    return this.request<Member>("PATCH", `/memberships/${membershipId}/role`, { role, reason });
+  /** Each member's role record and project scope; join it to `listMembers()` by `membershipId`. */
+  listMemberAccess() {
+    return this.request<MemberAccess[]>("GET", "/memberships/access");
+  }
+  /** `role`: a built-in role; `roleId`: any role (a custom one). Send one of them. */
+  changeMemberRole(membershipId: string, role: OrgRole | { roleId: string }, reason: string) {
+    return this.request<Member>("PATCH", `/memberships/${membershipId}/role`, typeof role === "string" ? { role, reason } : { roleId: role.roleId, reason });
+  }
+  /** All projects, or only the listed projects and sites. */
+  setMemberScope(membershipId: string, input: SetMemberScopeInput) {
+    return this.request<Member>("PATCH", `/memberships/${membershipId}/scope`, input);
   }
   suspendMember(membershipId: string, reason: string) {
     return this.request<Member>("POST", `/memberships/${membershipId}/suspend`, { reason });

@@ -1,5 +1,9 @@
 import type {
   AccountStatus,
+  Permission,
+  WorkRules,
+  WorkRuleKey,
+  WorkRuleVersion,
   ApprovalAction,
   AttendanceFlag,
   AttendanceListTab,
@@ -976,6 +980,8 @@ export interface TimeEntryEvidence {
   approvedAt: string | null;
   approvedByName: string | null;
   periodFinalized: boolean;
+  /** The day-length rules in force on the entry's business date (no money): the correction preview splits minutes with them. */
+  dayRules?: { standardDayMinutes: number; overtimeThresholdMinutes: number };
   worker: { id: string; fullLegalName: string; phoneNumber: string };
   shift: {
     id: string;
@@ -1553,4 +1559,116 @@ export interface PushNotificationData {
   turanAssignmentId?: string;
   /** YYYY-MM. */
   yearMonth?: string;
+}
+
+// ── Flexible organization model: roles, permissions, scope, work rules ──
+
+/** `GET /auth/me`: who the caller is right now. Clients decide what to show from `permissions`, never from a role's name. */
+export interface MyAccess {
+  userId: string;
+  membershipId: string;
+  organizationId: string;
+  /** OWNER / FIELD_MANAGER / WORKER for the built-in roles, CUSTOM for a role an Owner created. */
+  role: OrgRole;
+  roleId: string | null;
+  roleName: string | null;
+  /** Effective permissions (a member restricted to some projects has no organization-wide ones). */
+  permissions: Permission[];
+  isTimeTrackable: boolean;
+  workerProfileId: string | null;
+  scope: { restricted: boolean; projectIds: string[]; siteIds: string[]; visibleProjectIds: string[] };
+}
+
+export interface Role {
+  id: string;
+  /** A built-in role: fixed permissions, never edited or archived. */
+  name: string;
+  description: string | null;
+  isSystem: boolean;
+  systemKey: "OWNER" | "FIELD_MANAGER" | "WORKER" | null;
+  permissions: Permission[];
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+}
+
+export interface RoleDetail extends Role {
+  members: { membershipId: string; userId: string; fullLegalName: string; status: AccountStatus }[];
+}
+
+/** `GET /roles/catalog`: the permissions grouped as the role editor shows them. */
+export interface PermissionCatalog {
+  groups: {
+    group: "ATTENDANCE" | "SCHEDULING" | "SITES" | "WORKERS" | "FINANCE" | "REPORTS" | "SETTINGS" | "AUDIT";
+    permissions: { permission: Permission; requires: Permission[]; financial: boolean; organizationWide: boolean }[];
+  }[];
+}
+
+export interface CreateRoleInput {
+  name: string;
+  description?: string;
+  permissions: Permission[];
+}
+
+export interface UpdateRoleInput {
+  name?: string;
+  description?: string;
+  permissions?: Permission[];
+  reason?: string;
+}
+
+/** `GET /memberships/access`: each member's role record and project scope. */
+export interface MemberAccess {
+  membershipId: string;
+  roleId: string | null;
+  roleName: string | null;
+  restrictedToScope: boolean;
+  projectIds: string[];
+  siteIds: string[];
+}
+
+export interface SetMemberScopeInput {
+  /** false = every project; true = only the projects and sites below (at least one). */
+  restricted: boolean;
+  projectIds?: string[];
+  siteIds?: string[];
+  reason: string;
+}
+
+export interface OwnerLimit {
+  /** null = no limit. */
+  maxOwners: number | null;
+  activeOwners: number;
+  canEdit: boolean;
+}
+
+/** A work-rule version as the API shows it: the money rule (the penalty) is absent for a member who may not see money. */
+export interface WorkRuleVersionView extends Omit<WorkRuleVersion, "rules"> {
+  rules: Partial<WorkRules>;
+}
+
+export interface WorkRulesView {
+  canEdit: boolean;
+  canSeeMoney: boolean;
+  /** The rules in force today. */
+  current: Partial<WorkRules>;
+  defaults: Partial<WorkRules>;
+  limits: Partial<Record<WorkRuleKey, { min: number; max: number }>>;
+  /** Oldest first. A version whose `effectiveFrom` is after `today` has not started yet. */
+  versions: WorkRuleVersionView[];
+  /** YYYY-MM-DD (Asia/Jerusalem). */
+  today: string;
+}
+
+export interface WorkRulesImpact {
+  effectiveFrom: string;
+  openMonths: { yearMonth: string; status: string; version: number | null }[];
+  finalizedMonths: { yearMonth: string; version: number }[];
+}
+
+/** `POST /organizations/me/work-rules`: only the rules sent change; `effectiveFrom` is after today. */
+export interface CreateWorkRuleVersionInput extends Partial<WorkRules> {
+  effectiveFrom: string;
+  reason: string;
 }

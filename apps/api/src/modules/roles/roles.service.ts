@@ -2,8 +2,6 @@ import { Injectable } from "@nestjs/common";
 import type { Prisma, Role } from "@prisma/client";
 import {
   AccountStatus,
-  FINANCIAL_PERMISSIONS,
-  ORG_WIDE_PERMISSIONS,
   OrgRole,
   PERMISSION_GROUPS,
   PERMISSION_REQUIRES,
@@ -11,6 +9,8 @@ import {
   SystemRoleKey,
   checkRolePermissions,
   holdsAdminPermissions,
+  isFinancialPermission,
+  isOrgWidePermission,
   isPermission,
   type Permission,
 } from "@fieldmaster/shared-types";
@@ -81,8 +81,8 @@ export class RolesService {
         permissions: permissions.map((permission) => ({
           permission,
           requires: [...(PERMISSION_REQUIRES[permission] ?? [])],
-          financial: FINANCIAL_PERMISSIONS.has(permission),
-          organizationWide: ORG_WIDE_PERMISSIONS.has(permission),
+          financial: isFinancialPermission(permission),
+          organizationWide: isOrgWidePermission(permission),
         })),
       })),
     };

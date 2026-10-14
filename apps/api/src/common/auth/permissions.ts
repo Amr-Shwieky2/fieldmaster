@@ -1,4 +1,4 @@
-import { OrgRole, Permission, SYSTEM_ROLE_PERMISSIONS, type SystemRoleKey } from "@fieldmaster/shared-types";
+import { FINANCIAL_PERMISSION_LIST, ORG_WIDE_PERMISSION_LIST, OrgRole, Permission, SYSTEM_ROLE_PERMISSIONS, type SystemRoleKey } from "@fieldmaster/shared-types";
 
 /**
  * The permission catalog lives in `@fieldmaster/shared-types` (the admin web's
@@ -9,13 +9,17 @@ import { OrgRole, Permission, SYSTEM_ROLE_PERMISSIONS, type SystemRoleKey } from
 export {
   ADMIN_PERMISSIONS,
   ALL_PERMISSIONS,
-  FINANCIAL_PERMISSIONS,
-  ORG_WIDE_PERMISSIONS,
   PERMISSION_GROUPS,
   PERMISSION_REQUIRES,
   Permission,
   SYSTEM_ROLE_PERMISSIONS,
 } from "@fieldmaster/shared-types";
+
+/** Everything that opens an amount of money (see the catalog). */
+export const FINANCIAL_PERMISSIONS: ReadonlySet<Permission> = new Set(FINANCIAL_PERMISSION_LIST);
+
+/** The permissions a member restricted to some projects never has. */
+export const ORG_WIDE_PERMISSIONS: ReadonlySet<Permission> = new Set(ORG_WIDE_PERMISSION_LIST);
 
 /** The built-in roles' permissions. A CUSTOM member has none here: theirs come from the role record. */
 export const ROLE_PERMISSIONS: Record<OrgRole, Set<Permission>> = {

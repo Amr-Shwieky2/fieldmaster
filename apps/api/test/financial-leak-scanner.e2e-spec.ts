@@ -6,7 +6,7 @@ import { METHOD_METADATA, PATH_METADATA, SSE_METADATA } from "@nestjs/common/con
 import { ModulesContainer } from "@nestjs/core";
 import { io, type Socket } from "socket.io-client";
 import { v7 as uuidv7 } from "uuid";
-import { ALL_PERMISSIONS, CorrectionReason, FINANCIAL_PERMISSIONS, FileAssetPurpose, GovernmentIdType, NotificationType, PRIVACY_NOTICE_VERSION, TuranType } from "@fieldmaster/shared-types";
+import { ALL_PERMISSIONS, CorrectionReason, FileAssetPurpose, isFinancialPermission, GovernmentIdType, NotificationType, PRIVACY_NOTICE_VERSION, TuranType } from "@fieldmaster/shared-types";
 import { createTestApp, resetDatabase, request } from "./test-app";
 import { useEnv } from "./use-env";
 import {
@@ -273,11 +273,11 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     const managerToken = await devLogin(manager.membership.id);
 
     // Flexible organization model: three custom roles, made the way an Owner makes them (the API), and a member of each.
-    const nonFinancialPermissions = ALL_PERMISSIONS.filter((permission) => !FINANCIAL_PERMISSIONS.has(permission));
+    const nonFinancialPermissions = ALL_PERMISSIONS.filter((permission) => !isFinancialPermission(permission));
     const createRole = async (name: string, permissions: string[]) =>
       (await request(app.getHttpServer()).post("/api/v1/roles").set("Authorization", `Bearer ${ownerToken}`).send({ name, permissions }).expect(201)).body.id as string;
     const noMoneyRoleId = await createRole("Everything but money", nonFinancialPermissions);
-    const moneyRoleId = await createRole("Accountant", [...ALL_PERMISSIONS.filter((permission) => FINANCIAL_PERMISSIONS.has(permission)), "VIEW_ATTENDANCE", "VIEW_SHIFTS", "VIEW_ORG_SETTINGS", "GENERATE_OPERATIONAL_REPORTS"]);
+    const moneyRoleId = await createRole("Accountant", [...ALL_PERMISSIONS.filter((permission) => isFinancialPermission(permission)), "VIEW_ATTENDANCE", "VIEW_SHIFTS", "VIEW_ORG_SETTINGS", "GENERATE_OPERATIONAL_REPORTS"]);
     const scopedRoleId = await createRole("Project manager", nonFinancialPermissions.filter((permission) => permission !== "MANAGE_ROLES"));
     const addCustomMember = async (phoneNumber: string, fullLegalName: string, roleId: string) =>
       (await request(app.getHttpServer()).post("/api/v1/memberships").set("Authorization", `Bearer ${ownerToken}`).send({ phoneNumber, fullLegalName, roleId }).expect(201)).body.id as string;

@@ -117,7 +117,7 @@ export const PERMISSION_GROUPS: readonly { group: PermissionGroup; permissions: 
  * Temporary Supervisors never hold one of these by default; a custom role
  * gets them only by an Owner ticking the financial group.
  */
-export const FINANCIAL_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+export const FINANCIAL_PERMISSION_LIST: readonly Permission[] = [
   Permission.VIEW_FINANCIALS,
   Permission.VIEW_COMPENSATION,
   Permission.MANAGE_COMPENSATION,
@@ -127,7 +127,11 @@ export const FINANCIAL_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission
   Permission.FINALIZE_PAYROLL,
   Permission.VIEW_FINANCIAL_DASHBOARD,
   Permission.GENERATE_FINANCIAL_REPORTS,
-]);
+];
+
+export function isFinancialPermission(permission: string): boolean {
+  return (FINANCIAL_PERMISSION_LIST as readonly string[]).includes(permission);
+}
 
 /** A permission that needs other permissions in the same role (ticking it ticks them; removing them removes it). */
 export const PERMISSION_REQUIRES: Readonly<Partial<Record<Permission, readonly Permission[]>>> = {
@@ -154,7 +158,7 @@ export const PERMISSION_REQUIRES: Readonly<Partial<Record<Permission, readonly P
  * has them (their effective permissions leave them out), whatever their
  * role says.
  */
-export const ORG_WIDE_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+export const ORG_WIDE_PERMISSION_LIST: readonly Permission[] = [
   Permission.MANAGE_ORG_USERS,
   Permission.MANAGE_ROLES,
   Permission.MANAGE_ORG_SETTINGS,
@@ -167,7 +171,11 @@ export const ORG_WIDE_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>
   Permission.APPROVE_ONBOARDING,
   Permission.VIEW_BANK_INFO,
   Permission.MANAGE_TURAN,
-]);
+];
+
+export function isOrgWidePermission(permission: string): boolean {
+  return (ORG_WIDE_PERMISSION_LIST as readonly string[]).includes(permission);
+}
 
 /** Whoever manages roles and settings: an organization always keeps at least one active member holding all of these. */
 export const ADMIN_PERMISSIONS: readonly Permission[] = [Permission.MANAGE_ROLES, Permission.MANAGE_ORG_SETTINGS];
@@ -256,5 +264,5 @@ export function holdsAdminPermissions(permissions: ReadonlySet<string> | readonl
 /** What a member restricted to some projects keeps of their role's permissions. */
 export function permissionsForScope(permissions: Iterable<Permission>, restricted: boolean): Permission[] {
   const all = [...permissions];
-  return restricted ? all.filter((permission) => !ORG_WIDE_PERMISSIONS.has(permission)) : all;
+  return restricted ? all.filter((permission) => !isOrgWidePermission(permission)) : all;
 }
