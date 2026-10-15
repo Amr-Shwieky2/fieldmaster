@@ -6,9 +6,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { AttendanceListFilters, AttendanceListItem } from "@fieldmaster/api-client";
-import { AttendanceFlag, AttendanceListTab, ShiftType, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { AttendanceFlag, AttendanceListTab, DEFAULT_WORK_RULES, Permission, ShiftType, TimeEntryStatus } from "@fieldmaster/shared-types";
 import { isForbidden } from "@fieldmaster/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useShiftTitle } from "@/lib/shift-title";
 import { useEnumLabel } from "@/i18n/enums";
 import { ATTENDANCE_DEFAULTS, ATTENDANCE_PAGE_SIZE, filtersToQuery, parseAttendanceFilters } from "@/lib/attendance-filters";
@@ -27,8 +28,8 @@ import { CorrectionDialog } from "@/components/attendance/correction-dialog";
 /**
  * The attendance list: tabs by status, filters kept in the URL, pagination.
  * Every row opens the entry's evidence page; entries waiting for a decision
- * keep the quick approve / reject / full-day credit actions. No money is
- * shown or even requested here.
+ * keep the quick approve / reject (APPROVE_ATTENDANCE) and full-day credit
+ * (APPLY_FULL_DAY_CREDIT) actions. No money is shown or even requested here.
  */
 export default function AttendancePage() {
   return (
@@ -47,6 +48,7 @@ function AttendanceList() {
   const searchParams = useSearchParams();
   const filters = parseAttendanceFilters(new URLSearchParams(searchParams?.toString() ?? ""));
   const { client } = useAuth();
+  const { can } = useAccess();
   const listQuery = useQuery({
     queryKey: ["attendance-entries", filters],
     queryFn: () =>
@@ -87,9 +89,11 @@ function AttendanceList() {
             <Link href="/attendance/forgotten-stamps" className="text-sm font-medium text-brand-700 hover:underline">
               {t("forgottenStampsLink")}
             </Link>
-            <Button size="sm" variant="secondary" onClick={() => setAddingClockIn(true)}>
-              {t("addMissingClockIn")}
-            </Button>
+            {can(Permission.CORRECT_TIME_ENTRIES) ? (
+              <Button size="sm" variant="secondary" onClick={() => setAddingClockIn(true)}>
+                {t("addMissingClockIn")}
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -379,8 +383,17 @@ function EntryCard({
   const tc = useTranslations("common");
   const label = useEnumLabel();
   const shiftTitle = useShiftTitle();
+  const { can } = useAccess();
   const name = entry.worker.fullLegalName;
   const awaiting = AWAITING.includes(entry.status);
+  // A day shorter than the standard day of the entry's own date may be credited as a full day (the API decides; the defaults when the list does not say).
+  const standardDayMinutes = (entry as AttendanceListItem & { dayRules?: { standardDayMinutes: number } }).dayRules?.standardDayMinutes ?? DEFAULT_WORK_RULES.standardDayMinutes;
+  const allowed = {
+    approve: can(Permission.APPROVE_ATTENDANCE),
+    reject: can(Permission.APPROVE_ATTENDANCE),
+    fullDayCredit:
+      can(Permission.APPLY_FULL_DAY_CREDIT) && entry.rawDurationMinutes !== null && entry.rawDurationMinutes < standardDayMinutes && !entry.fullDayCredit,
+  };
   const showStatus = tab !== AttendanceListTab.PENDING || entry.status !== TimeEntryStatus.PENDING_APPROVAL;
   const place = [entry.shift.project?.name, entry.shift.site?.name].filter(Boolean).join(" · ");
 
@@ -445,17 +458,8 @@ function EntryCard({
           </div>
         )}
 
-        {awaiting ? (
-          <EntryActions
-            entryId={entry.id}
-            workerName={name}
-            allowed={{
-              approve: true,
-              reject: true,
-              fullDayCredit: entry.rawDurationMinutes !== null && entry.rawDurationMinutes < 540 && !entry.fullDayCredit,
-            }}
-            onSuccess={onSuccess}
-          />
+        {awaiting && (allowed.approve || allowed.reject || allowed.fullDayCredit) ? (
+          <EntryActions entryId={entry.id} workerName={name} allowed={allowed} onSuccess={onSuccess} />
         ) : null}
 
         <Link

@@ -15,6 +15,8 @@ import type { OtpProvider } from "./otp-providers/otp-provider.interface";
 import type { VerifyOtpDto } from "./dto/verify-otp.dto";
 import type { DevLoginDto } from "./dto/dev-login.dto";
 import { parseDurationMs } from "./duration.util";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
+import type { AuthenticatedUser } from "../../common/auth/auth-context";
 
 const OTP_TTL_MS = Number(process.env.OTP_TTL_SECONDS ?? 300) * 1000;
 const OTP_MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS ?? 5);
@@ -58,7 +60,7 @@ interface SessionClaims {
   loginMethod: LoginMethod;
 }
 
-const ROLE_ORDER: Record<string, number> = { [OrgRole.OWNER]: 0, [OrgRole.FIELD_MANAGER]: 1, [OrgRole.WORKER]: 2 };
+const ROLE_ORDER: Record<string, number> = { [OrgRole.OWNER]: 0, [OrgRole.FIELD_MANAGER]: 1, [OrgRole.CUSTOM]: 1, [OrgRole.WORKER]: 2 };
 
 @Injectable()
 export class AuthService {
@@ -70,6 +72,7 @@ export class AuthService {
     private readonly auditService: AuditService,
     @Inject(OTP_PROVIDER) private readonly otpProvider: OtpProvider,
     @Inject(APP_ENVIRONMENT) private readonly appEnvironment: AppEnvironment,
+    private readonly workRules: WorkRulesService,
   ) {}
 
   async requestOtp(phoneNumber: string): Promise<void> {
@@ -386,6 +389,40 @@ export class AuthService {
       deviceId: family.deviceId,
       loginMethod: family.origin as LoginMethod,
     });
+  }
+
+  /**
+   * `GET /auth/me`: who the caller is right now -- their role, the permissions
+   * it gives them (after the organization-wide ones a restricted member never
+   * has) and the projects / sites they are restricted to. Read from the
+   * database on every call, so a change of role or scope shows at once. Clients
+   * (the admin web's navigation, the mobile app's screens) decide what to show
+   * from `permissions`, never from the role's name.
+   */
+  async me(user: AuthenticatedUser) {
+    const permissions = [...(user.permissions ?? [])];
+    const scope = user.scope ?? { restricted: false as const };
+    // The rules in force today that the app shows or applies (no money: the penalty is not here).
+    const rules = await this.workRules.current(user.organizationId);
+    return {
+      userId: user.sub,
+      membershipId: user.membershipId,
+      organizationId: user.organizationId,
+      role: user.role,
+      roleId: user.roleId ?? null,
+      roleName: user.roleName ?? null,
+      permissions,
+      isTimeTrackable: user.isTimeTrackable,
+      workerProfileId: user.workerProfileId,
+      workRules: {
+        standardDayMinutes: rules.standardDayMinutes,
+        overtimeThresholdMinutes: rules.overtimeThresholdMinutes,
+        emergencyMinutesBefore: rules.emergencyMinutesBefore,
+        emergencyMinutesAfter: rules.emergencyMinutesAfter,
+        clockInEarlyWindowMinutes: rules.clockInEarlyWindowMinutes,
+      },
+      scope: scope.restricted ? { restricted: true, projectIds: scope.projectIds, siteIds: scope.siteIds, visibleProjectIds: scope.visibleProjectIds } : { restricted: false, projectIds: [], siteIds: [], visibleProjectIds: [] },
+    };
   }
 
   async logout(refreshToken: string): Promise<void> {

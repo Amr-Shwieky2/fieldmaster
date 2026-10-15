@@ -1,3 +1,4 @@
+import { reportShiftScope } from "../report-scope";
 import type { Prisma } from "@prisma/client";
 import { CheckInMethod, ClockEventType, LocationValidationStatus } from "@fieldmaster/shared-types";
 import { ErrorCodes } from "../../../common/errors/app-exception";
@@ -97,9 +98,11 @@ const shiftPlace = {
 export async function loadSiteViolations(deps: ReportDataDeps, context: ReportLoadContext): Promise<SiteViolationsData> {
   const { filters, organizationId } = context;
   const businessDate = { gte: filters.fromDate, lte: filters.toDate };
+  const scoped = reportShiftScope(filters);
   const shiftWhere: Prisma.ShiftWhereInput = {
     ...(filters.projectId ? { projectId: filters.projectId } : {}),
     ...(filters.siteId ? { siteId: filters.siteId } : {}),
+    ...(scoped ? { AND: [scoped] } : {}),
   };
   const worker = filters.workerProfileId ? { workerProfileId: filters.workerProfileId } : {};
   const entryWhere: Prisma.TimeEntryWhereInput = {

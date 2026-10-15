@@ -3,11 +3,11 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { RequirePermissions } from "../../common/decorators/require-permissions.decorator";
-import { Permission } from "../../common/auth/permissions";
+import { Permission, hasPermission } from "../../common/auth/permissions";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
-import { OrgRole, type ShiftStatus, type ShiftType } from "@fieldmaster/shared-types";
+import type { ShiftStatus, ShiftType } from "@fieldmaster/shared-types";
 import { ShiftsService } from "./shifts.service";
 import { CreateShiftDto } from "./dto/create-shift.dto";
 import { AssignWorkerDto } from "./dto/assign-worker.dto";
@@ -15,6 +15,7 @@ import { TemporarySupervisorsService } from "./temporary-supervisors.service";
 import { AssignTemporarySupervisorDto } from "./dto/temporary-supervisor.dto";
 import { TemporaryCheckInPointsService } from "./temporary-check-in-points.service";
 import { CreateTemporaryCheckInPointDto } from "./dto/temporary-check-in-point.dto";
+import { pageWindow } from "../../common/validation/page-query";
 
 @ApiBearerAuth()
 @ApiTags("shifts")
@@ -38,11 +39,14 @@ export class ShiftsController {
     @Query("status") status?: ShiftStatus,
     @Query("businessDate") businessDate?: string,
     @Query("shiftType") shiftType?: ShiftType,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string,
   ) {
-    // Workers have no MANAGE_SHIFTS permission and only ever see shifts
-    // they're personally assigned to; managers/owners see the full org list.
+    // A member without VIEW_SHIFTS (a Worker) only ever sees the shifts they're
+    // personally assigned to; whoever holds it sees the organization's list
+    // (the projects they are restricted to, if any).
     const scope = this.scopeFor(user);
-    return this.shiftsService.list(user.organizationId, { status, businessDate, shiftType }, user, scope);
+    return this.shiftsService.list(user.organizationId, { status, businessDate, shiftType }, user, scope, pageWindow({ page, pageSize }));
   }
 
   @Get(":id")
@@ -52,7 +56,7 @@ export class ShiftsController {
   }
 
   private scopeFor(user: AuthenticatedUser): { workerProfileId: string } | undefined {
-    if (user.role !== OrgRole.WORKER) return undefined;
+    if (hasPermission(user, Permission.VIEW_SHIFTS)) return undefined;
     if (!user.workerProfileId) {
       throw new AppException(403, ErrorCodes.FORBIDDEN, "No worker profile associated with this account.");
     }
@@ -79,7 +83,7 @@ export class ShiftsController {
   @Get(":id/temporary-supervisors")
   @RequirePermissions(Permission.MANAGE_TEMP_SUPERVISORS)
   listTemporarySupervisors(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.temporarySupervisorsService.listForShift(user.organizationId, id);
+    return this.temporarySupervisorsService.listForShift(user.organizationId, id, user);
   }
 
   @Post(":id/temporary-supervisors")

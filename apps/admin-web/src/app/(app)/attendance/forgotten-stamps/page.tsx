@@ -6,8 +6,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { ForgottenStampInfraction } from "@fieldmaster/api-client";
-import { OrgRole } from "@fieldmaster/shared-types";
+import { Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { currentYearMonth } from "@/lib/business-date";
 import { YEAR_MONTH_PATTERN } from "@/lib/jerusalem-time";
@@ -24,11 +25,12 @@ import { useInvalidateAttendance } from "@/components/attendance/entry-actions";
 import { ChangeValue, FieldName } from "@/components/attendance/evidence-sections";
 
 /**
- * Forgotten-stamp infractions per business month (spec section 14). A Field
- * Manager sees who, when, which stamp and the sequence number; the API never
- * sends them the deduction. An Owner's rows carry `deductionAgorot`, so only
- * the Owner sees amounts, month totals and "cancel the deduction" (which adds
- * an offsetting adjustment and keeps the original).
+ * Forgotten-stamp infractions per business month (spec section 14). Everyone
+ * here (VIEW_ATTENDANCE) sees who, when, which stamp and the sequence number;
+ * the API sends the deduction (`deductionAgorot`) only to a member who may see
+ * money (VIEW_FINANCIALS), so only they see amounts and month totals, and only
+ * with MANAGE_PAYROLL "cancel the deduction" (which adds an offsetting
+ * adjustment and keeps the original).
  */
 export default function ForgottenStampsPage() {
   return (
@@ -65,8 +67,9 @@ function ForgottenStamps() {
   const searchParams = useSearchParams();
   const monthParam = searchParams?.get("month") ?? "";
   const month = YEAR_MONTH_PATTERN.test(monthParam) ? monthParam : currentYearMonth();
-  const { client, session } = useAuth();
-  const isOwner = session?.role === OrgRole.OWNER;
+  const { client } = useAuth();
+  const { can } = useAccess();
+  const money: MoneyAccess = { see: can(Permission.VIEW_FINANCIALS), reverse: can(Permission.VIEW_FINANCIALS) && can(Permission.MANAGE_PAYROLL) };
   const listQuery = useQuery({ queryKey: ["forgotten-stamps", { month }], queryFn: () => client.listForgottenStampInfractions({ month }) });
   const [announcement, setAnnouncement] = useState<string | null>(null);
 
@@ -104,8 +107,8 @@ function ForgottenStamps() {
       {rows.length > 0 ? (
         <>
           <p className="text-sm text-slate-600">{t("summary", { workers: groups.length, infractions: rows.length })}</p>
-          {/* Owner only: the month's money. */}
-          {isOwner ? (
+          {/* Money: only for a member who may see it. */}
+          {money.see ? (
             <Card>
               <CardHeader>
                 <CardTitle>{t("totals.title")}</CardTitle>
@@ -137,7 +140,7 @@ function ForgottenStamps() {
           <ul className="space-y-4" aria-label={t("listLabel")}>
             {groups.map((group) => (
               <li key={group.workerId}>
-                <WorkerInfractions group={group} isOwner={isOwner} onReversed={setAnnouncement} />
+                <WorkerInfractions group={group} money={money} onReversed={setAnnouncement} />
               </li>
             ))}
           </ul>
@@ -147,7 +150,13 @@ function ForgottenStamps() {
   );
 }
 
-function WorkerInfractions({ group, isOwner, onReversed }: { group: WorkerGroup; isOwner: boolean; onReversed: (message: string) => void }) {
+/** What the member may do with the money of an infraction: see the amounts, and cancel a deduction. */
+interface MoneyAccess {
+  see: boolean;
+  reverse: boolean;
+}
+
+function WorkerInfractions({ group, money, onReversed }: { group: WorkerGroup; money: MoneyAccess; onReversed: (message: string) => void }) {
   const t = useTranslations("forgottenStamps");
   const workerTotal = group.infractions.reduce((sum, row) => sum + activeDeduction(row), 0);
   return (
@@ -161,7 +170,7 @@ function WorkerInfractions({ group, isOwner, onReversed }: { group: WorkerGroup;
           </CardTitle>
           <Badge tone="warning">{t("infractionsCount", { count: group.infractions.length })}</Badge>
         </div>
-        {isOwner ? <p className="text-sm font-medium text-slate-700">{t.rich("workerDeduction", { money: () => <Money agorot={workerTotal} /> })}</p> : null}
+        {money.see ? <p className="text-sm font-medium text-slate-700">{t.rich("workerDeduction", { money: () => <Money agorot={workerTotal} /> })}</p> : null}
       </CardHeader>
       <CardContent className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -183,7 +192,7 @@ function WorkerInfractions({ group, isOwner, onReversed }: { group: WorkerGroup;
               <th scope="col" className="px-2 py-2 text-start font-medium">
                 {t("columns.reversal")}
               </th>
-              {isOwner ? (
+              {money.see ? (
                 <th scope="col" className="px-2 py-2 text-start font-medium">
                   {t("columns.deduction")}
                 </th>
@@ -192,7 +201,7 @@ function WorkerInfractions({ group, isOwner, onReversed }: { group: WorkerGroup;
           </thead>
           <tbody>
             {group.infractions.map((row) => (
-              <InfractionRow key={row.id} row={row} isOwner={isOwner} onReversed={onReversed} />
+              <InfractionRow key={row.id} row={row} money={money} onReversed={onReversed} />
             ))}
           </tbody>
         </table>
@@ -201,7 +210,7 @@ function WorkerInfractions({ group, isOwner, onReversed }: { group: WorkerGroup;
   );
 }
 
-function InfractionRow({ row, isOwner, onReversed }: { row: ForgottenStampInfraction; isOwner: boolean; onReversed: (message: string) => void }) {
+function InfractionRow({ row, money, onReversed }: { row: ForgottenStampInfraction; money: MoneyAccess; onReversed: (message: string) => void }) {
   const t = useTranslations("forgottenStamps");
   const tHistory = useTranslations("attendance.detail.history");
   const errorMessage = useErrorMessage();
@@ -216,7 +225,7 @@ function InfractionRow({ row, isOwner, onReversed }: { row: ForgottenStampInfrac
       void invalidate(row.timeEntryId);
     },
   });
-  const canReverse = isOwner && (row.deductionAgorot ?? 0) > 0 && !row.reversedAt;
+  const canReverse = money.reverse && (row.deductionAgorot ?? 0) > 0 && !row.reversedAt;
   const formId = `reverse-${row.id}`;
 
   return (
@@ -257,7 +266,7 @@ function InfractionRow({ row, isOwner, onReversed }: { row: ForgottenStampInfrac
             <span className="text-slate-400">{t("notReversed")}</span>
           )}
         </td>
-        {isOwner ? (
+        {money.see ? (
           <td className="px-2 py-2">
             {(row.deductionAgorot ?? 0) > 0 ? <Money agorot={row.deductionAgorot} /> : <span className="text-slate-500">{t("noDeduction")}</span>}
             {canReverse && !prompt ? (

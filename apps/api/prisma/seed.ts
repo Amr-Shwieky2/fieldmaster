@@ -51,6 +51,8 @@ import {
 import type { PrismaService } from "../src/common/prisma/prisma.service";
 import { FilesService } from "../src/common/files/files.service";
 import { PayrollInputsService } from "../src/modules/payroll/payroll-inputs.service";
+import { WorkRulesService } from "../src/common/settings/work-rules.service";
+import { ensureSystemRoles } from "../src/modules/roles/system-roles";
 import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION } from "../src/modules/payroll/payroll-snapshot";
 
 const prisma = new PrismaClient();
@@ -163,7 +165,7 @@ async function main() {
       turan_assignments, geofences, sites, projects,
       notification_deliveries, notifications,
       onboarding_invitations, identity_documents, encrypted_bank_accounts, compensation_profiles, worker_profiles, file_assets,
-      refresh_token_families, user_devices, organization_memberships, users,
+      refresh_token_families, user_devices, member_scopes, organization_memberships, roles, work_rule_versions, users,
       audit_logs, organization_settings, organizations
     RESTART IDENTITY CASCADE;
   `);
@@ -171,6 +173,8 @@ async function main() {
   console.log("Creating organization...");
   const org = await prisma.organization.create({ data: { id: id(), name: "شركة الميدان للمقاولات وأعمال الطرق" } });
   await prisma.organizationSettings.create({ data: { id: id(), organizationId: org.id } });
+  // The built-in roles (Owner, Field Manager, Worker): every membership below points at its own.
+  await ensureSystemRoles(prisma as unknown as Prisma.TransactionClient, org.id);
 
   // ── Users & memberships ──────────────────────────────────────────────
   async function createUser(phoneNumber: string, fullLegalName: string, preferredName?: string) {
@@ -179,9 +183,9 @@ async function main() {
     });
   }
 
-  async function createMembership(userId: string, role: OrgRole, isTimeTrackable: boolean) {
+  async function createMembership(userId: string, role: OrgRole, isTimeTrackable: boolean, roleId?: string) {
     return prisma.organizationMembership.create({
-      data: { id: id(), organizationId: org.id, userId, role, isTimeTrackable, status: AccountStatus.ACTIVE },
+      data: { id: id(), organizationId: org.id, userId, role, roleId, isTimeTrackable, status: AccountStatus.ACTIVE },
     });
   }
 
@@ -197,6 +201,43 @@ async function main() {
 
   const fm2User = await createUser("+972500000012", "رنا عودة", "رنا");
   const fm2Membership = await createMembership(fm2User.id, OrgRole.FIELD_MANAGER, false);
+
+  // Two custom roles (flexible organization model): an accountant who sees the money and nothing else to change,
+  // and a project manager who runs the operations of ONE project (restricted to it below).
+  console.log("Creating custom roles: accountant and project manager...");
+  const accountantRole = await prisma.role.create({
+    data: {
+      id: id(),
+      organizationId: org.id,
+      name: "محاسب",
+      description: "يرى الرواتب والمبالغ المالية والتقارير، ولا يغيّر الجدولة ولا الحضور.",
+      permissions: [
+        "VIEW_ATTENDANCE", "VIEW_SHIFTS", "VIEW_ORG_SETTINGS",
+        "VIEW_FINANCIALS", "VIEW_COMPENSATION", "VIEW_PAYROLL", "VIEW_FINANCIAL_DASHBOARD",
+        "GENERATE_OPERATIONAL_REPORTS", "GENERATE_FINANCIAL_REPORTS",
+      ],
+      createdBy: owner1User.id,
+    },
+  });
+  const projectManagerRole = await prisma.role.create({
+    data: {
+      id: id(),
+      organizationId: org.id,
+      name: "مدير مشروع",
+      description: "يدير الجدولة والحضور والمواقع، بلا أي مبالغ مالية. يُقيَّد بمشروعه.",
+      permissions: [
+        "CLOCK_IN_OUT", "VIEW_OWN_ATTENDANCE", "VIEW_ATTENDANCE", "VIEW_OPERATIONS", "APPROVE_ATTENDANCE", "CORRECT_TIME_ENTRIES", "APPLY_FULL_DAY_CREDIT",
+        "VIEW_SHIFTS", "MANAGE_SHIFTS", "MANAGE_TEMP_SUPERVISORS", "MANAGE_SITES", "MANAGE_WORKERS", "VIEW_ORG_SETTINGS", "GENERATE_OPERATIONAL_REPORTS",
+      ],
+      createdBy: owner1User.id,
+    },
+  });
+  const accountantUser = await createUser("+972500020001", "سمر الحداد", "سمر");
+  const accountantMembership = await createMembership(accountantUser.id, OrgRole.CUSTOM, false, accountantRole.id);
+  const projectManagerUser = await createUser("+972500020002", "طارق منصور", "طارق");
+  const projectManagerMembership = await createMembership(projectManagerUser.id, OrgRole.CUSTOM, false, projectManagerRole.id);
+  await prisma.organizationMembership.update({ where: { id: projectManagerMembership.id }, data: { restrictedToScope: true } });
+  void accountantMembership;
 
   console.log("Creating 12 workers...");
   // Order matters: index-based logic below (workers[1], workers[7], workers[9], ...) relies on it.
@@ -297,6 +338,10 @@ async function main() {
       },
     });
     sites.push({ site, geofence });
+    // The project manager works with the project of the first two sites only (today's shift is there).
+    if (i === 0) {
+      await prisma.memberScope.create({ data: { id: id(), organizationId: org.id, membershipId: projectManagerMembership.id, projectId: projects[0].id } });
+    }
   }
 
   // ── Shifts ────────────────────────────────────────────────────────────
@@ -622,7 +667,10 @@ async function main() {
     await approvedEntry(shift, workers[workerIndex], hours);
   }
 
-  const { inputs: payrollInputs, inputsHash } = await new PayrollInputsService(prisma as unknown as PrismaService).load(org.id, yearMonth);
+  const { inputs: payrollInputs, inputsHash } = await new PayrollInputsService(
+    prisma as unknown as PrismaService,
+    new WorkRulesService(prisma as unknown as PrismaService),
+  ).load(org.id, yearMonth);
   const payrollMonth = calculatePayrollMonth({ entries: payrollInputs.entries, profiles: payrollInputs.compensationProfiles, adjustments: payrollInputs.adjustments });
   const { result: payrollResult, totals: payrollTotals } = buildPayrollSnapshotResult(payrollInputs, payrollMonth.workers, payrollMonth.entries);
   const calculatedAt = new Date();

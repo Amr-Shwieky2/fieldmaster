@@ -5,9 +5,10 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { OnboardingInvitation } from "@fieldmaster/api-client";
-import { InvitationStatus, OrgRole } from "@fieldmaster/shared-types";
+import { InvitationStatus, Permission } from "@fieldmaster/shared-types";
 import { EM_DASH } from "@fieldmaster/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useFormat } from "@/lib/use-format";
 import { useEnumLabel } from "@/i18n/enums";
@@ -54,10 +55,11 @@ export function InvitationsTable() {
   const enumLabel = useEnumLabel();
   const errorMessage = useErrorMessage();
   const format = useFormat();
-  const { client, session } = useAuth();
+  const { client } = useAuth();
+  const { canAll } = useAccess();
   const queryClient = useQueryClient();
   const id = useId();
-  const isOwner = session?.role === OrgRole.OWNER;
+  const canReview = canAll([Permission.APPROVE_ONBOARDING, Permission.VIEW_BANK_INFO]);
   const query = useQuery({ queryKey: invitationKeys.list, queryFn: () => client.listInvitations() });
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ kind: "revoked" } | { kind: "failed"; error: unknown } | null>(null);
@@ -86,10 +88,10 @@ export function InvitationsTable() {
     return null;
   };
 
-  /** The worker whose application used the invitation: an Owner opens the review, a Field Manager sees the name. */
+  /** The worker whose application used the invitation: whoever may review it (bank details) opens the review, anyone else sees the name. */
   const workerCell = (invitation: OnboardingInvitation) => {
     const name = invitation.workerName;
-    if (invitation.workerProfileId && isOwner) {
+    if (invitation.workerProfileId && canReview) {
       return (
         <Link href={`/workers/${invitation.workerProfileId}/review`} className="font-medium text-brand-700 hover:underline">
           {name ? t("list.reviewWorker", { name }) : t("list.review")}

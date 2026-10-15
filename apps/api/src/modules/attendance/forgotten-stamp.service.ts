@@ -1,17 +1,21 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import { OrgRole, PayrollAdjustmentSource, PayrollAdjustmentType, PayrollPeriodStatus } from "@fieldmaster/shared-types";
+import { PayrollAdjustmentSource, PayrollAdjustmentType, PayrollPeriodStatus } from "@fieldmaster/shared-types";
 import { evaluateForgottenStampInfraction } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
+import { canViewFinancials } from "../../common/auth/permissions";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
+import { timeEntryScopeWhere } from "../../common/scope/scope-filters";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { listOrPage, mapRows, type PageWindow } from "../../common/validation/page-query";
 
 /**
- * Every infraction column except the deduction, which is money and Owner-only
- * (spec section 6.2 / 23.5). Field Managers see the infractions they manage,
- * never what they cost the worker.
+ * Every infraction column except the deduction, which is money (spec section
+ * 6.2 / 23.5): only a member who may see financials gets it. Everyone else
+ * sees the infractions they manage, never what they cost the worker.
  */
 const INFRACTION_FIELDS_WITHOUT_DEDUCTION = {
   id: true,
@@ -29,16 +33,20 @@ const INFRACTION_FIELDS_WITHOUT_DEDUCTION = {
 } satisfies Prisma.ForgottenStampInfractionSelect;
 
 /**
- * Two-strike rule (spec section 14): the first two forgotten clock-stamp
- * infractions in a calendar month are free; the third and every later one
- * deduct a fixed 1000 agorot, recorded as a standing PayrollAdjustment that
- * gets attached to that month's PayrollItem once payroll is calculated.
+ * Two-strike rule (spec section 14): the first forgotten clock-stamp
+ * infractions in a calendar month are free (two by default); every later one
+ * deducts the penalty (1000 agorot by default), recorded as a standing
+ * PayrollAdjustment that gets attached to that month's PayrollItem once
+ * payroll is calculated. How many are free and how much the penalty is come
+ * from the work rules in force on the day of the infraction; an adjustment
+ * already recorded keeps the amount it was created with.
  */
 @Injectable()
 export class ForgottenStampService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly workRules: WorkRulesService,
   ) {}
 
   async recordInfraction(
@@ -51,10 +59,14 @@ export class ForgottenStampService {
     businessMonth: string,
     actor: AuthenticatedUser,
     correlationId: string,
+    /** The day the infraction happens on (the added clock-in's date, or today for a correction to an existing entry): picks the work rules. */
+    ruleDate?: string,
   ) {
     const existingCount = await tx.forgottenStampInfraction.count({ where: { workerProfileId, businessMonth } });
     const monthlySequenceNumber = existingCount + 1;
-    const evaluation = evaluateForgottenStampInfraction(monthlySequenceNumber);
+    // The work rules in force on the day of the infraction (a month's first day when the caller gives none).
+    const rules = await this.workRules.rulesOn(organizationId, ruleDate ?? `${businessMonth}-01`, tx);
+    const evaluation = evaluateForgottenStampInfraction(monthlySequenceNumber, rules);
 
     const infraction = await tx.forgottenStampInfraction.create({
       data: {
@@ -166,17 +178,26 @@ export class ForgottenStampService {
   /**
    * Infractions for the forgotten-stamp report, newest first, with the
    * worker, the correction that recorded them and the corrected entry's date.
-   * An Owner also gets `deductionAgorot`; for anyone else the column is never
-   * read (FM: counts and sequence numbers only).
+   * A member who may see financials also gets `deductionAgorot`; for anyone
+   * else the column is never read (counts and sequence numbers only). A member
+   * restricted to some projects sees the infractions of entries in those
+   * projects only.
    */
-  async listForOrganization(organizationId: string, viewer: AuthenticatedUser, filters: { workerProfileId?: string; month?: string } = {}) {
+  async listForOrganization(
+    organizationId: string,
+    viewer: AuthenticatedUser,
+    filters: { workerProfileId?: string; month?: string } = {},
+    window: PageWindow | null = null,
+  ) {
     const related = {
       worker: { select: { id: true, membership: { select: { user: { select: { fullLegalName: true } } } } } },
       correction: { select: { id: true, field: true, oldValue: true, newValue: true, reason: true, note: true, editedBy: true, createdAt: true } },
       timeEntry: { select: { id: true, businessDate: true, status: true } },
     } satisfies Prisma.ForgottenStampInfractionSelect;
+    const entryScope = timeEntryScopeWhere(viewer.scope ?? { restricted: false });
     const where: Prisma.ForgottenStampInfractionWhereInput = {
       organizationId,
+      ...(entryScope ? { timeEntry: entryScope } : {}),
       ...(filters.workerProfileId ? { workerProfileId: filters.workerProfileId } : {}),
       ...(filters.month ? { businessMonth: filters.month } : {}),
     };
@@ -186,24 +207,37 @@ export class ForgottenStampService {
       { monthlySequenceNumber: "desc" },
     ];
 
-    const rows =
-      viewer.role === OrgRole.OWNER
-        ? await this.prisma.forgottenStampInfraction.findMany({
-            where,
-            orderBy,
-            select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, deductionAgorot: true, ...related },
-          })
-        : await this.prisma.forgottenStampInfraction.findMany({ where, orderBy, select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, ...related } });
+    // Every infraction, or one page of them (`?page=` / `?pageSize=`).
+    const list = await listOrPage(
+      window,
+      (range) =>
+        canViewFinancials(viewer)
+          ? this.prisma.forgottenStampInfraction.findMany({
+              where,
+              orderBy: [...orderBy, { id: "desc" }],
+              select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, deductionAgorot: true, ...related },
+              ...range,
+            })
+          : this.prisma.forgottenStampInfraction.findMany({
+              where,
+              orderBy: [...orderBy, { id: "desc" }],
+              select: { ...INFRACTION_FIELDS_WITHOUT_DEDUCTION, ...related },
+              ...range,
+            }),
+      () => this.prisma.forgottenStampInfraction.count({ where }),
+    );
 
-    const userIds = [...new Set(rows.flatMap((row) => [row.correction.editedBy, row.reversedBy]).filter((id): id is string => id !== null))];
-    const users = userIds.length > 0 ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullLegalName: true } }) : [];
-    const nameOf = (id: string | null) => (id ? (users.find((user) => user.id === id)?.fullLegalName ?? null) : null);
-
-    return rows.map(({ worker, correction, ...row }) => ({
-      ...row,
-      reversedByName: nameOf(row.reversedBy),
-      worker: { id: worker.id, fullLegalName: worker.membership.user.fullLegalName },
-      correction: { ...correction, editedByName: nameOf(correction.editedBy) },
-    }));
+    return mapRows(list, async (rows) => {
+      const userIds = [...new Set(rows.flatMap((row) => [row.correction.editedBy, row.reversedBy]).filter((id): id is string => id !== null))];
+      const users = userIds.length > 0 ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullLegalName: true } }) : [];
+      const names = new Map(users.map((user) => [user.id, user.fullLegalName]));
+      const nameOf = (id: string | null) => (id ? (names.get(id) ?? null) : null);
+      return rows.map(({ worker, correction, ...row }) => ({
+        ...row,
+        reversedByName: nameOf(row.reversedBy),
+        worker: { id: worker.id, fullLegalName: worker.membership.user.fullLegalName },
+        correction: { ...correction, editedByName: nameOf(correction.editedBy) },
+      }));
+    });
   }
 }

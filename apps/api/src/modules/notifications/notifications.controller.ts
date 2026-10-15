@@ -26,7 +26,7 @@ export class NotificationsController {
 
   @Get()
   async list(@CurrentUser() user: AuthenticatedUser) {
-    return this.notificationsService.listForUser(user.organizationId, user.sub);
+    return this.notificationsService.listForUser(user.organizationId, user.sub, user);
   }
 
   // Step 9 (declared before the `:id` routes): the caller's own push switches, and "mark all as read".
@@ -79,7 +79,13 @@ export class NotificationsController {
     );
     const operations = viewer.canViewOperations
       ? fromEvent(this.eventEmitter, OPERATIONS_CHANGED_EVENT).pipe(
-          filter((event): event is OperationsChangedEvent => (event as OperationsChangedEvent).organizationId === viewer.organizationId),
+          filter((event): event is OperationsChangedEvent => {
+            const changed = event as OperationsChangedEvent;
+            if (changed.organizationId !== viewer.organizationId) return false;
+            if (!viewer.scope.restricted) return true;
+            // Restricted to some projects: only an event of one of them.
+            return (changed.projectId != null && viewer.scope.projectIds.includes(changed.projectId)) || (changed.siteId != null && viewer.scope.siteIds.includes(changed.siteId));
+          }),
           map((event): MessageEvent => ({ type: "operations", data: { kind: event.kind, at: event.at } })),
         )
       : EMPTY;

@@ -4,13 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useQuery } from "@tanstack/react-query";
+import { Permission } from "@fieldmaster/shared-types";
 import { EM_DASH, getErrorCode } from "@fieldmaster/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { currentYearMonth } from "@/lib/business-date";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useFormat } from "@/lib/use-format";
 import { useEnumLabel } from "@/i18n/enums";
-import { OwnerOnly } from "@/components/owner-only";
+import { RequirePermission } from "@/components/require-permission";
 import { PageHeader } from "@/components/page-header";
 import { DateTimeText, MonthText, Money } from "@/components/formatted";
 import { ChevronEndIcon } from "@/components/icons";
@@ -24,9 +26,10 @@ const TH = "px-5 py-3 text-start";
 const TH_NUMBER = "px-5 py-3 text-end";
 
 /**
- * Payroll per month (Owner only): each month's latest version, its status,
- * workers, net and dates. "احسب رواتب <month>" starts the current month's
- * background calculation and opens the month, where its progress is shown.
+ * Payroll per month (VIEW_PAYROLL): each month's latest version, its status,
+ * workers, net and dates. "احسب رواتب <month>" (MANAGE_PAYROLL) starts the
+ * current month's background calculation and opens the month, where its
+ * progress is shown.
  */
 function PayrollPageContent() {
   const t = useTranslations("payroll");
@@ -35,6 +38,7 @@ function PayrollPageContent() {
   const enumLabel = useEnumLabel();
   const errorMessage = useErrorMessage();
   const { client } = useAuth();
+  const { can } = useAccess();
   const router = useRouter();
   const periodsQuery = useQuery({ queryKey: payrollKeys.periods, queryFn: () => client.listPayrollPeriods() });
 
@@ -51,9 +55,11 @@ function PayrollPageContent() {
         title={t("title")}
         description={t("description")}
         actions={
-          <Button onClick={startCalculation} disabled={calculate.isPending}>
-            {calculate.isPending ? t("calculating") : t("calculateMonth", { month: monthLabel })}
-          </Button>
+          can(Permission.MANAGE_PAYROLL) ? (
+            <Button onClick={startCalculation} disabled={calculate.isPending}>
+              {calculate.isPending ? t("calculating") : t("calculateMonth", { month: monthLabel })}
+            </Button>
+          ) : null
         }
       />
 
@@ -142,8 +148,8 @@ function PayrollPageContent() {
 
 export default function PayrollPage() {
   return (
-    <OwnerOnly>
+    <RequirePermission permission={[Permission.VIEW_FINANCIALS, Permission.VIEW_PAYROLL]}>
       <PayrollPageContent />
-    </OwnerOnly>
+    </RequirePermission>
   );
 }

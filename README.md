@@ -241,8 +241,9 @@ pnpm test:e2e
 
 ## Seed / development accounts and logging in
 
-`pnpm db:seed` creates 16 fictional accounts: 2 Owners, 2 Field Managers and
-12 Workers. The full list with phone numbers and what each account is useful
+`pnpm db:seed` creates 18 fictional accounts: 2 Owners, 2 Field Managers,
+2 members with custom roles («محاسب» and a «مدير مشروع» restricted to one
+project) and 12 Workers. The full list with phone numbers and what each account is useful
 for testing is in [`docs/seed-accounts.md`](docs/seed-accounts.md). The main
 ones:
 
@@ -312,8 +313,8 @@ Run `pnpm db:seed` afterwards to reset the data.
 - 21 unit tests inside the API (RBAC permission matrix, mock-location/
   device-time validation, and the `APP_ENV`/`DEV_LOGIN_ENABLED` boot rules)
 - 35 integration/e2e tests against a live Postgres+PostGIS database:
-  OTP login, refresh-token rotation and theft detection, 2-owner-limit
-  enforcement, suspended-account lockout, financial isolation (Field
+  OTP login, refresh-token rotation and theft detection, Owner-limit
+  enforcement (configurable since the flexible organization model), suspended-account lockout, financial isolation (Field
   Manager 403s and DTO stripping), geofence rejection with distance
   detail, full clock-in→summary→approve→minute-split flow, full-day
   credit, the forgotten-stamp two-strike sequence end-to-end, non-counting

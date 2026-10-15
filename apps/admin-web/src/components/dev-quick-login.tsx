@@ -11,10 +11,12 @@ import { useErrorMessage } from "@/lib/use-error-message";
 import { Phone } from "@/components/formatted";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-const ROLE_GROUPS: { role: OrgRole; titleKey: "groupOwners" | "groupFieldManagers" | "groupWorkers" }[] = [
+/** The test users grouped by the kind of their role (members of custom roles last). */
+const ROLE_GROUPS: { role: OrgRole; titleKey: "groupOwners" | "groupFieldManagers" | "groupWorkers" | null }[] = [
   { role: OrgRole.OWNER, titleKey: "groupOwners" },
   { role: OrgRole.FIELD_MANAGER, titleKey: "groupFieldManagers" },
   { role: OrgRole.WORKER, titleKey: "groupWorkers" },
+  { role: OrgRole.CUSTOM, titleKey: null },
 ];
 
 /**
@@ -45,6 +47,7 @@ export function TestModeBanner() {
 export function DevQuickLogin({ users, onLoggedIn }: { users: DevLoginUser[]; onLoggedIn: (session: AuthSession) => void }) {
   const { client } = useAuth();
   const t = useTranslations("devLogin");
+  const tGroups = useTranslations("devQuickLogin");
   const enumLabel = useEnumLabel();
   const errorMessage = useErrorMessage();
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -78,7 +81,7 @@ export function DevQuickLogin({ users, onLoggedIn }: { users: DevLoginUser[]; on
           return (
             <section key={role} aria-labelledby={`dev-login-${role}`}>
               <h3 id={`dev-login-${role}`} className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t(titleKey)} <span className="font-normal normal-case">{t("groupCount", { count: group.length })}</span>
+                {titleKey ? t(titleKey) : tGroups("groupCustomRoles")} <span className="font-normal normal-case">{t("groupCount", { count: group.length })}</span>
               </h3>
               {role === OrgRole.WORKER && <p className="mb-2 text-xs text-slate-500">{t("workersNote")}</p>}
               <ul className="grid gap-2 sm:grid-cols-2">

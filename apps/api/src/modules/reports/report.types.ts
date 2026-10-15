@@ -4,6 +4,7 @@ import type { PayrollCalculationService } from "../payroll/payroll-calculation.s
 import type { AttendanceCostService } from "../payroll/attendance-cost.service";
 import type { PayrollVersionsService } from "../payroll/payroll-versions.service";
 import type { AttendanceRecordsService } from "../attendance/attendance-records.service";
+import type { WorkRulesService } from "../../common/settings/work-rules.service";
 import type { PageOrientation, SafeHtml } from "./render/html";
 
 /**
@@ -21,6 +22,12 @@ export interface ReportFilters {
   siteId?: string;
   yearMonth?: string;
   version?: number;
+  /**
+   * Set by the service for a requester restricted to some projects (never
+   * taken from a request): the report only covers those projects' shifts.
+   * Stored with the report so the background job applies it.
+   */
+  scope?: { projectIds: string[]; siteIds: string[] };
 }
 
 export interface GeneratedReportDto {
@@ -70,6 +77,8 @@ export interface ReportDataDeps {
   attendanceCost: AttendanceCostService;
   attendanceRecords: AttendanceRecordsService;
   payrollVersions: PayrollVersionsService;
+  /** The organization's work-rule versions (each entry is priced with the rules of its business date). */
+  workRules: WorkRulesService;
 }
 
 export interface ReportLoadContext {

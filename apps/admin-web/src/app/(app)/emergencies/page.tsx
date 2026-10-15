@@ -6,8 +6,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { EmergencyCalloutFilters } from "@fieldmaster/api-client";
-import { OrgRole, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { Permission, TimeEntryStatus } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useEnumLabel } from "@/i18n/enums";
 import { EMERGENCY_DEFAULTS, filtersToQuery, parseEmergencyFilters } from "@/lib/attendance-filters";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,8 +24,9 @@ const PAGE_SIZE = 20;
 
 /**
  * Emergency call-outs (spec section 16) with their actual and compensated
- * times. The API builds a different DTO per role: only an Owner's items have
- * `estimatedCostAgorot`, so only an Owner's table has a cost column.
+ * times. The API builds a different DTO per viewer: only the items of a
+ * member who may see money (VIEW_FINANCIALS) have `estimatedCostAgorot`, so
+ * only their table has a cost column.
  */
 export default function EmergenciesPage() {
   return (
@@ -43,15 +45,17 @@ function EmergencyList() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const filters = parseEmergencyFilters(new URLSearchParams(searchParams?.toString() ?? ""));
-  const { client, session } = useAuth();
-  const isOwner = session?.role === OrgRole.OWNER;
+  const { client } = useAuth();
+  const { can } = useAccess();
+  const showCost = can(Permission.VIEW_FINANCIALS);
   const id = useId();
   const listQuery = useQuery({
     queryKey: ["emergency-callouts", filters],
     queryFn: () => client.listEmergencyCallouts({ ...filters, pageSize: PAGE_SIZE }),
     placeholderData: keepPreviousData,
   });
-  const workersQuery = useQuery({ queryKey: ["workers"], queryFn: () => client.listWorkers() });
+  // The worker filter's names (a member without MANAGE_WORKERS filters by none).
+  const workersQuery = useQuery({ queryKey: ["workers"], queryFn: () => client.listWorkers(), enabled: can(Permission.MANAGE_WORKERS) });
 
   const update = (changes: Partial<EmergencyCalloutFilters>) => {
     const next = { ...filters, ...changes };
@@ -169,7 +173,7 @@ function EmergencyList() {
                     <th scope="col" className="px-2 py-2 text-start font-medium">
                       {tc("status")}
                     </th>
-                    {isOwner ? (
+                    {showCost ? (
                       <th scope="col" className="px-2 py-2 text-start font-medium">
                         {tc("cost")}
                       </th>
@@ -205,7 +209,7 @@ function EmergencyList() {
                       <td className="px-2 py-2">
                         {callout.status ? <Badge tone={statusTone(callout.status)}>{label("TimeEntryStatus", callout.status)}</Badge> : null}
                       </td>
-                      {isOwner ? (
+                      {showCost ? (
                         <td className="px-2 py-2">
                           <Money agorot={callout.estimatedCostAgorot} />
                         </td>

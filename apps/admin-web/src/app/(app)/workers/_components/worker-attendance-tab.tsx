@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { AttendanceListItem } from "@fieldmaster/api-client";
-import { AttendanceListTab, TimeEntryStatus } from "@fieldmaster/shared-types";
-import { splitWorkedMinutes } from "@fieldmaster/shared-validation";
+import { AttendanceListTab, DEFAULT_WORK_RULES, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { splitWorkedMinutes, type DayRules } from "@fieldmaster/shared-validation";
 import { useAuth } from "@/lib/auth-context";
 import { useShiftTitle } from "@/lib/shift-title";
 import { useEnumLabel } from "@/i18n/enums";
@@ -23,18 +23,29 @@ const MONTH_PAGE_SIZE = 100;
 /** Table columns (keys of `workers.attendanceTab.columns`). */
 const COLUMNS = ["date", "shift", "clockIn", "clockOut", "worked", "regular", "overtime", "status", "flags"] as const;
 
+/** A list row may carry the day rules in force on its business date; without them the default rules apply. */
+type AttendanceRow = AttendanceListItem & { dayRules?: DayRules };
+
+/** The standard day and overtime threshold of the entry's own business date (the work rules are versioned by date). */
+function dayRulesOf(entry: AttendanceRow): DayRules {
+  return entry.dayRules ?? DEFAULT_WORK_RULES;
+}
+
 /**
  * Worked / regular / overtime minutes of a row: as approved, or as approval
- * would split them (shared rule). A rejected entry keeps its worked minutes
- * as evidence but has no split.
+ * would split them (shared rule, with the entry's own day rules). A rejected
+ * entry keeps its worked minutes as evidence but has no split.
  */
-function minutesOf(entry: AttendanceListItem): { worked: number; regular: number | null; overtime: number | null } | null {
+function minutesOf(entry: AttendanceRow): { worked: number; regular: number | null; overtime: number | null } | null {
   if (entry.rawDurationMinutes === null) return null;
-  const split = splitWorkedMinutes({
-    rawDurationMinutes: entry.rawDurationMinutes,
-    unpaidBreakMinutes: entry.unpaidBreakMinutes,
-    fullDayCredit: entry.fullDayCredit,
-  });
+  const split = splitWorkedMinutes(
+    {
+      rawDurationMinutes: entry.rawDurationMinutes,
+      unpaidBreakMinutes: entry.unpaidBreakMinutes,
+      fullDayCredit: entry.fullDayCredit,
+    },
+    dayRulesOf(entry),
+  );
   if (entry.status === TimeEntryStatus.APPROVED) {
     return { worked: split.workedMinutes, regular: entry.approvedRegularMinutes ?? 0, overtime: entry.approvedOvertimeMinutes ?? 0 };
   }
@@ -45,20 +56,20 @@ function minutesOf(entry: AttendanceListItem): { worked: number; regular: number
 /**
  * A worker's attendance by business month (Step 5): status, minutes and flags
  * of every entry, each linking to its evidence page. No money for anyone in
- * the list; an Owner also gets the month's estimated earnings from the
- * Owner-only `GET /workers/:id/estimated-earnings` (a Field Manager's page
- * never asks).
+ * the list; a member who may see pay (`showEarnings`: VIEW_FINANCIALS with
+ * VIEW_COMPENSATION) also gets the month's estimated earnings from
+ * `GET /workers/:id/estimated-earnings` (anyone else's page never asks).
  */
 export function WorkerAttendanceTab({
   workerId,
   month,
   onMonthChange,
-  isOwner,
+  showEarnings,
 }: {
   workerId: string;
   month: string;
   onMonthChange: (month: string) => void;
-  isOwner: boolean;
+  showEarnings: boolean;
 }) {
   const t = useTranslations("workers.attendanceTab");
   const label = useEnumLabel();
@@ -87,7 +98,7 @@ export function WorkerAttendanceTab({
   return (
     <div className="space-y-6">
       <MonthPicker value={month} onChange={onMonthChange} label={t("month")} />
-      {isOwner ? <EarningsCard workerId={workerId} month={month} /> : null}
+      {showEarnings ? <EarningsCard workerId={workerId} month={month} /> : null}
 
       <Card>
         <CardHeader>
@@ -179,7 +190,7 @@ export function WorkerAttendanceTab({
   );
 }
 
-/** Owner only: the month's estimated earnings, from its own Owner-only endpoint. */
+/** Money: the month's estimated earnings, from its own endpoint (VIEW_COMPENSATION). */
 function EarningsCard({ workerId, month }: { workerId: string; month: string }) {
   const tEarnings = useTranslations("workers.attendanceTab.earnings");
   const { client } = useAuth();

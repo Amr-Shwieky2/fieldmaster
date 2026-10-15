@@ -51,6 +51,9 @@ export const ENUM_NAMES = [
   "AttendanceFlag",
   "TemporarySupervisorState",
   "ShiftWorkerPresence",
+  "Permission",
+  "PermissionGroup",
+  "SystemRoleKey",
 ] as const;
 
 export type EnumName = (typeof ENUM_NAMES)[number];

@@ -1,6 +1,6 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  previewFeatures = ["postgresqlExtensions", "relationJoins"]
 }
 
 datasource db {
@@ -17,6 +17,8 @@ enum OrgRole {
   OWNER
   FIELD_MANAGER
   WORKER
+  /// A role an Owner created: its permissions come from `roles` (organization_memberships.role_id).
+  CUSTOM
 }
 
 enum AccountStatus {
@@ -215,6 +217,8 @@ model Organization {
 
   settings               OrganizationSettings?
   memberships            OrganizationMembership[]
+  roles                  Role[]
+  workRuleVersions       WorkRuleVersion[]
   onboardingInvitations  OnboardingInvitation[]
   projects               Project[]
   sites                  Site[]
@@ -246,6 +250,9 @@ model OrganizationSettings {
   deviceTimeDeviationSeconds   Int     @default(120) @map("device_time_deviation_seconds")
   onboardingInvitationTtlHours Int     @default(72) @map("onboarding_invitation_ttl_hours")
   defaultLanguage              String  @default("en") @map("default_language")
+
+  /// The most active Owners the organization may have; null = no limit (the former fixed limit of 2 is this setting now).
+  maxOwners Int? @map("max_owners")
 
   /// Step 6: defaults the API used to hard-code. A shift, site, geofence or
   /// temporary point keeps the value it was created with.
@@ -290,7 +297,12 @@ model OrganizationMembership {
   id                      String        @id @db.Uuid
   organizationId          String        @map("organization_id") @db.Uuid
   userId                  String        @map("user_id") @db.Uuid
+  /// The kind of role: OWNER / FIELD_MANAGER / WORKER for the built-in roles, CUSTOM for one an Owner created.
   role                    OrgRole
+  /// The role record (its permissions). Filled from `role` for the built-in roles when the member row is written.
+  roleId                  String?       @map("role_id") @db.Uuid
+  /// Restricted to the projects / sites in `scopes`; false = every project.
+  restrictedToScope       Boolean       @default(false) @map("restricted_to_scope")
   isTimeTrackable         Boolean       @default(false) @map("is_time_trackable")
   status                  AccountStatus @default(ACTIVE)
   /// Step 9: the member's own push preferences ({ [NotificationType]: { push: boolean } }); in-app notifications are always kept.
@@ -301,12 +313,89 @@ model OrganizationMembership {
 
   organization         Organization         @relation(fields: [organizationId], references: [id])
   user                 User                 @relation(fields: [userId], references: [id])
+  roleRecord           Role?                @relation(fields: [roleId], references: [id])
   workerProfile        WorkerProfile?
   refreshTokenFamilies RefreshTokenFamily[]
+  scopes               MemberScope[]
 
   @@unique([organizationId, userId])
   @@index([organizationId, role, status])
+  @@index([roleId])
   @@map("organization_memberships")
+}
+
+/// A role: a name and a set of permissions. The three built-in roles (system_key set) have the permissions of
+/// SYSTEM_ROLE_PERMISSIONS in the code and are never edited or archived; a custom role keeps its own list.
+model Role {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  name        String
+  description String?
+  /// OWNER | FIELD_MANAGER | WORKER for a built-in role, null for a custom one.
+  systemKey   String?  @map("system_key")
+  /// A custom role's permission names (the catalog of @fieldmaster/shared-types); empty for a built-in role.
+  permissions String[] @default([])
+
+  createdBy  String?   @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  memberships OrganizationMembership[]
+
+  @@unique([organizationId, systemKey])
+  @@index([organizationId, archivedAt])
+  @@map("roles")
+}
+
+/// One project or one site a restricted member may work with (exactly one of the two is set).
+model MemberScope {
+  id             String                 @id @db.Uuid
+  organizationId String                 @map("organization_id") @db.Uuid
+  membershipId   String                 @map("membership_id") @db.Uuid
+  membership     OrganizationMembership @relation(fields: [membershipId], references: [id])
+  projectId      String?                @map("project_id") @db.Uuid
+  // A scope row names one project or one site: it goes with it (the database cascades).
+  project        Project?               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  siteId         String?                @map("site_id") @db.Uuid
+  site           Site?                  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  createdAt      DateTime               @default(now()) @map("created_at")
+
+  @@index([membershipId])
+  @@index([projectId])
+  @@index([siteId])
+  @@map("member_scopes")
+}
+
+/// One version of an organization's work rules. A change is a new row with an effective date, never an edit
+/// (a trigger refuses updates and deletes); a calculation uses the version in force on the business date it is about.
+model WorkRuleVersion {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  /// 1, 2, 3 ... per organization, in the order the versions were created.
+  version       Int
+  /// YYYY-MM-DD (Asia/Jerusalem): the first business date the version applies to.
+  effectiveFrom String @map("effective_from")
+
+  standardDayMinutes          Int @map("standard_day_minutes")
+  overtimeThresholdMinutes    Int @map("overtime_threshold_minutes")
+  freeForgottenStampsPerMonth Int @map("free_forgotten_stamps_per_month")
+  forgottenStampPenaltyAgorot Int @map("forgotten_stamp_penalty_agorot")
+  emergencyMinutesBefore      Int @map("emergency_minutes_before")
+  emergencyMinutesAfter       Int @map("emergency_minutes_after")
+  clockInEarlyWindowMinutes   Int @map("clock_in_early_window_minutes")
+
+  reason    String?
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([organizationId, version])
+  @@index([organizationId, effectiveFrom])
+  @@map("work_rule_versions")
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -634,6 +723,7 @@ model Project {
 
   sites  Site[]
   shifts Shift[]
+  scopes MemberScope[]
 
   @@unique([organizationId, projectCode])
   @@index([organizationId, status])
@@ -662,8 +752,10 @@ model Site {
 
   geofences Geofence[]
   shifts    Shift[]
+  scopes    MemberScope[]
 
   @@index([organizationId, active])
+  @@index([projectId])
   @@map("sites")
 }
 
@@ -737,6 +829,8 @@ model Shift {
 
   @@index([organizationId, status])
   @@index([organizationId, businessDate])
+  @@index([projectId])
+  @@index([siteId])
   @@map("shifts")
 }
 
@@ -939,7 +1033,9 @@ model TimeEntry {
   emergencyCallout          EmergencyCallout?
   rejectedClockAttempts     RejectedClockAttempt[]
 
-  @@index([organizationId, status])
+  @@index([organizationId, status, businessDate])
+  @@index([organizationId, businessDate])
+  @@index([shiftId])
   @@index([workerProfileId, businessDate])
   @@map("time_entries")
 }
@@ -1146,6 +1242,7 @@ model ForgottenStampInfraction {
   payrollAdjustments PayrollAdjustment[]
 
   @@index([workerProfileId, businessMonth])
+  @@index([organizationId, businessMonth])
   @@map("forgotten_stamp_infractions")
 }
 
@@ -1354,11 +1451,11 @@ model AuditLog {
   userAgent     String? @map("user_agent")
   correlationId String  @map("correlation_id")
 
-  previousHash String @map("previous_hash")
-  currentHash  String @map("current_hash")
+  previousHash   String @map("previous_hash")
+  currentHash    String @map("current_hash")
   /// The row's place in its organization's hash chain: 1, 2, 3, ... with no
   /// gap. The chain's order is this number, never created_at (AuditService).
-  sequenceNumber Int @map("sequence_number")
+  sequenceNumber Int    @map("sequence_number")
 
   createdAt DateTime @default(now()) @map("created_at")
 

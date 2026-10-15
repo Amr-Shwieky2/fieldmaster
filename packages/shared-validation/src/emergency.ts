@@ -1,4 +1,7 @@
-import { EMERGENCY_RETROACTIVE_MINUTES, EMERGENCY_RETURN_BUFFER_MINUTES } from "@fieldmaster/shared-types";
+import { DEFAULT_WORK_RULES, type WorkRules } from "@fieldmaster/shared-types";
+
+/** The rules an emergency call-out needs: the minutes paid before the start click and after the end click. */
+export type EmergencyRules = Pick<WorkRules, "emergencyMinutesBefore" | "emergencyMinutesAfter">;
 
 export interface EmergencyCompensationResult {
   actualStartClick: Date;
@@ -19,13 +22,14 @@ export interface EmergencyCompensationResult {
 export function computeEmergencyCompensation(
   actualStartClick: Date,
   actualEndClick: Date,
+  rules: EmergencyRules = DEFAULT_WORK_RULES,
 ): EmergencyCompensationResult {
   if (actualEndClick.getTime() <= actualStartClick.getTime()) {
     throw new Error("actualEndClick must be after actualStartClick");
   }
 
-  const compensatedStart = new Date(actualStartClick.getTime() - EMERGENCY_RETROACTIVE_MINUTES * 60_000);
-  const compensatedEnd = new Date(actualEndClick.getTime() + EMERGENCY_RETURN_BUFFER_MINUTES * 60_000);
+  const compensatedStart = new Date(actualStartClick.getTime() - rules.emergencyMinutesBefore * 60_000);
+  const compensatedEnd = new Date(actualEndClick.getTime() + rules.emergencyMinutesAfter * 60_000);
 
   const actualWorkedMinutes = Math.round((actualEndClick.getTime() - actualStartClick.getTime()) / 60_000);
   const compensatedDurationMinutes = Math.round(
@@ -38,8 +42,8 @@ export function computeEmergencyCompensation(
     compensatedStart,
     compensatedEnd,
     actualWorkedMinutes,
-    retroactiveMinutes: EMERGENCY_RETROACTIVE_MINUTES,
-    returnBufferMinutes: EMERGENCY_RETURN_BUFFER_MINUTES,
+    retroactiveMinutes: rules.emergencyMinutesBefore,
+    returnBufferMinutes: rules.emergencyMinutesAfter,
     compensatedDurationMinutes,
   };
 }

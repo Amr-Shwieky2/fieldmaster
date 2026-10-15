@@ -5,10 +5,12 @@ import { generateId } from "../../common/ids";
 import { OrganizationSettingsService } from "../../common/settings/organization-settings.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
+import { projectScopeWhere, scopeOf, siteScopeWhere, projectInScope } from "../../common/scope/scope-filters";
 import type { CreateProjectDto } from "./dto/create-project.dto";
 import type { CreateSiteDto } from "./dto/create-site.dto";
 import type { CreateGeofenceDto } from "./dto/create-geofence.dto";
 import { projectSelectFor } from "./project-fields";
+import { listOrPage, type PageWindow } from "../../common/validation/page-query";
 
 @Injectable()
 export class SitesService {
@@ -20,6 +22,8 @@ export class SitesService {
 
   // ── Projects ──────────────────────────────────────────────────────────
   async createProject(organizationId: string, dto: CreateProjectDto, actor: AuthenticatedUser, correlationId: string) {
+    // A new project belongs to no one's selection yet: only a member who is not restricted may start one.
+    if (scopeOf(actor).restricted) throw new AppException(403, ErrorCodes.SCOPE_RESTRICTED, "A member restricted to some projects cannot create a project.");
     const project = await this.prisma.project.create({
       data: {
         id: generateId(),
@@ -45,16 +49,20 @@ export class SitesService {
     return project;
   }
 
-  async listProjects(organizationId: string, viewer: AuthenticatedUser) {
-    return this.prisma.project.findMany({
-      where: { organizationId, archivedAt: null },
-      select: projectSelectFor(viewer),
-      orderBy: { createdAt: "asc" },
-    });
+  async listProjects(organizationId: string, viewer: AuthenticatedUser, window: PageWindow | null = null) {
+    const where = { organizationId, archivedAt: null, ...(projectScopeWhere(scopeOf(viewer)) ?? {}) };
+    return listOrPage(
+      window,
+      (range) => this.prisma.project.findMany({ where, select: projectSelectFor(viewer), orderBy: [{ createdAt: "asc" }, { id: "asc" }], ...range }),
+      () => this.prisma.project.count({ where }),
+    );
   }
 
   async getProject(organizationId: string, id: string, viewer: AuthenticatedUser) {
-    const project = await this.prisma.project.findFirst({ where: { id, organizationId, archivedAt: null }, select: projectSelectFor(viewer) });
+    const project = await this.prisma.project.findFirst({
+      where: { id, organizationId, archivedAt: null, ...(projectScopeWhere(scopeOf(viewer)) ?? {}) },
+      select: projectSelectFor(viewer),
+    });
     if (!project) throw new AppException(404, ErrorCodes.NOT_FOUND, "Project not found.");
     return project;
   }
@@ -62,7 +70,7 @@ export class SitesService {
   // ── Sites ─────────────────────────────────────────────────────────────
   async createSite(organizationId: string, dto: CreateSiteDto, actor: AuthenticatedUser, correlationId: string) {
     const project = await this.prisma.project.findFirst({ where: { id: dto.projectId, organizationId } });
-    if (!project) throw new AppException(404, ErrorCodes.NOT_FOUND, "Project not found.");
+    if (!project || !projectInScope(scopeOf(actor), project.id)) throw new AppException(404, ErrorCodes.NOT_FOUND, "Project not found.");
     const settings = await this.settings.get(organizationId);
 
     const site = await this.prisma.site.create({
@@ -90,22 +98,27 @@ export class SitesService {
     return site;
   }
 
-  async listSites(organizationId: string, projectId?: string) {
-    return this.prisma.site.findMany({
-      where: { organizationId, archivedAt: null, ...(projectId ? { projectId } : {}) },
-      orderBy: { createdAt: "asc" },
-    });
+  async listSites(organizationId: string, viewer: AuthenticatedUser, projectId?: string, window: PageWindow | null = null) {
+    const where = { organizationId, archivedAt: null, ...(siteScopeWhere(scopeOf(viewer)) ?? {}), ...(projectId ? { projectId } : {}) };
+    return listOrPage(
+      window,
+      (range) => this.prisma.site.findMany({ where, orderBy: [{ createdAt: "asc" }, { id: "asc" }], ...range }),
+      () => this.prisma.site.count({ where }),
+    );
   }
 
-  async getSite(organizationId: string, id: string) {
-    const site = await this.prisma.site.findFirst({ where: { id, organizationId, archivedAt: null }, include: { geofences: true } });
+  async getSite(organizationId: string, id: string, viewer: AuthenticatedUser) {
+    const site = await this.prisma.site.findFirst({
+      where: { id, organizationId, archivedAt: null, ...(siteScopeWhere(scopeOf(viewer)) ?? {}) },
+      include: { geofences: true },
+    });
     if (!site) throw new AppException(404, ErrorCodes.NOT_FOUND, "Site not found.");
     return site;
   }
 
   // ── Geofences ─────────────────────────────────────────────────────────
   async createGeofence(organizationId: string, dto: CreateGeofenceDto, actor: AuthenticatedUser, correlationId: string) {
-    const site = await this.prisma.site.findFirst({ where: { id: dto.siteId, organizationId } });
+    const site = await this.prisma.site.findFirst({ where: { id: dto.siteId, organizationId, ...(siteScopeWhere(scopeOf(actor)) ?? {}) } });
     if (!site) throw new AppException(404, ErrorCodes.NOT_FOUND, "Site not found.");
 
     const previousVersion = await this.prisma.geofence.findFirst({
@@ -138,7 +151,7 @@ export class SitesService {
     return geofence;
   }
 
-  async listGeofencesForSite(organizationId: string, siteId: string) {
-    return this.prisma.geofence.findMany({ where: { organizationId, siteId }, orderBy: { version: "desc" } });
+  async listGeofencesForSite(organizationId: string, siteId: string, viewer: AuthenticatedUser) {
+    return this.prisma.geofence.findMany({ where: { organizationId, siteId, site: siteScopeWhere(scopeOf(viewer)) ?? {} }, orderBy: { version: "desc" } });
   }
 }

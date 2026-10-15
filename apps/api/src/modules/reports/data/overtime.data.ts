@@ -1,3 +1,4 @@
+import { reportShiftScope } from "../report-scope";
 import type { Prisma } from "@prisma/client";
 import { TimeEntryStatus } from "@fieldmaster/shared-types";
 import { pickEffectiveCompensationProfile, splitWorkedMinutes } from "@fieldmaster/shared-validation";
@@ -64,9 +65,11 @@ export interface OvertimeFinancialData {
 
 function entryFilter(context: ReportLoadContext): Prisma.TimeEntryWhereInput {
   const { filters } = context;
+  const scoped = reportShiftScope(filters);
   const shift: Prisma.ShiftWhereInput = {
     ...(filters.projectId ? { projectId: filters.projectId } : {}),
     ...(filters.siteId ? { siteId: filters.siteId } : {}),
+    ...(scoped ? { AND: [scoped] } : {}),
   };
   return {
     organizationId: context.organizationId,
@@ -102,7 +105,7 @@ export async function loadOvertimeOperational(deps: ReportDataDeps, context: Rep
     }),
     deps.prisma.timeEntry.findMany({
       where: { ...where, status: { in: PENDING_ENTRY_STATUSES }, rawDurationMinutes: { not: null } },
-      select: { rawDurationMinutes: true, unpaidBreakMinutes: true, fullDayCredit: true },
+      select: { businessDate: true, rawDurationMinutes: true, unpaidBreakMinutes: true, fullDayCredit: true },
     }),
   ]);
 
@@ -131,14 +134,19 @@ export async function loadOvertimeOperational(deps: ReportDataDeps, context: Rep
     byWorker.set(row.workerProfileId, worker);
   }
 
+  // Each waiting entry is split with the rules in force on its business date.
+  const rules = await deps.workRules.resolver(context.organizationId);
   const expected = pendingEntries
     .map(
       (entry) =>
-        splitWorkedMinutes({
-          rawDurationMinutes: entry.rawDurationMinutes ?? 0,
-          unpaidBreakMinutes: entry.unpaidBreakMinutes,
-          fullDayCredit: entry.fullDayCredit,
-        }).overtimeMinutes,
+        splitWorkedMinutes(
+          {
+            rawDurationMinutes: entry.rawDurationMinutes ?? 0,
+            unpaidBreakMinutes: entry.unpaidBreakMinutes,
+            fullDayCredit: entry.fullDayCredit,
+          },
+          rules.rulesFor(entry.businessDate),
+        ).overtimeMinutes,
     )
     .filter((minutes) => minutes > 0);
 
@@ -164,13 +172,14 @@ export async function loadOvertimeFinancial(deps: ReportDataDeps, context: Repor
   ]);
   const engineProfiles = profiles.map(toEngineProfile);
   const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+  const rules = await deps.workRules.resolver(context.organizationId);
 
   const rows = operational.rows.map((row): OvertimeFinancialRow => {
     const effective = pickEffectiveCompensationProfile(engineProfiles, row.workerProfileId, row.businessDate);
     const profile = effective ? profiles.find((candidate) => candidate.id === effective.id) : undefined;
     const entry = entryById.get(row.timeEntryId);
     if (!profile || !entry) return { ...row, compensationType: null, overtimePayAgorot: null };
-    const pay = deps.payrollCalculation.computeEntryCompensation(entry, profile);
+    const pay = deps.payrollCalculation.computeEntryCompensation(entry, profile, rules.rulesFor(row.businessDate));
     return { ...row, compensationType: profile.compensationType, overtimePayAgorot: pay.overtimeAgorot };
   });
 

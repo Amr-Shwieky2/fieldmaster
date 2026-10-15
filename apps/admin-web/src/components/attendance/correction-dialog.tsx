@@ -4,9 +4,16 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "rea
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { ManualCorrectionInput, Shift } from "@fieldmaster/api-client";
-import { CorrectionReason, OrgRole, ShiftType, TimeEntryStatus } from "@fieldmaster/shared-types";
-import { evaluateForgottenStampInfraction, forgottenStampInfractionMonth, rawDurationMinutes, splitWorkedMinutes } from "@fieldmaster/shared-validation";
+import { CorrectionReason, DEFAULT_WORK_RULES, Permission, ShiftType, TimeEntryStatus } from "@fieldmaster/shared-types";
+import {
+  evaluateForgottenStampInfraction,
+  forgottenStampInfractionMonth,
+  rawDurationMinutes,
+  splitWorkedMinutes,
+  type DayRules,
+} from "@fieldmaster/shared-validation";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useErrorMessage } from "@/lib/use-error-message";
 import { useEnumLabel } from "@/i18n/enums";
 import { useShiftTitle } from "@/lib/shift-title";
@@ -37,6 +44,8 @@ export interface CorrectionEntry {
   rawDurationMinutes: number | null;
   unpaidBreakMinutes: number;
   fullDayCredit: boolean;
+  /** The standard day and overtime threshold in force on the entry's business date (the evidence's `dayRules`); the defaults when absent. */
+  dayRules?: DayRules;
 }
 
 const FORGOTTEN_STAMP_REASONS: CorrectionReason[] = [CorrectionReason.FORGOTTEN_CLOCK_IN, CorrectionReason.FORGOTTEN_CLOCK_OUT];
@@ -87,8 +96,9 @@ function initialTime(kind: CorrectionKind, entry: CorrectionEntry | undefined, s
  * correct either time, or correct the unpaid break minutes. Only the entry's
  * validated time changes; what the phone and the server recorded stays as
  * evidence. Before saving it previews the new minutes with the same shared
- * functions approval uses, and, for a forgotten stamp, which infraction of
- * the month this will be (an Owner also sees the deduction from the third).
+ * functions approval uses (with the day rules of the entry's own business
+ * date), and, for a forgotten stamp, which infraction of the month this will
+ * be (a member who may see money also sees the deduction from the third).
  */
 export function CorrectionDialog({ entry, onClose, onSaved }: { entry?: CorrectionEntry; onClose: () => void; onSaved: (timeEntryId: string) => void }) {
   const t = useTranslations("correction");
@@ -96,7 +106,8 @@ export function CorrectionDialog({ entry, onClose, onSaved }: { entry?: Correcti
   const errorMessage = useErrorMessage();
   const shiftTitle = useShiftTitle();
   const format = useFormat();
-  const { client, session } = useAuth();
+  const { client } = useAuth();
+  const { can } = useAccess();
   const invalidate = useInvalidateAttendance();
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -135,10 +146,11 @@ export function CorrectionDialog({ entry, onClose, onSaved }: { entry?: Correcti
   const minutes = Number(breakMinutes);
   const breakValid = breakMinutes.trim() !== "" && Number.isInteger(minutes) && minutes >= 0;
 
-  // The preview: the entry's minutes now and after the correction, split by the shared approval rule.
+  // The preview: the entry's minutes now and after the correction, split by the shared approval rule with the entry's own day rules.
   const preview = useMemo(() => {
+    const dayRules = entry?.dayRules ?? DEFAULT_WORK_RULES;
     const split = (raw: number | null, unpaid: number) =>
-      raw === null ? null : splitWorkedMinutes({ rawDurationMinutes: raw, unpaidBreakMinutes: unpaid, fullDayCredit: entry?.fullDayCredit ?? false });
+      raw === null ? null : splitWorkedMinutes({ rawDurationMinutes: raw, unpaidBreakMinutes: unpaid, fullDayCredit: entry?.fullDayCredit ?? false }, dayRules);
     const current = entry ? split(entry.rawDurationMinutes, entry.unpaidBreakMinutes) : null;
     let orderError: "clockOutBeforeClockIn" | "clockInAfterClockOut" | null = null;
     let next: ReturnType<typeof split> = null;
@@ -416,8 +428,8 @@ export function CorrectionDialog({ entry, onClose, onSaved }: { entry?: Correcti
                 <>
                   <p className="font-medium">{t("infraction.number", { number: infractionNumber })}</p>
                   <p>{t.rich("infraction.month", { month: () => <MonthText yearMonth={infractionMonth} /> })}</p>
-                  {/* Owner only: the deduction (money). A Field Manager sees the count alone. */}
-                  {session?.role === OrgRole.OWNER && deductionAgorot > 0 ? (
+                  {/* Money: the deduction, only for a member who may see money; anyone else sees the count alone. */}
+                  {can(Permission.VIEW_FINANCIALS) && deductionAgorot > 0 ? (
                     <p className="font-medium">{t.rich("infraction.deduction", { money: () => <Money agorot={deductionAgorot} /> })}</p>
                   ) : null}
                 </>

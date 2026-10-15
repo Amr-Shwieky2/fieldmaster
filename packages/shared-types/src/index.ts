@@ -3,10 +3,17 @@
 // use the same pattern. `OrgRole.OWNER` etc. still works exactly like an
 // enum at every call site.
 
+import { DEFAULT_WORK_RULES } from "./work-rules";
+
+export * from "./permissions";
+export * from "./work-rules";
+
 export const OrgRole = {
   OWNER: "OWNER",
   FIELD_MANAGER: "FIELD_MANAGER",
   WORKER: "WORKER",
+  /** A role an Owner created: its permissions come from the role record (`roleId`), not from this value. */
+  CUSTOM: "CUSTOM",
 } as const;
 export type OrgRole = (typeof OrgRole)[keyof typeof OrgRole];
 
@@ -339,14 +346,19 @@ export type ShiftWorkerPresence = (typeof ShiftWorkerPresence)[keyof typeof Shif
 /** Every business table's timezone anchor for monthly/daily grouping. */
 export const BUSINESS_TIMEZONE = "Asia/Jerusalem";
 
-/** One standard working day, per compensation rules. */
-export const STANDARD_DAY_MINUTES = 540;
+/**
+ * The default work rules (see work-rules.ts): what an organization uses until
+ * an Owner adds a rule version. Calculations take the rules in force on the
+ * business date; these constants are the defaults and the fallback of the
+ * pure functions that are called without rules.
+ */
+export const STANDARD_DAY_MINUTES = DEFAULT_WORK_RULES.standardDayMinutes;
 
-export const FORGOTTEN_STAMP_FREE_INFRACTIONS = 2;
-export const FORGOTTEN_STAMP_PENALTY_AGOROT = 1000;
+export const FORGOTTEN_STAMP_FREE_INFRACTIONS = DEFAULT_WORK_RULES.freeForgottenStampsPerMonth;
+export const FORGOTTEN_STAMP_PENALTY_AGOROT = DEFAULT_WORK_RULES.forgottenStampPenaltyAgorot;
 
-export const EMERGENCY_RETROACTIVE_MINUTES = 60;
-export const EMERGENCY_RETURN_BUFFER_MINUTES = 15;
+export const EMERGENCY_RETROACTIVE_MINUTES = DEFAULT_WORK_RULES.emergencyMinutesBefore;
+export const EMERGENCY_RETURN_BUFFER_MINUTES = DEFAULT_WORK_RULES.emergencyMinutesAfter;
 
 /**
  * Owner dashboard (Step 7): a business day is an overtime spike when its

@@ -1,4 +1,5 @@
 import type { INestApplication } from "@nestjs/common";
+import { v7 as uuidv7 } from "uuid";
 import { OrgRole } from "@fieldmaster/shared-types";
 import { createTestApp, resetDatabase, loginAs, request } from "./test-app";
 import { PrismaService } from "../src/common/prisma/prisma.service";
@@ -65,25 +66,44 @@ describe("Auth + RBAC + financial isolation (e2e)", () => {
       .expect(401);
   });
 
-  it("enforces the maximum of 2 active Owners per organization", async () => {
+  it("enforces the organization's configurable limit of active Owners (none by default; 2 once set), and the database refuses what the application would", async () => {
     const { org } = await createOrgWithOwner(prisma, "+972500000001", "Owner One");
     const ownerSession = await loginAs(app, "+972500000001");
+    const addOwner = (phoneNumber: string, name: string) =>
+      request(app.getHttpServer())
+        .post("/api/v1/memberships")
+        .set("Authorization", `Bearer ${ownerSession.accessToken}`)
+        .send({ phoneNumber, fullLegalName: name, role: OrgRole.OWNER });
 
-    await request(app.getHttpServer())
-      .post("/api/v1/memberships")
-      .set("Authorization", `Bearer ${ownerSession.accessToken}`)
-      .send({ phoneNumber: "+972500000002", fullLegalName: "Owner Two", role: OrgRole.OWNER })
-      .expect(201);
+    // No limit until one is set: a third Owner is fine.
+    await addOwner("+972500000002", "Owner Two").expect(201);
+    await addOwner("+972500000003", "Owner Three").expect(201);
+    expect(await prisma.organizationMembership.count({ where: { organizationId: org.id, role: OrgRole.OWNER } })).toBe(3);
 
-    const response = await request(app.getHttpServer())
-      .post("/api/v1/memberships")
-      .set("Authorization", `Bearer ${ownerSession.accessToken}`)
-      .send({ phoneNumber: "+972500000003", fullLegalName: "Owner Three", role: OrgRole.OWNER })
-      .expect(409);
-    expect(response.body.code).toBe("MAX_OWNERS_REACHED");
+    // A limit below the Owners there are is refused; at their number it is accepted.
+    const patch = (maxOwners: number | null) =>
+      request(app.getHttpServer())
+        .patch("/api/v1/organizations/me/settings/owners")
+        .set("Authorization", `Bearer ${ownerSession.accessToken}`)
+        .send({ maxOwners, reason: "Agreed in the partners' meeting" });
+    expect((await patch(2).expect(409)).body.code).toBe("OWNER_LIMIT_BELOW_CURRENT");
+    await patch(3).expect(200);
+    const fourth = await addOwner("+972500000004", "Owner Four").expect(409);
+    expect(fourth.body.code).toBe("MAX_OWNERS_REACHED");
+    expect(await prisma.organizationMembership.count({ where: { organizationId: org.id, role: OrgRole.OWNER } })).toBe(3);
 
-    const owners = await prisma.organizationMembership.count({ where: { organizationId: org.id, role: OrgRole.OWNER } });
-    expect(owners).toBe(2);
+    // The database trigger is the backstop for a write that skips the application.
+    const stranger = await prisma.user.create({ data: { id: uuidv7(), phoneNumber: "+972500000009", fullLegalName: "Direct Write", status: "ACTIVE" } });
+    await expect(
+      prisma.organizationMembership.create({ data: { id: uuidv7(), organizationId: org.id, userId: stranger.id, role: OrgRole.OWNER, status: "ACTIVE" } }),
+    ).rejects.toThrow(/maximum of 3 active Owners/);
+
+    // Clearing the limit lifts it.
+    await patch(null).expect(200);
+    await addOwner("+972500000004", "Owner Four").expect(201);
+    expect(await prisma.organizationMembership.count({ where: { organizationId: org.id, role: OrgRole.OWNER } })).toBe(4);
+    const audit = await prisma.auditLog.findMany({ where: { organizationId: org.id, action: "ORGANIZATION_SETTING_CHANGED", field: "maxOwners" }, orderBy: { sequenceNumber: "asc" } });
+    expect(audit.map((row) => [row.oldValue, row.newValue])).toEqual([["null", "3"], ["3", "null"]]);
   });
 
   it("blocks authentication for a suspended account", async () => {

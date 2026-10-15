@@ -189,13 +189,25 @@
     "ACCOUNT_REJECTED": "لم تتم الموافقة على طلب انضمامك. للاستفسار، تواصل مع صاحب العمل.",
     "ACCOUNT_SUSPENDED": "حسابك موقوف حاليًا. للاستفسار، تواصل مع صاحب العمل.",
     "DEVICE_KEY_REVOKED": "أُلغي تفويض هذا الجهاز. سجّل الدخول من جديد للمتابعة.",
-    "TRANSCRIPTION_UNAVAILABLE": "تعذّر تحويل التسجيل الصوتي إلى نص الآن. اكتب الملخص بدلًا منه أو حاول لاحقًا."
+    "TRANSCRIPTION_UNAVAILABLE": "تعذّر تحويل التسجيل الصوتي إلى نص الآن. اكتب الملخص بدلًا منه أو حاول لاحقًا.",
+    "ROLE_NAME_TAKEN": "يوجد دور بهذا الاسم بالفعل. اختر اسمًا آخر.",
+    "SYSTEM_ROLE_IMMUTABLE": "لا يمكن تعديل الأدوار الأساسية ولا أرشفتها.",
+    "ROLE_IN_USE": "لا يمكن أرشفة دور له أعضاء. انقل أعضاءه إلى دور آخر أولًا.",
+    "INVALID_ROLE_PERMISSIONS": "قائمة الصلاحيات غير صالحة: بعض الصلاحيات تحتاج إلى صلاحيات أخرى معها.",
+    "LAST_ADMIN": "يجب أن يبقى في المؤسسة عضو فعّال واحد على الأقل يدير الأدوار والإعدادات.",
+    "OWNER_LIMIT_BELOW_CURRENT": "لا يمكن أن يكون الحد أقل من عدد المالكين الفعّالين حاليًا.",
+    "SCOPE_TARGET_NOT_FOUND": "مشروع أو موقع غير موجود في هذه المؤسسة.",
+    "SCOPE_RESTRICTED": "هذا الإجراء يخص المؤسسة كلها، ولا يتاح لعضو مقيَّد بمشاريع محددة.",
+    "WORK_RULES_INVALID": "قيم قواعد العمل غير صالحة. راجع الحدود المسموحة لكل قاعدة.",
+    "WORK_RULES_EFFECTIVE_DATE_PAST": "يجب أن يبدأ سريان التغيير بعد اليوم. لا تُعدَّل الأيام الماضية.",
+    "CLOCK_IN_TOO_EARLY": "لم يحن وقت بدء الدوام لهذه الوردية بعد."
   },
   "enums": {
     "OrgRole": {
       "OWNER": "المالك",
       "FIELD_MANAGER": "مدير ميدان",
-      "WORKER": "عامل"
+      "WORKER": "عامل",
+      "CUSTOM": "دور مخصص"
     },
     "AccountStatus": {
       "INVITED": "مدعو",
@@ -426,6 +438,52 @@
       "NOT_CLOCKED_IN": "لم يبدأ الدوام",
       "CLOCKED_IN": "في الدوام",
       "CLOCKED_OUT": "أنهى الدوام"
+    },
+    "SystemRoleKey": {
+      "OWNER": "المالك",
+      "FIELD_MANAGER": "مدير ميدان",
+      "WORKER": "عامل"
+    },
+    "PermissionGroup": {
+      "ATTENDANCE": "الحضور",
+      "SCHEDULING": "الجدولة",
+      "SITES": "المواقع",
+      "WORKERS": "العمال",
+      "FINANCE": "الرواتب والمالية",
+      "REPORTS": "التقارير",
+      "SETTINGS": "الإعدادات",
+      "AUDIT": "سجل التدقيق"
+    },
+    "Permission": {
+      "CLOCK_IN_OUT": "تسجيل بدء الدوام وإنهائه بنفسه",
+      "VIEW_OWN_ATTENDANCE": "رؤية سجل حضوره الشخصي",
+      "VIEW_ATTENDANCE": "رؤية سجل حضور الجميع",
+      "VIEW_OPERATIONS": "متابعة العمليات الحيّة",
+      "APPROVE_ATTENDANCE": "اعتماد الحضور أو رفضه",
+      "CORRECT_TIME_ENTRIES": "تصحيح تسجيلات الحضور",
+      "APPLY_FULL_DAY_CREDIT": "منح احتساب يوم كامل",
+      "VIEW_SHIFTS": "رؤية جميع الورديات",
+      "MANAGE_SHIFTS": "إنشاء الورديات وإدارتها وتعيين العمال",
+      "MANAGE_TURAN": "إدارة جدول المناوبات",
+      "MANAGE_TEMP_SUPERVISORS": "تعيين المشرفين المؤقتين",
+      "MANAGE_SITES": "إدارة المشاريع والمواقع",
+      "MANAGE_WORKERS": "إدارة العمال",
+      "APPROVE_ONBOARDING": "مراجعة طلبات الانضمام والدعوات",
+      "VIEW_FINANCIALS": "رؤية المبالغ المالية",
+      "VIEW_COMPENSATION": "رؤية أجور العمال",
+      "MANAGE_COMPENSATION": "تعديل أجور العمال",
+      "VIEW_BANK_INFO": "رؤية بيانات الهوية والحساب البنكي",
+      "VIEW_PAYROLL": "رؤية كشوف الرواتب",
+      "MANAGE_PAYROLL": "حساب الرواتب وتسجيل التعديلات",
+      "FINALIZE_PAYROLL": "اعتماد الرواتب وإعادة فتحها",
+      "VIEW_FINANCIAL_DASHBOARD": "اللوحة المالية",
+      "GENERATE_OPERATIONAL_REPORTS": "إصدار التقارير التشغيلية",
+      "GENERATE_FINANCIAL_REPORTS": "إصدار التقارير المالية",
+      "VIEW_ORG_SETTINGS": "رؤية إعدادات المؤسسة",
+      "MANAGE_ORG_SETTINGS": "تعديل إعدادات المؤسسة وقواعد العمل",
+      "MANAGE_ORG_USERS": "إدارة المستخدمين والأجهزة",
+      "MANAGE_ROLES": "إدارة الأدوار والصلاحيات",
+      "VIEW_AUDIT_LOG": "رؤية سجل التدقيق"
     }
   },
   "units": {

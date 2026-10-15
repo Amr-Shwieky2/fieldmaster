@@ -1,6 +1,26 @@
 import type { Prisma } from "@prisma/client";
 import { NotificationType, OrgRole } from "@fieldmaster/shared-types";
-import { CONFIGURABLE_NOTIFICATIONS } from "../../common/settings/organization-settings.service";
+import { Permission, hasPermission, type PermissionHolder } from "../../common/auth/permissions";
+import { CONFIGURABLE_NOTIFICATIONS, type ConfigurableNotificationType } from "../../common/settings/organization-settings.service";
+/**
+ * The permission a member's role needs to receive each manager-facing
+ * notification (flexible organization model). The built-in Owner and Field
+ * Manager roles hold all of them, so for them nothing changed; a custom role
+ * receives a notification only when it holds the permission.
+ */
+export const NOTIFICATION_PERMISSION: Record<ConfigurableNotificationType, Permission> = {
+  [NotificationType.WORKER_CLOCKED_IN]: Permission.VIEW_OPERATIONS,
+  [NotificationType.WORKER_CLOCKED_OUT]: Permission.VIEW_OPERATIONS,
+  [NotificationType.OVERTIME_THRESHOLD_CROSSED]: Permission.VIEW_OPERATIONS,
+  [NotificationType.TEMPORARY_SUPERVISOR_ISSUE_REPORTED]: Permission.VIEW_OPERATIONS,
+  [NotificationType.EMERGENCY_SHIFT_STARTED]: Permission.VIEW_ATTENDANCE,
+  [NotificationType.EMERGENCY_SHIFT_ENDED]: Permission.VIEW_ATTENDANCE,
+  [NotificationType.ONBOARDING_SUBMITTED]: Permission.APPROVE_ONBOARDING,
+  [NotificationType.OFFLINE_EVENT_REJECTED]: Permission.VIEW_ATTENDANCE,
+  [NotificationType.SUSPICIOUS_LOCATION_DETECTED]: Permission.VIEW_ATTENDANCE,
+};
+
+
 
 /**
  * A member's own push preferences (Step 9), stored on their membership
@@ -23,15 +43,20 @@ export const WORKER_NOTIFICATION_TYPES: readonly NotificationType[] = [
 export const MANAGER_NOTIFICATION_TYPES = Object.keys(CONFIGURABLE_NOTIFICATIONS) as NotificationType[];
 
 /**
- * Every type the member can receive today: the manager-facing ones for an
- * Owner or Field Manager, and the worker-facing ones for anyone with a worker
- * profile (a Worker, or a time-trackable Field Manager or Owner). Types the
- * API never sends (e.g. PAYROLL_FINALIZED) are not listed.
+ * Every type the member can receive today: the manager-facing ones whose
+ * permission their role holds (every one for an Owner or Field Manager), and
+ * the worker-facing ones for anyone with a worker profile (a Worker, or a
+ * time-trackable member of any role). Types the API never sends (e.g.
+ * PAYROLL_FINALIZED) are not listed. Pass a plain role, or the member (with
+ * their effective permissions).
  */
-export function receivableNotificationTypes(role: OrgRole, hasWorkerProfile: boolean): NotificationType[] {
+export function receivableNotificationTypes(member: OrgRole | PermissionHolder, hasWorkerProfile: boolean): NotificationType[] {
+  const holder: PermissionHolder = typeof member === "string" ? { role: member } : member;
   const types = new Set<NotificationType>();
-  if (role === OrgRole.OWNER || role === OrgRole.FIELD_MANAGER) for (const type of MANAGER_NOTIFICATION_TYPES) types.add(type);
-  if (role === OrgRole.WORKER || hasWorkerProfile) for (const type of WORKER_NOTIFICATION_TYPES) types.add(type);
+  for (const type of MANAGER_NOTIFICATION_TYPES) {
+    if (hasPermission(holder, NOTIFICATION_PERMISSION[type as ConfigurableNotificationType])) types.add(type);
+  }
+  if (holder.role === OrgRole.WORKER || hasWorkerProfile) for (const type of WORKER_NOTIFICATION_TYPES) types.add(type);
   // In the enum's order, so the settings screen lists them in a stable order.
   return (Object.values(NotificationType) as NotificationType[]).filter((type) => types.has(type));
 }

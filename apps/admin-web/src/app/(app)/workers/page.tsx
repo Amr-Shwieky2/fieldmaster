@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { CompensationType, OrgRole } from "@fieldmaster/shared-types";
+import { CompensationType, Permission } from "@fieldmaster/shared-types";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { isForbidden } from "@fieldmaster/i18n";
 import { EM_DASH } from "@fieldmaster/i18n";
 import { useEnumLabel } from "@/i18n/enums";
@@ -20,11 +21,13 @@ export default function WorkersPage() {
   const t = useTranslations("workers");
   const tc = useTranslations("common");
   const label = useEnumLabel();
-  const { client, session } = useAuth();
-  // Only an Owner reviews applications (decrypted ID and bank details); a Field Manager sees who is waiting.
-  const isOwner = session?.role === OrgRole.OWNER;
+  const { client } = useAuth();
+  const { can, canAll } = useAccess();
+  // Reviewing an application shows the decrypted ID and bank details (VIEW_BANK_INFO); without it, a member sees who is waiting.
+  const canReview = canAll([Permission.APPROVE_ONBOARDING, Permission.VIEW_BANK_INFO]);
+  const canOnboard = can(Permission.APPROVE_ONBOARDING);
   const workersQuery = useQuery({ queryKey: ["workers"], queryFn: () => client.listWorkers() });
-  const pendingQuery = useQuery({ queryKey: ["workers-pending"], queryFn: () => client.listPendingApproval() });
+  const pendingQuery = useQuery({ queryKey: ["workers-pending"], queryFn: () => client.listPendingApproval(), enabled: canOnboard });
   const pending = pendingQuery.data ?? [];
   const workers = workersQuery.data;
 
@@ -34,12 +37,14 @@ export default function WorkersPage() {
         title={t("title")}
         description={t("description")}
         actions={
-          <Link
-            href="/workers/invitations"
-            className="inline-flex items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-          >
-            {t("inviteWorker")}
-          </Link>
+          canOnboard ? (
+            <Link
+              href="/workers/invitations"
+              className="inline-flex items-center justify-center rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+            >
+              {t("inviteWorker")}
+            </Link>
+          ) : null
         }
       />
 
@@ -59,7 +64,7 @@ export default function WorkersPage() {
         <Card>
           <CardHeader>
             <CardTitle>{t("pending.title", { count: pending.length })}</CardTitle>
-            {isOwner ? null : <p className="mt-1 text-sm text-slate-500">{t("pending.ownerReviews")}</p>}
+            {canReview ? null : <p className="mt-1 text-sm text-slate-500">{t("pending.ownerReviews")}</p>}
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
@@ -71,7 +76,7 @@ export default function WorkersPage() {
                       <Phone value={p.phoneNumber} />
                     </p>
                   </div>
-                  {isOwner ? (
+                  {canReview ? (
                     <Link
                       href={`/workers/${p.workerProfileId}/review`}
                       aria-label={t("pending.reviewLabel", { name: p.fullLegalName })}

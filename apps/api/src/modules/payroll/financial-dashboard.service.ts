@@ -1,13 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import type { PayrollCalculationSnapshot } from "@prisma/client";
 import { OVERTIME_SPIKE_FACTOR, OVERTIME_SPIKE_MIN_MINUTES, PayrollAdjustmentType, PayrollFigureSource, PayrollPeriodStatus } from "@fieldmaster/shared-types";
-import { calculatePayrollMonth, findOvertimeSpikes, toBusinessDate } from "@fieldmaster/shared-validation";
+import { businessMonthDates, calculatePayrollMonth, findOvertimeSpikes, sumPayrollWorkers, toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AttendanceCostService, CostBasis } from "./attendance-cost.service";
 import { PayrollInputsService, PENDING_ENTRY_STATUSES } from "./payroll-inputs.service";
 import {
   buildPayrollSnapshotResult,
   PAYROLL_SNAPSHOT_SCHEMA_VERSION,
+  snapshotRulesFor,
+  type PayrollFigureInputs,
   type PayrollSnapshotInputs,
   type PayrollSnapshotResult,
   type PayrollSnapshotTotals,
@@ -30,7 +32,7 @@ function monthDays(yearMonth: string, today: string): string[] {
 interface MonthFigures {
   source: PayrollFigureSource;
   finalizedVersion: number | null;
-  inputs: PayrollSnapshotInputs | null;
+  inputs: PayrollFigureInputs | null;
   result: PayrollSnapshotResult;
   totals: PayrollSnapshotTotals;
 }
@@ -54,7 +56,7 @@ export class FinancialDashboardService {
     const previousMonth = previousYearMonth(yearMonth);
     const [current, previous, pendingApproval] = await Promise.all([
       this.monthFigures(organizationId, yearMonth),
-      this.monthFigures(organizationId, previousMonth),
+      this.monthTotals(organizationId, previousMonth),
       this.pendingApproval(organizationId, yearMonth),
     ]);
     const { result, totals, inputs } = current;
@@ -189,16 +191,38 @@ export class FinancialDashboardService {
     const latest = await this.prisma.payrollPeriod.findFirst({
       where: { organizationId, yearMonth },
       orderBy: { version: "desc" },
-      include: { currentSnapshot: true },
+      select: { id: true, status: true, version: true, currentSnapshotId: true },
     });
     if (latest?.status === PayrollPeriodStatus.FINALIZED) {
-      const stored = this.stored(latest.currentSnapshot);
+      // Only a finalized month reads its stored calculation (a large document); any other month is calculated live.
+      const snapshot = latest.currentSnapshotId ? await this.prisma.payrollCalculationSnapshot.findUnique({ where: { id: latest.currentSnapshotId } }) : null;
+      const stored = this.stored(snapshot);
       if (stored) return { source: PayrollFigureSource.FINALIZED, finalizedVersion: latest.version, ...stored };
       return { source: PayrollFigureSource.FINALIZED, finalizedVersion: latest.version, ...(await this.legacyFigures(latest.id)) };
     }
-    const { inputs } = await this.inputs.load(organizationId, yearMonth);
-    const month = calculatePayrollMonth({ entries: inputs.entries, profiles: inputs.compensationProfiles, adjustments: inputs.adjustments });
+    const inputs = await this.inputs.loadFigures(organizationId, yearMonth);
+    const month = calculatePayrollMonth({ entries: inputs.entries, profiles: inputs.compensationProfiles, adjustments: inputs.adjustments, rulesFor: snapshotRulesFor(inputs) });
     return { source: PayrollFigureSource.LIVE, finalizedVersion: null, inputs, ...buildPayrollSnapshotResult(inputs, month.workers, month.entries) };
+  }
+
+  /** Only the month's totals (the comparison with the previous month): its finalized version's stored totals, or a live calculation's. */
+  private async monthTotals(organizationId: string, yearMonth: string): Promise<Pick<MonthFigures, "source" | "totals">> {
+    const latest = await this.prisma.payrollPeriod.findFirst({
+      where: { organizationId, yearMonth },
+      orderBy: { version: "desc" },
+      select: { id: true, status: true, currentSnapshot: { select: { schemaVersion: true, totalsJson: true } } },
+    });
+    if (latest?.status === PayrollPeriodStatus.FINALIZED) {
+      const snapshot = latest.currentSnapshot;
+      const totals =
+        snapshot && snapshot.schemaVersion === PAYROLL_SNAPSHOT_SCHEMA_VERSION && snapshot.totalsJson
+          ? (snapshot.totalsJson as unknown as PayrollSnapshotTotals)
+          : (await this.legacyFigures(latest.id)).totals;
+      return { source: PayrollFigureSource.FINALIZED, totals };
+    }
+    const inputs = await this.inputs.loadFigures(organizationId, yearMonth);
+    const month = calculatePayrollMonth({ entries: inputs.entries, profiles: inputs.compensationProfiles, adjustments: inputs.adjustments, rulesFor: snapshotRulesFor(inputs) });
+    return { source: PayrollFigureSource.LIVE, totals: sumPayrollWorkers(month.workers) };
   }
 
   private stored(snapshot: PayrollCalculationSnapshot | null) {
@@ -266,7 +290,7 @@ export class FinancialDashboardService {
    */
   private async pendingApproval(organizationId: string, yearMonth: string) {
     const entries = await this.prisma.timeEntry.findMany({
-      where: { organizationId, status: { in: PENDING_ENTRY_STATUSES }, businessDate: { startsWith: `${yearMonth}-` } },
+      where: { organizationId, status: { in: PENDING_ENTRY_STATUSES }, businessDate: businessMonthDates(yearMonth) },
       select: {
         id: true,
         workerProfileId: true,
@@ -280,7 +304,7 @@ export class FinancialDashboardService {
         approvedOvertimeMinutes: true,
       },
     });
-    const estimates = await Promise.all(entries.map((entry) => this.costs.estimateEntry(entry)));
+    const estimates = await this.costs.estimateEntries(organizationId, entries);
     return {
       entries: entries.length,
       exposureAgorot: estimates.reduce((sum, estimate) => sum + (estimate.basis === CostBasis.ESTIMATED ? (estimate.estimatedCostAgorot ?? 0) : 0), 0),

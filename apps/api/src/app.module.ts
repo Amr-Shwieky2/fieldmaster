@@ -13,6 +13,7 @@ import { PermissionsGuard } from "./common/guards/permissions.guard";
 import { AuthModule } from "./modules/auth/auth.module";
 import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { MembershipsModule } from "./modules/memberships/memberships.module";
+import { RolesModule } from "./modules/roles/roles.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { WorkersModule } from "./modules/workers/workers.module";
 import { FileAssetsModule } from "./modules/files/file-assets.module";
@@ -36,12 +37,14 @@ import { AttachmentsModule } from "./modules/attachments/attachments.module";
     ConfigModule.forRoot({ isGlobal: true }),
     AppConfigModule,
     EventEmitterModule.forRoot(),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
+    // Requests per minute per client address (RATE_LIMIT_PER_MINUTE; the load test raises it: all its traffic comes from one address).
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: Number(process.env.RATE_LIMIT_PER_MINUTE) > 0 ? Number(process.env.RATE_LIMIT_PER_MINUTE) : 300 }]),
     PrismaModule,
     CommonModule,
     QueueModule,
     AuthModule,
     OrganizationsModule,
+    RolesModule,
     MembershipsModule,
     NotificationsModule,
     WorkersModule,

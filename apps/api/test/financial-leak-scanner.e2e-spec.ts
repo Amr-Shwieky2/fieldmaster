@@ -6,7 +6,7 @@ import { METHOD_METADATA, PATH_METADATA, SSE_METADATA } from "@nestjs/common/con
 import { ModulesContainer } from "@nestjs/core";
 import { io, type Socket } from "socket.io-client";
 import { v7 as uuidv7 } from "uuid";
-import { CorrectionReason, FileAssetPurpose, GovernmentIdType, NotificationType, PRIVACY_NOTICE_VERSION, TuranType } from "@fieldmaster/shared-types";
+import { ALL_PERMISSIONS, CorrectionReason, FileAssetPurpose, isFinancialPermission, GovernmentIdType, NotificationType, PRIVACY_NOTICE_VERSION, TuranType } from "@fieldmaster/shared-types";
 import { createTestApp, resetDatabase, request } from "./test-app";
 import { useEnv } from "./use-env";
 import {
@@ -43,6 +43,10 @@ const MANAGER_PHONE = "+972500000011";
 const WORKER_PHONE = "+972500010001";
 const OTHER_WORKER_PHONE = "+972500010002";
 const SUPERVISOR_PHONE = "+972500010003";
+// Flexible organization model: custom roles with and without the financial permissions, and one restricted to another project.
+const CUSTOM_NO_MONEY_PHONE = "+972500020101";
+const CUSTOM_MONEY_PHONE = "+972500020102";
+const CUSTOM_SCOPED_PHONE = "+972500020103";
 
 const SITE_LAT = 32.0853;
 const SITE_LNG = 34.7818;
@@ -137,6 +141,19 @@ const EXPECTED_NOT_FOUND = {
     "GET /api/v1/time-entries/:id/my-pay",
   ]),
   worker: new Set(["GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
+  // A custom role is a member without a worker profile, like the Field Manager: the same routes answer 404.
+  custom: new Set([
+    "GET /api/v1/payroll-periods/:yearMonth/my-payslip",
+    "GET /api/v1/payroll-statements/me",
+    "GET /api/v1/temporary-supervisors/:assignmentId/shift",
+    "GET /api/v1/payroll-statements/me/current",
+    "GET /api/v1/time-entries/:id/my-pay",
+    // A report is seen by whoever may generate the financial reports, the worker it is about and its requester
+    // (the manager): for a custom role that is none of those it does not exist.
+    "GET /api/v1/reports/:id",
+    "GET /api/v1/reports/:id/download",
+    "GET /api/v1/reports/:id/verify",
+  ]),
   // Step 8: a report is seen by an Owner, its requester and the worker it is about (the Worker above); for anyone
   // else it does not exist, so nothing tells it exists.
   supervisor: new Set([
@@ -254,6 +271,29 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
 
     const ownerToken = await devLogin(owner.membership.id);
     const managerToken = await devLogin(manager.membership.id);
+
+    // Flexible organization model: three custom roles, made the way an Owner makes them (the API), and a member of each.
+    const nonFinancialPermissions = ALL_PERMISSIONS.filter((permission) => !isFinancialPermission(permission));
+    const createRole = async (name: string, permissions: string[]) =>
+      (await request(app.getHttpServer()).post("/api/v1/roles").set("Authorization", `Bearer ${ownerToken}`).send({ name, permissions }).expect(201)).body.id as string;
+    const noMoneyRoleId = await createRole("Everything but money", nonFinancialPermissions);
+    const moneyRoleId = await createRole("Accountant", [...ALL_PERMISSIONS.filter((permission) => isFinancialPermission(permission)), "VIEW_ATTENDANCE", "VIEW_SHIFTS", "VIEW_ORG_SETTINGS", "GENERATE_OPERATIONAL_REPORTS"]);
+    const scopedRoleId = await createRole("Project manager", nonFinancialPermissions.filter((permission) => permission !== "MANAGE_ROLES"));
+    const addCustomMember = async (phoneNumber: string, fullLegalName: string, roleId: string) =>
+      (await request(app.getHttpServer()).post("/api/v1/memberships").set("Authorization", `Bearer ${ownerToken}`).send({ phoneNumber, fullLegalName, roleId }).expect(201)).body.id as string;
+    const customNoMoneyMembershipId = await addCustomMember(CUSTOM_NO_MONEY_PHONE, "Noa NoMoney", noMoneyRoleId);
+    const customMoneyMembershipId = await addCustomMember(CUSTOM_MONEY_PHONE, "Maya Money", moneyRoleId);
+    const customScopedMembershipId = await addCustomMember(CUSTOM_SCOPED_PHONE, "Sara Scoped", scopedRoleId);
+    // The scoped member works with ANOTHER project than the one all the seeded data is in.
+    const otherProject = await createProject(prisma, organizationId, "PRJ-OTHER");
+    await request(app.getHttpServer())
+      .patch(`/api/v1/memberships/${customScopedMembershipId}/scope`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ restricted: true, projectIds: [otherProject.id], reason: "Runs the other project" })
+      .expect(200);
+    const customNoMoneyToken = await devLogin(customNoMoneyMembershipId);
+    const customMoneyToken = await devLogin(customMoneyMembershipId);
+    const customScopedToken = await devLogin(customScopedMembershipId);
     const workerToken = await devLogin(worker.membership.id);
     const otherWorkerToken = await devLogin(otherWorker.membership.id);
     const supervisorToken = await devLogin(supervisor.membership.id);
@@ -442,7 +482,16 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       applicantWorkerProfileId: applicant.id,
       supervisorWorkerProfileId: supervisor.workerProfile.id,
       supervisionId: supervision.body.id as string,
-      tokens: { owner: ownerToken, manager: managerToken, worker: workerToken, otherWorker: otherWorkerToken, supervisor: supervisorToken },
+      tokens: {
+        owner: ownerToken,
+        manager: managerToken,
+        worker: workerToken,
+        otherWorker: otherWorkerToken,
+        supervisor: supervisorToken,
+        customNoMoney: customNoMoneyToken,
+        customMoney: customMoneyToken,
+        customScoped: customScopedToken,
+      },
       /** What only the Owner's review may show: ID numbers, account numbers and holders, invitation tokens and their hashes. */
       sensitiveValues: [
         WORKER_ID_NUMBER,
@@ -464,6 +513,7 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
         reports: report.id,
         "emergency-callouts": calloutId,
         memberships: worker.membership.id,
+        roles: noMoneyRoleId,
         "temporary-supervisors": supervision.body.id as string,
         // Step 7: `/payroll-periods/:yearMonth/versions/:version` (and its `workers/:workerProfileId`, filled with the Worker above).
         versions: "1",
@@ -480,7 +530,7 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
    * sensitive value (ID number, bank detail, invitation token) was found the same way. `moneyExceptions` (a Worker's
    * own pay) are only searched for the sensitive values: the money in them is the caller's own.
    */
-  async function scanGetRoutes(accessToken: string, role: "manager" | "worker" | "supervisor", moneyExceptions: Set<string>) {
+  async function scanGetRoutes(accessToken: string, role: "manager" | "worker" | "supervisor" | "custom", moneyExceptions: Set<string>, anyNotFound = false) {
     const leaks: string[] = [];
     const sensitiveValues: string[] = [];
     const unexpectedStatuses: string[] = [];
@@ -489,7 +539,7 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       const response = await request(app.getHttpServer()).get(path).set("Authorization", `Bearer ${accessToken}`);
       for (const jsonPath of findSensitiveValues(response.body, seed.sensitiveValues)) sensitiveValues.push(`${route} -> ${jsonPath}`);
       if (moneyExceptions.has(route)) continue;
-      const allowed = response.status === 200 || response.status === 403 || (response.status === 404 && EXPECTED_NOT_FOUND[role].has(route));
+      const allowed = response.status === 200 || response.status === 403 || (response.status === 404 && (anyNotFound || EXPECTED_NOT_FOUND[role].has(route)));
       if (!allowed) unexpectedStatuses.push(`${route} -> ${response.status} ${JSON.stringify(response.body)}`);
       if (response.status === 200) bodies.set(route, response.body);
       for (const jsonPath of findForbiddenKeys(response.body)) leaks.push(`${route} -> ${jsonPath}`);
@@ -605,6 +655,52 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
     const view = bodies.get("GET /api/v1/temporary-supervisors/:assignmentId/shift") as { workers: unknown[]; temporaryCheckInPoints: unknown[] };
     expect(view.workers).toHaveLength(3);
     expect(view.temporaryCheckInPoints).toHaveLength(1);
+  });
+
+  it("a custom role holding every permission except the financial ones gets no money, bank or ID-document field or value from any GET route", async () => {
+    const { leaks, sensitiveValues, unexpectedStatuses, bodies } = await scanGetRoutes(seed.tokens.customNoMoney, "custom", new Set());
+    expect({ leaks, sensitiveValues, unexpectedStatuses }).toEqual({ leaks: [], sensitiveValues: [], unexpectedStatuses: [] });
+
+    // The routes were really read as this role, with the same rows the Owner gets (so an empty scan means no leak, not no data).
+    expectRows(bodies, ["GET /api/v1/shifts", "GET /api/v1/forgotten-stamp-infractions", "GET /api/v1/projects", "GET /api/v1/workers", "GET /api/v1/roles"]);
+    expect(bodies.get("GET /api/v1/organizations/me/settings")).toMatchObject({ canEdit: true, fixedRules: { standardDayMinutes: 540 } });
+    expect(JSON.stringify(bodies.get("GET /api/v1/organizations/me/settings"))).not.toMatch(/penalty/i);
+    // The audit log has the money rows (a forgotten-stamp deduction), their amounts left out.
+    const audit = bodies.get("GET /api/v1/audit-logs") as { items: { action: string; newValue: string | null; redacted?: boolean }[] };
+    const deduction = audit.items.find((row) => row.action === "FORGOTTEN_STAMP_INFRACTION_RECORDED" && row.redacted);
+    expect(deduction).toMatchObject({ newValue: null, redacted: true });
+    // The money routes are refused outright.
+    for (const route of ["/payroll-periods", `/payroll-periods/${seed.yearMonth}/dashboard`, `/time-entries/${seed.timeEntryId}/estimated-cost`, `/workers/${seed.worker.workerProfile.id}/onboarding-review`]) {
+      await request(app.getHttpServer()).get(`/api/v1${route}`).set("Authorization", `Bearer ${seed.tokens.customNoMoney}`).expect(403);
+    }
+    // Nor may it add a financial permission to its own role or change what a rule's penalty is.
+    const penalty = await request(app.getHttpServer())
+      .post("/api/v1/organizations/me/work-rules")
+      .set("Authorization", `Bearer ${seed.tokens.customNoMoney}`)
+      .send({ effectiveFrom: "2099-01-01", reason: "Try", forgottenStampPenaltyAgorot: 5_000 })
+      .expect(403);
+    expect(penalty.body.code).toBe("FORBIDDEN");
+    const rules = await request(app.getHttpServer()).get("/api/v1/organizations/me/work-rules").set("Authorization", `Bearer ${seed.tokens.customNoMoney}`).expect(200);
+    expect(JSON.stringify(rules.body)).not.toMatch(/penalty/i);
+  });
+
+  it("a custom role WITH the financial permissions sees money (so the scans above mean something), and one restricted to another project sees none of this project's data", async () => {
+    const { leaks, unexpectedStatuses } = await scanGetRoutes(seed.tokens.customMoney, "custom", new Set());
+    expect(unexpectedStatuses).toEqual([]);
+    const found = leaks.join("\n");
+    expect(found).toMatch(/^GET \/api\/v1\/payroll-periods -> \$\[0\]\.netPayableAgorot$/m);
+    expect(found).toMatch(/^GET \/api\/v1\/payroll-periods\/:yearMonth\/dashboard -> /m);
+    expect(found).toMatch(/^GET \/api\/v1\/shifts -> \$\[\d+\]\.project\.budgetAgorot$/m);
+    expect(found).toMatch(/^GET \/api\/v1\/organizations\/me\/settings -> \$\.fixedRules\.forgottenStampPenaltyAgorot$/m);
+
+    // The restricted member (no money permission either): nothing of this project, and no money anywhere.
+    const scoped = await scanGetRoutes(seed.tokens.customScoped, "custom", new Set(), true);
+    expect({ leaks: scoped.leaks, sensitiveValues: scoped.sensitiveValues }).toEqual({ leaks: [], sensitiveValues: [] });
+    expect(scoped.unexpectedStatuses).toEqual([]);
+    for (const route of ["GET /api/v1/shifts", "GET /api/v1/workers", "GET /api/v1/attendance/entries", "GET /api/v1/emergency-callouts"]) {
+      const body = scoped.bodies.get(route) as unknown[] | { items: unknown[] };
+      expect({ route, rows: Array.isArray(body) ? body.length : body.items.length }).toEqual({ route, rows: 0 });
+    }
   });
 
   it("the Worker's own-money exceptions only ever contain the Worker's own data", async () => {

@@ -6,11 +6,11 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { OnboardingReview } from "@fieldmaster/api-client";
-import { AccountStatus } from "@fieldmaster/shared-types";
+import { AccountStatus, Permission } from "@fieldmaster/shared-types";
 import { EM_DASH, isNotFound } from "@fieldmaster/i18n";
 import { useAuth } from "@/lib/auth-context";
 import { useEnumLabel } from "@/i18n/enums";
-import { OwnerOnly } from "@/components/owner-only";
+import { RequirePermission } from "@/components/require-permission";
 import { PageHeader } from "@/components/page-header";
 import { DateTimeText, LtrText, Phone } from "@/components/formatted";
 import { ArrowStartIcon } from "@/components/icons";
@@ -21,18 +21,19 @@ import { WorkerApprovalForm } from "../../_components/approval-form";
 import { OnboardingFilePreview } from "../../_components/onboarding-file-preview";
 
 /**
- * An Owner reviews a join application: the details as the worker entered
- * them (ID and bank details decrypted by the API), the uploaded documents,
- * the privacy consent, and then approves with a compensation or rejects with
- * a reason. Every view of this data is audited by the API, so the page reads
- * it once per visit and keeps nothing after it closes. A Field Manager never
- * gets here: OwnerOnly sends them to the dashboard before any request.
+ * A join application is reviewed (APPROVE_ONBOARDING with VIEW_BANK_INFO):
+ * the details as the worker entered them (ID and bank details decrypted by
+ * the API), the uploaded documents, the privacy consent, and then approved
+ * with a compensation or rejected with a reason. Every view of this data is
+ * audited by the API, so the page reads it once per visit and keeps nothing
+ * after it closes. Whoever lacks those permissions (a Field Manager) never
+ * gets here: RequirePermission sends them to the dashboard before any request.
  */
 export default function OnboardingReviewPage() {
   return (
-    <OwnerOnly>
+    <RequirePermission permission={[Permission.APPROVE_ONBOARDING, Permission.VIEW_BANK_INFO]}>
       <ReviewContent />
-    </OwnerOnly>
+    </RequirePermission>
   );
 }
 

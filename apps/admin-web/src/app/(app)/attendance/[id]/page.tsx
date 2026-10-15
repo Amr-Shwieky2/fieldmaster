@@ -6,9 +6,10 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { TimeEntryEvidence } from "@fieldmaster/api-client";
-import { OrgRole } from "@fieldmaster/shared-types";
+import { Permission } from "@fieldmaster/shared-types";
 import { isNotFound } from "@fieldmaster/i18n";
 import { useAuth } from "@/lib/auth-context";
+import { useAccess } from "@/lib/use-access";
 import { useEnumLabel } from "@/i18n/enums";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,9 +35,10 @@ import {
 /**
  * One time entry with everything a manager needs to decide (Step 5): who and
  * where, the device / server / validated times, the map with refused
- * attempts, the minutes, the summary and the full history, plus the actions.
- * The evidence response carries no money for anyone; an Owner's page also
- * loads the entry's estimated cost from its own Owner-only endpoint.
+ * attempts, the minutes, the summary and the full history, plus the actions
+ * (each only with its own permission). The evidence response carries no
+ * money for anyone; a member who may see pay (VIEW_FINANCIALS with
+ * VIEW_COMPENSATION) also gets the entry's estimated cost from its own endpoint.
  */
 export default function AttendanceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -71,11 +73,18 @@ function Evidence({ evidence }: { evidence: TimeEntryEvidence }) {
   const t = useTranslations("attendance");
   const tDetail = useTranslations("attendance.detail");
   const label = useEnumLabel();
-  const { session } = useAuth();
-  const isOwner = session?.role === OrgRole.OWNER;
+  const { can, canAll } = useAccess();
+  const canSeeCost = canAll([Permission.VIEW_FINANCIALS, Permission.VIEW_COMPENSATION]);
   const [announcement, setAnnouncement] = useState<{ key: EntryActionSuccess | "corrected"; name: string } | null>(null);
   const [correcting, setCorrecting] = useState(false);
-  const { allowedActions } = evidence;
+  // What the entry allows now (the API) and what the member may do (their permissions).
+  const allowedActions = {
+    approve: evidence.allowedActions.approve && can(Permission.APPROVE_ATTENDANCE),
+    reject: evidence.allowedActions.reject && can(Permission.APPROVE_ATTENDANCE),
+    requestCorrection: evidence.allowedActions.requestCorrection && can(Permission.APPROVE_ATTENDANCE),
+    fullDayCredit: evidence.allowedActions.fullDayCredit && can(Permission.APPLY_FULL_DAY_CREDIT),
+    correct: evidence.allowedActions.correct && can(Permission.CORRECT_TIME_ENTRIES),
+  };
   const anyAction =
     allowedActions.approve || allowedActions.reject || allowedActions.requestCorrection || allowedActions.fullDayCredit || allowedActions.correct;
 
@@ -138,8 +147,8 @@ function Evidence({ evidence }: { evidence: TimeEntryEvidence }) {
           </Card>
           <RecordCard evidence={evidence} />
           <DurationCard evidence={evidence} />
-          {/* Owner only: a separate request to an Owner-only endpoint; a Field Manager's page never renders it. */}
-          {isOwner ? <EntryCostCard timeEntryId={evidence.id} /> : null}
+          {/* Money: a separate request to its own endpoint; a member who may not see pay never renders (or requests) it. */}
+          {canSeeCost ? <EntryCostCard timeEntryId={evidence.id} /> : null}
           {evidence.emergency ? <EmergencyCard emergency={evidence.emergency} /> : null}
           <SummaryCard summary={evidence.dailySummary} />
         </div>
@@ -157,6 +166,7 @@ function Evidence({ evidence }: { evidence: TimeEntryEvidence }) {
             rawDurationMinutes: evidence.duration.rawDurationMinutes,
             unpaidBreakMinutes: evidence.duration.unpaidBreakMinutes,
             fullDayCredit: evidence.fullDayCredit.applied,
+            dayRules: evidence.dayRules,
           }}
           onClose={() => setCorrecting(false)}
           onSaved={() => {

@@ -36,7 +36,7 @@ export async function resetDatabase(app: INestApplication) {
       notification_deliveries, notifications,
       offline_sync_events, offline_sync_batches, device_public_keys,
       onboarding_invitations, identity_documents, encrypted_bank_accounts, compensation_profiles, worker_profiles, file_assets,
-      refresh_token_families, user_devices, organization_memberships, users,
+      refresh_token_families, user_devices, member_scopes, organization_memberships, roles, work_rule_versions, users,
       audit_logs, organization_settings, organizations
     RESTART IDENTITY CASCADE;
   `);

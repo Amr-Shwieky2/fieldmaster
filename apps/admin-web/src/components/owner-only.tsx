@@ -1,25 +1,18 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { OrgRole } from "@fieldmaster/shared-types";
-import { useAuth } from "@/lib/auth-context";
-import { LoadingState } from "@/components/ui/states";
+import type { ReactNode } from "react";
+import { Permission } from "@fieldmaster/shared-types";
+import { RequirePermission } from "@/components/require-permission";
 
 /**
- * Client-side defense in depth for Owner-only pages (payroll, financial
- * dashboard). This is a UX guard, not a security boundary -- the API
- * itself rejects these routes for a Field Manager with 403 regardless of
- * what the browser renders (see PermissionsGuard + Permission.VIEW_PAYROLL).
+ * Money-only content (Step 1's "Owner only"). Since the flexible
+ * organization model it is whoever holds the financial permission -- an
+ * Owner, or a custom role with the money group -- so this is
+ * `RequirePermission` with `VIEW_FINANCIALS`, kept under its first name; a
+ * page that needs a narrower permission (payroll, the dashboard) uses
+ * `RequirePermission` with it. A UX guard, not a security boundary: the API
+ * refuses the money routes itself.
  */
-export function OwnerOnly({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const { session } = useAuth();
-
-  useEffect(() => {
-    if (session && session.role !== OrgRole.OWNER) router.replace("/dashboard");
-  }, [session, router]);
-
-  if (!session || session.role !== OrgRole.OWNER) return <LoadingState />;
-  return <>{children}</>;
+export function OwnerOnly({ children }: { children: ReactNode }) {
+  return <RequirePermission permission={Permission.VIEW_FINANCIALS}>{children}</RequirePermission>;
 }

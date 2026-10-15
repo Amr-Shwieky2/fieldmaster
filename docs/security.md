@@ -23,8 +23,8 @@
   (Step 8, below).
 - **Session security**: refresh-token rotation with reuse detection
   (revokes the whole session family on reuse — see `api.md`), short-lived
-  (15 min default) access tokens, Owner-triggered device revocation
-  (`AuthService.revokeDevice`).
+  (15 min default) access tokens, device revocation by whoever manages the
+  organization's users (`AuthService.revokeDevice`).
 - **Encryption at rest**: bank account details and identity-document
   numbers (Step 8) are envelope-encrypted (AES-256-GCM) at the application
   layer (`EncryptionService`) — a local key in development
@@ -244,6 +244,35 @@ The Field Manager's pass reads the pending application, the invitation
 list and an application notification, so the search has something to find.
 A report the Temporary Supervisor may not see answers 404 on all three
 `/reports/:id*` routes.
+
+The flexible organization model added 8 GET routes (`/auth/me`, the roles
+catalog, list and details, `/memberships/access`, the Owner limit, the work
+rules and their impact) and made the scanner role-agnostic:
+- **Every role without `VIEW_FINANCIALS` is scanned**: the built-in Field
+  Manager, Worker and Temporary Supervisor as before, and custom roles
+  created through the API — one holding every permission except the money
+  group, and a project manager restricted to another project. None gets a
+  money key or amount from any route; the routes that need a financial
+  permission answer them 403 with no body.
+- **The positive control**: a custom role with the money group («محاسب»)
+  does see money (budgets, estimates, payroll), so an empty result for the
+  others means no leak rather than no data.
+- **Scope**: the member restricted to another project gets none of this
+  project's records from the lists, and 404 on its ids.
+- The penalty rule is money: it is absent from `GET /organizations/me/settings`,
+  from the work rules (values, history and limits) and from `/auth/me` for
+  every role without the permission, and changing it is 403 for them.
+
+**Roles and scope cannot be used to escalate.** The permission list of a
+custom role is validated against the catalog (an unknown permission is a
+400); only `MANAGE_ROLES` edits roles and only `MANAGE_ORG_USERS` assigns
+them; a member restricted to some projects loses every organization-wide
+permission (users, roles, settings changes, audit log, payroll,
+compensation changes, onboarding approval, bank details, the Turan rota)
+whatever their role holds; effective permissions are read from the database
+on every request (a token never carries them); at least one active member
+always keeps the right to manage roles and settings (409 `LAST_ADMIN`); and
+every change is audited old → new with its reason.
 
 **Finalized payroll cannot be changed, even directly in the database (Step
 7).** Triggers refuse any UPDATE or DELETE of a FINALIZED version, any

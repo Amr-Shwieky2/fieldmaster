@@ -1,11 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import type { TimeEntry } from "@prisma/client";
 import { TimeEntryStatus } from "@fieldmaster/shared-types";
-import { splitWorkedMinutes } from "@fieldmaster/shared-validation";
+import { businessMonthDates, computeEntryCompensation, groupByWorker, pickEffectiveCompensationProfile, splitWorkedMinutes } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
-import { PayrollCalculationService } from "./payroll-calculation.service";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
+import { toEngineProfile } from "./payroll-inputs.service";
 
 /** Where an entry's estimate comes from. */
 export const CostBasis = {
@@ -71,51 +72,31 @@ const ENTRY_COST_SELECT = {
 export class AttendanceCostService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly payrollCalculation: PayrollCalculationService,
+    private readonly workRules: WorkRulesService,
   ) {}
 
-  async estimateEntry(entry: CostedEntry): Promise<EntryCostEstimate> {
-    const none = (basis: CostBasis, compensationType: string | null = null): EntryCostEstimate => ({
-      timeEntryId: entry.id,
-      basis,
-      compensationType,
-      regularMinutes: null,
-      overtimeMinutes: null,
-      baseAgorot: null,
-      overtimeAgorot: null,
-      estimatedCostAgorot: basis === CostBasis.REJECTED ? 0 : null,
-    });
+  /** One entry's estimate (see `estimateEntries`). */
+  async estimateEntry(entry: CostedEntry, organizationId: string): Promise<EntryCostEstimate> {
+    return (await this.estimateEntries(organizationId, [entry]))[0];
+  }
 
-    const profile = await this.payrollCalculation.findEffectiveCompensationProfile(entry.workerProfileId, entry.businessDate);
-    if (entry.status === TimeEntryStatus.REJECTED) return none(CostBasis.REJECTED, profile?.compensationType ?? null);
-    if (!profile) return none(CostBasis.NO_COMPENSATION_PROFILE);
-    if (entry.status === TimeEntryStatus.ACTIVE || entry.clockOutAt === null || entry.rawDurationMinutes === null) {
-      return none(CostBasis.OPEN, profile.compensationType);
-    }
-
-    let basis: CostBasis = CostBasis.APPROVED;
-    let minutes = { approvedRegularMinutes: entry.approvedRegularMinutes, approvedOvertimeMinutes: entry.approvedOvertimeMinutes };
-    if (entry.status !== TimeEntryStatus.APPROVED) {
-      basis = CostBasis.ESTIMATED;
-      const split = splitWorkedMinutes({
-        rawDurationMinutes: entry.rawDurationMinutes,
-        unpaidBreakMinutes: entry.unpaidBreakMinutes,
-        fullDayCredit: entry.fullDayCredit,
-      });
-      minutes = { approvedRegularMinutes: split.regularMinutes, approvedOvertimeMinutes: split.overtimeMinutes };
-    }
-
-    const comp = this.payrollCalculation.computeEntryCompensation({ ...entry, ...minutes } as TimeEntry, profile);
-    return {
-      timeEntryId: entry.id,
-      basis,
-      compensationType: profile.compensationType,
-      regularMinutes: comp.regularMinutes,
-      overtimeMinutes: comp.overtimeMinutes,
-      baseAgorot: comp.baseAgorot,
-      overtimeAgorot: comp.overtimeAgorot,
-      estimatedCostAgorot: comp.baseAgorot + comp.overtimeAgorot,
-    };
+  /**
+   * The estimates of many entries with a constant number of queries: the
+   * compensation profiles of the workers involved and the organization's
+   * work rules are read once, then each entry is priced with the profile in
+   * effect on its business date and the rules in force on it.
+   */
+  async estimateEntries(organizationId: string, entries: readonly CostedEntry[]): Promise<EntryCostEstimate[]> {
+    if (entries.length === 0) return [];
+    const workerIds = [...new Set(entries.map((entry) => entry.workerProfileId))];
+    const [profileRows, rules] = await Promise.all([
+      this.prisma.compensationProfile.findMany({ where: { workerProfileId: { in: workerIds } }, orderBy: [{ effectiveStartDate: "asc" }, { id: "asc" }] }),
+      this.workRules.resolver(organizationId),
+    ]);
+    const profilesOf = groupByWorker(profileRows.map(toEngineProfile));
+    return entries.map((entry) =>
+      estimate(entry, pickEffectiveCompensationProfile(profilesOf.get(entry.workerProfileId) ?? [], entry.workerProfileId, entry.businessDate), rules.rulesFor(entry.businessDate)),
+    );
   }
 
   async estimateEntryById(organizationId: string, timeEntryId: string): Promise<EntryCostEstimate> {
@@ -123,7 +104,7 @@ export class AttendanceCostService {
       ? await this.prisma.timeEntry.findFirst({ where: { id: timeEntryId, organizationId }, select: ENTRY_COST_SELECT })
       : null;
     if (!entry) throw new AppException(404, ErrorCodes.NOT_FOUND, "Time entry not found.");
-    return this.estimateEntry(entry);
+    return this.estimateEntry(entry, organizationId);
   }
 
   /**
@@ -139,11 +120,11 @@ export class AttendanceCostService {
     if (!worker) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
 
     const [entries, adjustments] = await Promise.all([
-      this.prisma.timeEntry.findMany({ where: { organizationId, workerProfileId, businessDate: { startsWith: month } }, select: ENTRY_COST_SELECT }),
+      this.prisma.timeEntry.findMany({ where: { organizationId, workerProfileId, businessDate: businessMonthDates(month) }, select: ENTRY_COST_SELECT }),
       this.prisma.payrollAdjustment.findMany({ where: { organizationId, workerProfileId, businessMonth: month }, select: { amountAgorot: true } }),
     ]);
 
-    const estimates = await Promise.all(entries.map((entry) => this.estimateEntry(entry)));
+    const estimates = await this.estimateEntries(organizationId, entries);
     const sum = (basis: CostBasis) =>
       estimates.filter((estimate) => estimate.basis === basis).reduce((total, estimate) => total + (estimate.estimatedCostAgorot ?? 0), 0);
     const count = (basis: CostBasis) => estimates.filter((estimate) => estimate.basis === basis).length;
@@ -164,4 +145,48 @@ export class AttendanceCostService {
       entriesWithoutCompensationProfile: count(CostBasis.NO_COMPENSATION_PROFILE),
     };
   }
+}
+
+/** One entry's estimate from its profile (in effect on its date) and the rules in force on it. */
+function estimate(entry: CostedEntry, profile: ReturnType<typeof toEngineProfile> | null, rules: { standardDayMinutes: number; overtimeThresholdMinutes: number }): EntryCostEstimate {
+  const none = (basis: CostBasis, compensationType: string | null = null): EntryCostEstimate => ({
+    timeEntryId: entry.id,
+    basis,
+    compensationType,
+    regularMinutes: null,
+    overtimeMinutes: null,
+    baseAgorot: null,
+    overtimeAgorot: null,
+    estimatedCostAgorot: basis === CostBasis.REJECTED ? 0 : null,
+  });
+
+  if (entry.status === TimeEntryStatus.REJECTED) return none(CostBasis.REJECTED, profile?.compensationType ?? null);
+  if (!profile) return none(CostBasis.NO_COMPENSATION_PROFILE);
+  if (entry.status === TimeEntryStatus.ACTIVE || entry.clockOutAt === null || entry.rawDurationMinutes === null) {
+    return none(CostBasis.OPEN, profile.compensationType);
+  }
+
+  let basis: CostBasis = CostBasis.APPROVED;
+  let minutes = { approvedRegularMinutes: entry.approvedRegularMinutes, approvedOvertimeMinutes: entry.approvedOvertimeMinutes };
+  if (entry.status !== TimeEntryStatus.APPROVED) {
+    basis = CostBasis.ESTIMATED;
+    const split = splitWorkedMinutes(
+      { rawDurationMinutes: entry.rawDurationMinutes, unpaidBreakMinutes: entry.unpaidBreakMinutes, fullDayCredit: entry.fullDayCredit },
+      rules,
+    );
+    minutes = { approvedRegularMinutes: split.regularMinutes, approvedOvertimeMinutes: split.overtimeMinutes };
+  }
+
+  // The same function the monthly payroll uses.
+  const comp = computeEntryCompensation({ ...minutes, fullDayCredit: entry.fullDayCredit }, profile, rules);
+  return {
+    timeEntryId: entry.id,
+    basis,
+    compensationType: profile.compensationType,
+    regularMinutes: comp.regularMinutes,
+    overtimeMinutes: comp.overtimeMinutes,
+    baseAgorot: comp.baseAgorot,
+    overtimeAgorot: comp.overtimeAgorot,
+    estimatedCostAgorot: comp.baseAgorot + comp.overtimeAgorot,
+  };
 }

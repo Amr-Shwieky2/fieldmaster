@@ -1,4 +1,5 @@
-import { OrgRole } from "@fieldmaster/shared-types";
+import { Permission, type OrgRole } from "@fieldmaster/shared-types";
+import { hasPermission } from "../../common/auth/permissions";
 import type { CompensationProfile, User, WorkerProfile } from "@prisma/client";
 
 export interface WorkerListRow {
@@ -7,17 +8,19 @@ export interface WorkerListRow {
 }
 
 /**
- * Central enforcement point for "Field Managers and Temporary Supervisors
- * must never see compensation" (spec section 6.2 / 31.3). Every worker
+ * Central enforcement point for "whoever may not see money -- Field
+ * Managers, Temporary Supervisors, custom roles without the financial
+ * permission -- must never see compensation" (spec section 6.2 / 31.3). Every worker
  * response -- list, detail, or nested in shift/attendance payloads -- must
  * be built through this mapper rather than returning Prisma rows directly.
  */
 export function serializeWorker(
   row: WorkerListRow,
-  viewer: { role: OrgRole; workerProfileId: string | null },
+  viewer: { role: OrgRole; workerProfileId: string | null; permissions?: ReadonlySet<Permission> },
 ) {
   const wp = row.workerProfile;
-  const canSeeFinancials = viewer.role === OrgRole.OWNER || viewer.workerProfileId === wp.id;
+  // Compensation: a member who may see it (VIEW_COMPENSATION), or the worker themself.
+  const canSeeFinancials = hasPermission(viewer, Permission.VIEW_COMPENSATION) || viewer.workerProfileId === wp.id;
 
   const base = {
     id: wp.id,

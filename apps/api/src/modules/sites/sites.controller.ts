@@ -9,6 +9,7 @@ import { SitesService } from "./sites.service";
 import { CreateProjectDto } from "./dto/create-project.dto";
 import { CreateSiteDto } from "./dto/create-site.dto";
 import { CreateGeofenceDto } from "./dto/create-geofence.dto";
+import { pageWindow } from "../../common/validation/page-query";
 
 @ApiBearerAuth()
 @ApiTags("projects-sites-geofences")
@@ -24,8 +25,8 @@ export class SitesController {
 
   @Get("projects")
   @RequirePermissions(Permission.MANAGE_SITES)
-  listProjects(@CurrentUser() user: AuthenticatedUser) {
-    return this.sitesService.listProjects(user.organizationId, user);
+  listProjects(@CurrentUser() user: AuthenticatedUser, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.sitesService.listProjects(user.organizationId, user, pageWindow({ page, pageSize }));
   }
 
   @Get("projects/:id")
@@ -42,14 +43,14 @@ export class SitesController {
 
   @Get("sites")
   @RequirePermissions(Permission.MANAGE_SITES)
-  listSites(@CurrentUser() user: AuthenticatedUser, @Query("projectId") projectId?: string) {
-    return this.sitesService.listSites(user.organizationId, projectId);
+  listSites(@CurrentUser() user: AuthenticatedUser, @Query("projectId") projectId?: string, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.sitesService.listSites(user.organizationId, user, projectId, pageWindow({ page, pageSize }));
   }
 
   @Get("sites/:id")
   @RequirePermissions(Permission.MANAGE_SITES)
   getSite(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.sitesService.getSite(user.organizationId, id);
+    return this.sitesService.getSite(user.organizationId, id, user);
   }
 
   @Post("geofences")
@@ -61,6 +62,6 @@ export class SitesController {
   @Get("sites/:id/geofences")
   @RequirePermissions(Permission.MANAGE_SITES)
   listGeofences(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.sitesService.listGeofencesForSite(user.organizationId, id);
+    return this.sitesService.listGeofencesForSite(user.organizationId, id, user);
   }
 }

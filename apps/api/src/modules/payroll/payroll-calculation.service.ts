@@ -5,6 +5,7 @@ import { Prisma, type CompensationProfile, type PayrollPeriod, type TimeEntry } 
 import { PayrollCalculationState, PayrollPeriodStatus } from "@fieldmaster/shared-types";
 import {
   calculateWorkerPayroll,
+  groupByWorker,
   computeEntryCompensation as computeEntryPay,
   payrollMonthWorkerIds,
   type EntryCompensation,
@@ -19,9 +20,13 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { PayrollInputsService, toEngineProfile } from "./payroll-inputs.service";
-import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION } from "./payroll-snapshot";
+import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION, snapshotRulesFor } from "./payroll-snapshot";
+import type { WorkRules } from "@fieldmaster/shared-types";
 
 export type EntryCompensationResult = EntryCompensation;
+
+/** How often a running calculation writes its progress. */
+const PROGRESS_WRITE_INTERVAL_MS = 1_000;
 
 /** A QUEUED or RUNNING run with no news for this long is taken over by the next "calculate" (its job was lost). */
 export const STALE_CALCULATION_MS = 15 * 60_000;
@@ -55,11 +60,13 @@ export class PayrollCalculationService {
     @InjectQueue(QUEUE_NAMES.PAYROLL_CALCULATION) private readonly queue: Queue,
   ) {}
 
+  /** `rules`: the work rules in force on the entry's business date (the defaults when not given). */
   computeEntryCompensation(
     entry: Pick<TimeEntry, "approvedRegularMinutes" | "approvedOvertimeMinutes" | "fullDayCredit">,
     profile: CompensationProfile,
+    rules?: Pick<WorkRules, "standardDayMinutes" | "overtimeThresholdMinutes">,
   ): EntryCompensationResult {
-    return computeEntryPay(entry, toEngineProfile(profile));
+    return computeEntryPay(entry, toEngineProfile(profile), rules);
   }
 
   async findEffectiveCompensationProfile(workerProfileId: string, onDate: string): Promise<CompensationProfile | null> {
@@ -182,14 +189,28 @@ export class PayrollCalculationService {
 
       const workers: PayrollWorkerResult[] = [];
       const entryResults: PayrollEntryResult[] = [];
+      // Each worker is calculated from their own entries only (grouped once), with the rules of each entry's business date.
+      const rulesFor = snapshotRulesFor(inputs);
+      const entriesByWorker = groupByWorker(inputs.entries);
+      const adjustmentsByWorker = groupByWorker(inputs.adjustments);
+      const profilesByWorker = groupByWorker(inputs.compensationProfiles);
       let lastProgress = 10;
+      let lastProgressWrite = Date.now();
       for (const [index, workerProfileId] of workerIds.entries()) {
-        const result = calculateWorkerPayroll(workerProfileId, inputs.entries, inputs.compensationProfiles, inputs.adjustments);
+        const result = calculateWorkerPayroll(
+          workerProfileId,
+          entriesByWorker.get(workerProfileId) ?? [],
+          profilesByWorker.get(workerProfileId) ?? [],
+          adjustmentsByWorker.get(workerProfileId) ?? [],
+          rulesFor,
+        );
         workers.push(result.worker);
         entryResults.push(...result.entries);
+        // Progress is written at most once a second: a quick calculation costs no per-worker statements at all.
         const progress = 10 + Math.floor((80 * (index + 1)) / workerIds.length);
-        if (progress !== lastProgress) {
+        if (progress !== lastProgress && Date.now() - lastProgressWrite >= PROGRESS_WRITE_INTERVAL_MS) {
           lastProgress = progress;
+          lastProgressWrite = Date.now();
           await this.setProgress(run.id, progress, index + 1, workerIds.length, onProgress);
         }
       }
@@ -219,34 +240,20 @@ export class PayrollCalculationService {
           });
 
           // The version's items mirror the snapshot (one per worker), for the statements and the dashboard.
+          // Written in batches (a few statements for any number of workers, not several per worker).
           await tx.payrollItem.deleteMany({ where: { payrollPeriodId: period.id, workerProfileId: { notIn: workerIds } } });
-          for (const worker of result.workers) {
-            const values = {
-              approvedShifts: worker.approvedShifts,
-              standardDaysCredited: worker.standardDaysCredited,
-              regularMinutes: worker.regularMinutes,
-              overtimeMinutes: worker.overtimeMinutes,
-              emergencyRetroactiveMinutes: worker.emergencyRetroactiveMinutes,
-              emergencyReturnMinutes: worker.emergencyReturnMinutes,
-              grossBaseAgorot: worker.grossBaseAgorot,
-              overtimeAgorot: worker.overtimeAgorot,
-              positiveAdjustmentsAgorot: worker.positiveAdjustmentsAgorot,
-              forgottenStampPenaltiesAgorot: worker.forgottenStampPenaltiesAgorot,
-              reversalsAgorot: worker.reversalsAgorot,
-              otherDeductionsAgorot: worker.otherDeductionsAgorot,
-              deductionsAgorot: worker.deductionsAgorot,
-              netPayableAgorot: worker.netPayableAgorot,
-            };
-            const item = await tx.payrollItem.upsert({
-              where: { payrollPeriodId_workerProfileId: { payrollPeriodId: period.id, workerProfileId: worker.workerProfileId } },
-              create: { id: generateId(), payrollPeriodId: period.id, workerProfileId: worker.workerProfileId, ...values },
-              update: values,
-            });
-            // An adjustment stays linked to the first item that included it (the snapshot records every version's own list).
-            await tx.payrollAdjustment.updateMany({
-              where: { id: { in: inputs.adjustments.filter((a) => a.workerProfileId === worker.workerProfileId).map((a) => a.id) }, payrollItemId: null },
-              data: { payrollItemId: item.id },
-            });
+          await this.upsertItems(tx, period.id, result.workers);
+          // An adjustment stays linked to the first item that included it (the snapshot records every version's own list).
+          const adjustmentIds = inputs.adjustments.map((adjustment) => adjustment.id);
+          if (adjustmentIds.length > 0) {
+            await tx.$executeRaw`
+              UPDATE payroll_adjustments a
+              SET payroll_item_id = i.id
+              FROM payroll_items i
+              WHERE i.payroll_period_id = ${period.id}::uuid
+                AND i.worker_profile_id = a.worker_profile_id
+                AND a.id = ANY(${adjustmentIds}::uuid[])
+                AND a.payroll_item_id IS NULL`;
           }
 
           await tx.payrollPeriod.update({ where: { id: period.id }, data: { status: PayrollPeriodStatus.REVIEW, currentSnapshotId: snapshot.id } });
@@ -279,6 +286,47 @@ export class PayrollCalculationService {
         note: `Calculation run ${run.id}`,
         correlationId: run.id,
       });
+    }
+  }
+
+  /** Creates or updates one item per worker, a few hundred per statement (`ON CONFLICT` on the version's worker key). */
+  private async upsertItems(tx: Prisma.TransactionClient, payrollPeriodId: string, workers: readonly PayrollWorkerResult[]): Promise<void> {
+    const BATCH = 200;
+    for (let from = 0; from < workers.length; from += BATCH) {
+      const rows = workers.slice(from, from + BATCH).map(
+        (worker) => Prisma.sql`(
+          ${generateId()}::uuid, ${payrollPeriodId}::uuid, ${worker.workerProfileId}::uuid,
+          ${worker.approvedShifts}, ${worker.standardDaysCredited}, ${worker.regularMinutes}, ${worker.overtimeMinutes},
+          ${worker.emergencyRetroactiveMinutes}, ${worker.emergencyReturnMinutes},
+          ${worker.grossBaseAgorot}, ${worker.overtimeAgorot}, ${worker.positiveAdjustmentsAgorot},
+          ${worker.forgottenStampPenaltiesAgorot}, ${worker.reversalsAgorot}, ${worker.otherDeductionsAgorot},
+          ${worker.deductionsAgorot}, ${worker.netPayableAgorot}, now(), now())`,
+      );
+      await tx.$executeRaw`
+        INSERT INTO payroll_items (
+          id, payroll_period_id, worker_profile_id,
+          approved_shifts, standard_days_credited, regular_minutes, overtime_minutes,
+          emergency_retroactive_minutes, emergency_return_minutes,
+          gross_base_agorot, overtime_agorot, positive_adjustments_agorot,
+          forgotten_stamp_penalties_agorot, reversals_agorot, other_deductions_agorot,
+          deductions_agorot, net_payable_agorot, created_at, updated_at)
+        VALUES ${Prisma.join(rows)}
+        ON CONFLICT (payroll_period_id, worker_profile_id) DO UPDATE SET
+          approved_shifts = EXCLUDED.approved_shifts,
+          standard_days_credited = EXCLUDED.standard_days_credited,
+          regular_minutes = EXCLUDED.regular_minutes,
+          overtime_minutes = EXCLUDED.overtime_minutes,
+          emergency_retroactive_minutes = EXCLUDED.emergency_retroactive_minutes,
+          emergency_return_minutes = EXCLUDED.emergency_return_minutes,
+          gross_base_agorot = EXCLUDED.gross_base_agorot,
+          overtime_agorot = EXCLUDED.overtime_agorot,
+          positive_adjustments_agorot = EXCLUDED.positive_adjustments_agorot,
+          forgotten_stamp_penalties_agorot = EXCLUDED.forgotten_stamp_penalties_agorot,
+          reversals_agorot = EXCLUDED.reversals_agorot,
+          other_deductions_agorot = EXCLUDED.other_deductions_agorot,
+          deductions_agorot = EXCLUDED.deductions_agorot,
+          net_payable_agorot = EXCLUDED.net_payable_agorot,
+          updated_at = now()`;
     }
   }
 

@@ -24,6 +24,7 @@ import { NotificationAudienceService } from "../notifications/notification-audie
 import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { loadWorkerName, withoutFinancialData, type NotificationData } from "../notifications/notification-data";
 import { OrganizationSettingsService } from "../../common/settings/organization-settings.service";
+import { WorkRulesService } from "../../common/settings/work-rules.service";
 import { LocationValidationService } from "./location-validation.service";
 import { RejectedClockAttemptsService, type RejectedClockAttemptInput } from "./rejected-clock-attempts.service";
 import { AttendanceAttachmentsService } from "./attendance-attachments.service";
@@ -46,6 +47,7 @@ export class ClockEventsService {
     private readonly notificationAudience: NotificationAudienceService,
     private readonly realtime: RealtimeEventsService,
     private readonly attachments: AttendanceAttachmentsService,
+    private readonly workRules: WorkRulesService,
   ) {}
 
   async clockIn(organizationId: string, dto: ClockInDto, actor: AuthenticatedUser, idempotencyKey: string | undefined, correlationId: string) {
@@ -140,6 +142,20 @@ export class ClockEventsService {
     if (locationValidationStatus === LocationValidationStatus.BLOCKED) {
       throw await refuse(
         new AppException(403, ErrorCodes.MOCK_LOCATION_BLOCKED, "Location could not be verified as genuine. Please disable mock-location tools and try again."),
+      );
+    }
+
+    // The clock-in window of the work rules in force on the shift's business date: not earlier than
+    // that many minutes before the shift starts (an offline event counts at the time it happened).
+    const rules = await this.workRules.rulesOn(organizationId, shift.businessDate);
+    const clockInOpensAt = new Date(shift.scheduledStart.getTime() - rules.clockInEarlyWindowMinutes * 60_000);
+    const eventAt = origin === EventOrigin.OFFLINE ? deviceTimestamp : new Date();
+    if (eventAt.getTime() < clockInOpensAt.getTime()) {
+      throw await refuse(
+        new AppException(409, ErrorCodes.CLOCK_IN_TOO_EARLY, "This shift is not open for clock-in yet.", {
+          opensAt: clockInOpensAt.toISOString(),
+          windowMinutes: rules.clockInEarlyWindowMinutes,
+        }),
       );
     }
 
@@ -275,8 +291,8 @@ export class ClockEventsService {
       workerName: await loadWorkerName(this.prisma, actor.workerProfileId),
       clockInAt: effectiveAt.toISOString(),
     };
-    this.realtime.operationsChanged(organizationId, OperationsChangeKind.CLOCK_IN);
-    await this.notifyManagerAndOwners(organizationId, shift.managerId, {
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.CLOCK_IN, shift.id);
+    await this.notifyManagerAndOwners(organizationId, shift.managerId, shift.id, {
       type: NotificationType.WORKER_CLOCKED_IN,
       title: "Worker clocked in",
       managerBody: `A worker clocked in for "${shift.title}".`,
@@ -442,12 +458,12 @@ export class ClockEventsService {
       correlationId,
     });
 
-    this.realtime.operationsChanged(organizationId, OperationsChangeKind.CLOCK_OUT);
+    this.realtime.operationsChanged(organizationId, OperationsChangeKind.CLOCK_OUT, timeEntry.shiftId);
     await this.notifyClockOut(organizationId, actor.workerProfileId, timeEntry.shift.managerId, timeEntry.shift.title, rawDurationMinutes, {
       timeEntryId: timeEntry.id,
       shiftId: timeEntry.shiftId,
       clockOutAt: effectiveAt.toISOString(),
-    });
+    }, timeEntry.businessDate);
 
     const updated = await this.prisma.timeEntry.findUniqueOrThrow({ where: { id: timeEntry.id }, include: { dailySummary: true } });
     // The public response is the closed entry, as before, plus (Step 9) what the app's receipt shows: the
@@ -457,14 +473,17 @@ export class ClockEventsService {
   }
 
   /**
-   * The shift's manager gets `managerBody` / `managerData`; every other active
-   * Owner gets `ownerBody` / `ownerData`. Only `ownerData` may carry money
-   * (`*Agorot`): it is the Owner-only counterpart of `ownerBody`'s cost line.
-   * Who receives it follows the organization's notification settings.
+   * The shift's manager gets `managerBody` / `managerData`; every other
+   * recipient who may see money (VIEW_FINANCIALS) gets `ownerBody` /
+   * `ownerData`, and one who may not gets the manager copy. Only `ownerData`
+   * may carry money (`*Agorot`): it is the counterpart of `ownerBody`'s cost
+   * line. Who receives it follows the organization's notification settings,
+   * the members' roles, and the projects a restricted member is limited to.
    */
   private async notifyManagerAndOwners(
     organizationId: string,
     managerUserId: string,
+    shiftId: string,
     content: {
       type: typeof NotificationType.WORKER_CLOCKED_IN | typeof NotificationType.WORKER_CLOCKED_OUT;
       title: string;
@@ -474,18 +493,20 @@ export class ClockEventsService {
       ownerData: NotificationData;
     },
   ) {
-    const audience = await this.notificationAudience.shiftManagerAndOwners(organizationId, content.type, managerUserId);
-    const recipients = new Set<string>([...(audience.managerUserId ? [audience.managerUserId] : []), ...audience.ownerUserIds]);
+    const recipients = await this.notificationAudience.recipients(organizationId, content.type, {
+      managerUserId,
+      context: await this.notificationAudience.contextOfShift(shiftId),
+    });
     await this.notifications.notifyMany(
-      Array.from(recipients).map((recipientUserId) => {
-        const isShiftManager = recipientUserId === managerUserId;
+      recipients.map((recipient) => {
+        const withMoney = recipient.financial && !recipient.isShiftManager;
         return {
           organizationId,
-          recipientUserId,
+          recipientUserId: recipient.userId,
           type: content.type,
           title: content.title,
-          body: isShiftManager ? content.managerBody : content.ownerBody,
-          data: isShiftManager ? withoutFinancialData(content.managerData) : content.ownerData,
+          body: withMoney ? content.ownerBody : content.managerBody,
+          data: withMoney ? content.ownerData : withoutFinancialData(content.managerData),
         };
       }),
     );
@@ -498,9 +519,12 @@ export class ClockEventsService {
     shiftTitle: string,
     rawDurationMinutes: number,
     refs: { timeEntryId: string; shiftId: string; clockOutAt: string },
+    businessDate: string,
   ) {
-    const regularMinutes = Math.min(rawDurationMinutes, 540);
-    const overtimeMinutes = Math.max(0, rawDurationMinutes - 540);
+    // The overtime threshold in force on the entry's business date (9 hours by default).
+    const rules = await this.workRules.rulesOn(organizationId, businessDate);
+    const regularMinutes = Math.min(rawDurationMinutes, rules.overtimeThresholdMinutes);
+    const overtimeMinutes = Math.max(0, rawDurationMinutes - rules.overtimeThresholdMinutes);
     const formatHm = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 
     const managerBody = `Worker clocked out of "${shiftTitle}".\nTotal: ${formatHm(rawDurationMinutes)}\nRegular: ${formatHm(regularMinutes)}\nOvertime: ${formatHm(overtimeMinutes)}\nApproval is required.`;
@@ -533,14 +557,14 @@ export class ClockEventsService {
         dailyBaseRateAgorot: activeCompensation.dailyBaseRateAgorot ?? undefined,
         baseHourlyRateAgorot: activeCompensation.baseHourlyRateAgorot ?? undefined,
         overtimeHourlyRateAgorot: activeCompensation.overtimeHourlyRateAgorot,
-      });
+      }, rules);
       const ils = (estimate.totalCompensationAgorot / 100).toFixed(2);
       ownerBody = `Worker clocked out of "${shiftTitle}".\nTotal: ${formatHm(rawDurationMinutes)}\nRegular: ${formatHm(regularMinutes)}\nOvertime: ${formatHm(overtimeMinutes)}\nEstimated cost: ₪${ils}`;
       // Owner-only: the same estimate as the cost line in ownerBody.
       ownerData = { ...managerData, estimatedCostAgorot: estimate.totalCompensationAgorot };
     }
 
-    await this.notifyManagerAndOwners(organizationId, managerUserId, {
+    await this.notifyManagerAndOwners(organizationId, managerUserId, refs.shiftId, {
       type: NotificationType.WORKER_CLOCKED_OUT,
       title: "Worker clocked out",
       managerBody,
