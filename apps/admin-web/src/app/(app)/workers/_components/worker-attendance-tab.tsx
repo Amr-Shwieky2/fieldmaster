@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { AttendanceListItem } from "@fieldmaster/api-client";
-import { AttendanceListTab, DEFAULT_WORK_RULES, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { AttendanceListTab, TimeEntryStatus } from "@fieldmaster/shared-types";
 import { splitWorkedMinutes, type DayRules } from "@fieldmaster/shared-validation";
 import { useAuth } from "@/lib/auth-context";
 import { useShiftTitle } from "@/lib/shift-title";
@@ -23,12 +23,12 @@ const MONTH_PAGE_SIZE = 100;
 /** Table columns (keys of `workers.attendanceTab.columns`). */
 const COLUMNS = ["date", "shift", "clockIn", "clockOut", "worked", "regular", "overtime", "status", "flags"] as const;
 
-/** A list row may carry the day rules in force on its business date; without them the default rules apply. */
-type AttendanceRow = AttendanceListItem & { dayRules?: DayRules };
+/** A list row: the API sends the day rules in force on its business date with it (the work rules are versioned by date). */
+type AttendanceRow = AttendanceListItem;
 
-/** The standard day and overtime threshold of the entry's own business date (the work rules are versioned by date). */
+/** The standard day and overtime threshold of the entry's own business date. */
 function dayRulesOf(entry: AttendanceRow): DayRules {
-  return entry.dayRules ?? DEFAULT_WORK_RULES;
+  return entry.dayRules;
 }
 
 /**

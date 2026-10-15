@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { NotificationType, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { NotificationType, TimeEntryStatus, NotificationSubjectKind } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationAudienceService } from "../notifications/notification-audience.service";
@@ -86,6 +86,7 @@ export class LongOpenEntriesService {
             clockInAt: entry.clockInAt!.toISOString(),
             openMinutes,
           },
+          subject: { kind: NotificationSubjectKind.ATTENDANCE, refId: entry.id },
         })),
       );
       this.realtime.operationsChanged(entry.organizationId, OperationsChangeKind.LONG_OPEN_ENTRY, entry.shift.id);

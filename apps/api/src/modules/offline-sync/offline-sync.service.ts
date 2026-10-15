@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { ClockEventType, EventOrigin, LocationValidationStatus, NotificationType, OfflineSyncEventStatus, Permission } from "@fieldmaster/shared-types";
+import { ClockEventType, EventOrigin, LocationValidationStatus, NotificationType, OfflineSyncEventStatus, Permission, NotificationSubjectKind } from "@fieldmaster/shared-types";
 import { canonicalizeOfflineEvent, verifyOfflineEventSignature, type OfflineEventSignablePayload } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
@@ -17,6 +17,7 @@ import type { ClockInDto } from "../attendance/dto/clock-in.dto";
 import type { ClockOutDto } from "../attendance/dto/clock-out.dto";
 import type { OfflineSyncBatchDto, OfflineSyncEventInputDto } from "./dto/offline-sync-batch.dto";
 import { listOrPage, type PageWindow } from "../../common/validation/page-query";
+import { UUID_PATTERN } from "../../common/validation/patterns";
 
 export interface EventOutcome {
   clientEventId: string;
@@ -119,13 +120,20 @@ export class OfflineSyncService {
     return batch;
   }
 
-  /** The 50 newest batches, or one page of all of them (`?page=` / `?pageSize=`). */
-  async listBatches(organizationId: string, actor: AuthenticatedUser, window: PageWindow | null = null) {
+  /**
+   * The 50 newest batches, or one page of all of them. A member who may see
+   * everyone's attendance may narrow them to one worker (`?workerProfileId=`,
+   * mobile manager mode: the offline review); anyone else sees their own.
+   */
+  async listBatches(organizationId: string, actor: AuthenticatedUser, window: PageWindow | null = null, workerProfileId?: string) {
+    if (workerProfileId !== undefined && !UUID_PATTERN.test(workerProfileId)) {
+      throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "workerProfileId must be a UUID.", { field: "workerProfileId" });
+    }
     const canReviewAll = hasPermission(actor, Permission.VIEW_ATTENDANCE);
     const workerScope = canReviewAll ? workerScopeWhere(scopeOf(actor)) : undefined;
     const where = !canReviewAll
       ? { organizationId, workerProfileId: actor.workerProfileId ?? "" }
-      : { organizationId, ...(workerScope ? { worker: workerScope } : {}) };
+      : { organizationId, ...(workerProfileId ? { workerProfileId } : {}), ...(workerScope ? { worker: workerScope } : {}) };
     return listOrPage(
       window,
       (range) => this.prisma.offlineSyncBatch.findMany({ where, include: { events: true }, orderBy: [{ submittedAt: "desc" }, { id: "desc" }], skip: range.skip, take: range.take ?? 50 }),
@@ -312,7 +320,15 @@ export class OfflineSyncService {
     });
     const flaggedCount = outcomes.filter((o) => o.status === OfflineSyncEventStatus.FLAGGED).length;
     const rejectedCount = outcomes.filter((o) => o.status === OfflineSyncEventStatus.REJECTED).length;
-    const body = `${worker?.membership.user.fullLegalName ?? "A worker"}'s offline attendance sync needs review: ${flaggedCount} flagged, ${rejectedCount} rejected.`;
+    // The text says what happened: refused records (nothing was recorded for them) and/or records whose location needs a review.
+    const name = worker?.membership.user.fullLegalName ?? "A worker";
+    const title = flaggedCount === 0 ? "Offline attendance refused" : "Offline attendance needs review";
+    const body =
+      flaggedCount === 0
+        ? `${name}: ${rejectedCount} offline attendance record(s) were refused.`
+        : rejectedCount === 0
+          ? `${name}: ${flaggedCount} offline attendance record(s) need a location review.`
+          : `${name}: ${flaggedCount} offline attendance record(s) need a location review and ${rejectedCount} were refused.`;
     const type = rejectedCount > 0 ? NotificationType.OFFLINE_EVENT_REJECTED : NotificationType.SUSPICIOUS_LOCATION_DETECTED;
     // Owners by default; Field Managers and custom roles too when the organization's notification settings say so.
     const recipients = await this.notificationAudience.recipients(organizationId, type);
@@ -322,9 +338,11 @@ export class OfflineSyncService {
         organizationId,
         recipientUserId: recipient.userId,
         type,
-        title: "Offline attendance needs review",
+        title,
         body,
         data: { workerProfileId, workerName: worker?.membership.user.fullLegalName ?? null, flaggedCount, rejectedCount },
+        // Repeated problems of the same worker are one subject until a manager reviews them.
+        subject: { kind: NotificationSubjectKind.OFFLINE_REVIEW, refId: workerProfileId },
       })),
     );
   }

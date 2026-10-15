@@ -19,6 +19,7 @@ import { calculatePayroll, waitForCalculation } from "./payroll-helpers";
 import { PrismaService } from "../src/common/prisma/prisma.service";
 import { PayrollInputsService } from "../src/modules/payroll/payroll-inputs.service";
 import { PayrollCalculationProcessor } from "../src/modules/payroll/payroll-calculation.processor";
+import { WorkRulesService } from "../src/common/settings/work-rules.service";
 
 /**
  * Step 7: the payroll engine with the spec's concrete numbers (fixtures: daily
@@ -150,7 +151,7 @@ describe("Payroll versions, background calculation and dashboard (e2e, Step 7)",
 
   /** A Night Turan emergency call-out, stored exactly as the emergency endpoints store it (-60 / +15 around the clicks), waiting for approval. */
   async function nightTuranEmergency(workerProfileId: string, actualStartClick: Date, actualEndClick: Date) {
-    const compensation = computeEmergencyCompensation(actualStartClick, actualEndClick);
+    const compensation = computeEmergencyCompensation(actualStartClick, actualEndClick, await app.get(WorkRulesService).rulesOn(ctx.org.id, toBusinessDate(actualStartClick)));
     const turan = await prisma.turanAssignment.create({
       data: {
         id: uuidv7(),

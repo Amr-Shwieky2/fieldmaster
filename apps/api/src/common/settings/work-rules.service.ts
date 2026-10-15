@@ -9,6 +9,7 @@ import {
 } from "@fieldmaster/shared-types";
 import { toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../prisma/prisma.service";
+import { generateId } from "../ids";
 
 type Client = Pick<PrismaService, "workRuleVersion"> | Pick<Prisma.TransactionClient, "workRuleVersion">;
 
@@ -36,10 +37,8 @@ export function toWorkRuleVersion(row: WorkRuleVersionRow): WorkRuleVersion {
   };
 }
 
-/** The version that stands for "no version stored yet": the defaults, in force since the beginning. */
-export function baselineVersion(): WorkRuleVersion {
-  return { id: "baseline", version: 0, effectiveFrom: WORK_RULES_FIRST_EFFECTIVE_DATE, rules: { ...DEFAULT_WORK_RULES }, reason: null, createdByUserId: null, createdAt: new Date(0).toISOString() };
-}
+/** Why the first version exists: the values the organization started with. */
+export const FIRST_VERSION_REASON = "القيم الأصلية";
 
 /** An organization's rule versions, loaded once: ask it for the rules of any number of business dates. */
 export class WorkRulesResolver {
@@ -55,18 +54,46 @@ export class WorkRulesResolver {
 /**
  * The organization's work rules, read from the database whenever a
  * calculation needs them (never cached across requests: a new version
- * applies at once). An organization with no stored version uses the default
- * rules, which are the numbers the system used before they were settings, so
- * nothing is written until an Owner changes one.
+ * applies at once). Every organization has stored versions: the first one
+ * (effective 2000-01-01, the starting values) was written by the migration
+ * for the organizations that existed, and is written here for a new one the
+ * first time its rules are read. That is the only use of DEFAULT_WORK_RULES:
+ * nothing is ever priced with default values.
  */
 @Injectable()
 export class WorkRulesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Every stored version, oldest first by effective date then creation. */
+  /** Every stored version, oldest first by effective date then creation (the first version is created when missing). */
   async versions(organizationId: string, client: Client = this.prisma): Promise<WorkRuleVersion[]> {
-    const rows = await client.workRuleVersion.findMany({ where: { organizationId }, orderBy: [{ effectiveFrom: "asc" }, { version: "asc" }] });
+    const read = () => client.workRuleVersion.findMany({ where: { organizationId }, orderBy: [{ effectiveFrom: "asc" }, { version: "asc" }] });
+    let rows = await read();
+    if (rows.length === 0) {
+      await this.seedFirstVersion(organizationId, client);
+      rows = await read();
+    }
     return rows.map(toWorkRuleVersion);
+  }
+
+  /**
+   * Writes an organization's first version (version 1, effective 2000-01-01,
+   * the starting values) unless it has one; concurrent callers write it once.
+   */
+  async seedFirstVersion(organizationId: string, client: Client = this.prisma): Promise<void> {
+    await client.workRuleVersion.createMany({
+      data: [
+        {
+          id: generateId(),
+          organizationId,
+          version: 1,
+          effectiveFrom: WORK_RULES_FIRST_EFFECTIVE_DATE,
+          reason: FIRST_VERSION_REASON,
+          createdBy: null,
+          ...DEFAULT_WORK_RULES,
+        },
+      ],
+      skipDuplicates: true,
+    });
   }
 
   /** A resolver for any number of dates, from one query. */

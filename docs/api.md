@@ -233,7 +233,9 @@ emergency call-out DTO has. See `authorization-matrix.md`.
 - **Salary:** `GET /payroll-statements/me/current` gives the open month as
   an estimate (`basis: APPROVED_ENTRIES_ONLY`, `pendingEntries`). Once the
   month has a finalized version it is `409 PAYROLL_PERIOD_FINALIZED`, and
-  the month is then in `/payroll-statements/me`.
+  the month is then in `/payroll-statements/me`. A member without a worker
+  profile gets `404 NO_WORKER_PROFILE` from both (mobile manager mode; it
+  was a generic `NOT_FOUND`).
 - **Notifications:**
   - `GET/PATCH /notifications/preferences` (`{ preferences: [{ type, push
     }] }`, the types the caller's role receives; push on by default).
@@ -253,6 +255,93 @@ emergency call-out DTO has. See `authorization-matrix.md`.
   name, and only the temporary points usable now. Only the worker's own
   assignment is included, never co-workers' names or phone numbers (the
   list `GET /shifts` likewise).
+
+## Mobile manager mode
+
+Who may call each route: `authorization-matrix.md` ("Mobile manager mode").
+
+- **Notifications with an action:** each item of `GET /notifications` also
+  has `subjectId`, `action` and `handled`.
+  - `action` is what the notification asks of this reader, or `null` (only
+    for information): `{ kind: REVIEW_ATTENDANCE | OPEN_ENTRY |
+    REVIEW_OFFLINE | REVIEW_ONBOARDING | RESOLVE_SUPERVISOR_ISSUE,
+    timeEntryId?, workerProfileId?, issueId? }`, only when the reader may
+    open the screen that settles it.
+  - `handled` is shared by every manager's copy: `{ at, by: { userId,
+    fullLegalName }, outcome, note }` or `null`. Outcomes: APPROVED,
+    REJECTED, CORRECTION_REQUESTED, RESOLVED, REVIEWED, WORKER_APPROVED,
+    WORKER_REJECTED (FULL_DAY_CREDIT and CORRECTED are reserved).
+  - Notifications about the same entry, the same worker's offline records,
+    the same application or the same supervisor report share one subject
+    (the grouping key); a new notification about a settled subject opens
+    it again.
+  - A notification stored before subjects existed (`subjectId: null`)
+    offers its action only while its record still waits for it (an entry
+    pending approval, an entry still open, an application still pending);
+    older offline-record notifications are information only.
+  - `GET /notification-subjects/:id` answers `{ id, kind, handled }`.
+    `POST /notification-subjects/:id/handle { note? }` settles an entry the
+    manager followed up or a worker's offline records reviewed (outcome
+    REVIEWED); applications and supervisor reports are settled by their
+    decision (`409 NOTIFICATION_SUBJECT_NOT_HANDLED_HERE`); a settled
+    subject is `409 CONFLICT`.
+  - Pushes add `subjectId`, and `issueId` for a supervisor report.
+- **Manager home:** `GET /operations/summary` answers `{ generatedAt,
+  pendingApprovals?, onShift?, late?, siteAlerts?, onboardingRequests? }`,
+  each counter only for a member with its permission and within their
+  projects. `pendingApprovals` counts what the approvals list's PENDING tab
+  shows (waiting for approval or for the correction asked for).
+- **Supervisor reports:** `GET /supervisor-issues/:id` answers `{ id, text,
+  reportedAt, shift: { id, title, siteName, scheduledStart, scheduledEnd },
+  supervisor: { workerProfileId, fullLegalName, phoneNumber }, resolved }`.
+  `POST /supervisor-issues/:id/resolve { note }` settles it (RESOLVED,
+  audited `SUPERVISOR_ISSUE_RESOLVED`) and sends the supervisor
+  `TEMPORARY_SUPERVISOR_ISSUE_RESOLVED` (data: `issueId, assignmentId,
+  shiftId, shiftTitle, resolverName, note`).
+- **Work locations** (a site with its geofence, saved in one transaction):
+  - `GET /work-locations/defaults` → `{ defaultGeofenceRadiusMeters,
+    minRadiusMeters: 10, maxRadiusMeters: 5000 }`.
+  - `POST /work-locations { projectId | newProject: { name, client?,
+    budgetAgorot? }, name, address?, latitude, longitude,
+    geofenceRadiusMeters, instructions?, emergencyContact? }`: the new
+    project, the site and its geofence (version 1) are saved together or
+    not at all, each audited.
+  - `PATCH /work-locations/:id { name?, address?, latitude?, longitude?,
+    geofenceRadiusMeters?, instructions?, emergencyContact?, reason? }`:
+    only the fields sent (`null` clears an optional text), audited per
+    field (`SITE_UPDATED` old → new); a new center or radius is a new
+    geofence version; nothing to change is `400`.
+  - `GET /work-locations/:id` and every answer: `{ id, projectId,
+    projectName, name, address, latitude, longitude, instructions,
+    emergencyContact, geofence: { id, centerLatitude, centerLongitude,
+    radiusMeters, version } }`.
+- **A shift with its workers:** `GET /shifts/assignable-workers?start&end`
+  lists `{ workerProfileId, fullLegalName, conflicts: [{ shiftId, title,
+  scheduledStart, scheduledEnd }] }`. `POST /shifts` with
+  `workerProfileIds` creates the shift (its project and geofence from the
+  site) and the assignments in one transaction, or nothing: `409
+  SHIFT_ASSIGNMENT_CONFLICT` with `details.conflicts: [{ workerProfileId,
+  shifts }]`. Each worker is told.
+- **Applications:** `GET /workers/:id/onboarding-summary` answers `{
+  workerProfileId, membershipStatus, fullLegalName, preferredName,
+  phoneNumber, submittedAt, governmentIdType, hasIdentityDocument,
+  hasProfilePhoto, bankAccount?: { bankName, branchNumber,
+  accountNumberLast4 } | null, canRevealDetails, canApprove, canReject }`
+  without decrypting anything for display (`bankAccount` only with
+  `VIEW_BANK_INFO`). The full details stay
+  `GET /workers/:id/onboarding-review` (audited). Rejecting an application
+  that is no longer pending is `409 CONFLICT`, like approving.
+- **Entry photos:** the evidence lists `photos: [{ id, contentType,
+  uploadedAt, eventType }]`; `GET /time-entries/:id/photos/:photoId/view-url`
+  answers `{ url, expiresInSeconds, contentType }` for one view (audited,
+  `Cache-Control: no-store`).
+- **Offline review:** `GET /offline-sync/batches?workerProfileId=` (one
+  worker's batches for a member with `VIEW_ATTENDANCE`); each event has
+  `resultTimeEntryId`.
+- **Work rules on every preview:** each item of `GET /attendance/entries`
+  and each evidence carries `dayRules: { standardDayMinutes,
+  overtimeThresholdMinutes }` of its business date;
+  `GET /organizations/me/work-rules` has no `defaults` any more.
 
 ## Real-time
 

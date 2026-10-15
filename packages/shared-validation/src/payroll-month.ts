@@ -1,14 +1,13 @@
-import { CompensationType, DEFAULT_WORK_RULES, OVERTIME_SPIKE_FACTOR, OVERTIME_SPIKE_MIN_MINUTES, PayrollAdjustmentType } from "@fieldmaster/shared-types";
+import { CompensationType, OVERTIME_SPIKE_FACTOR, OVERTIME_SPIKE_MIN_MINUTES, PayrollAdjustmentType } from "@fieldmaster/shared-types";
 import type { DayRules } from "./attendance";
 import { calculateDailyCompensation, calculateHourlyCompensation } from "./payroll";
 
 /**
- * The work rules in force on a business date (YYYY-MM-DD). The API builds it
- * from the organization's rule versions; without one, every entry uses the
- * default rules (what the system used before they became settings).
+ * The work rules in force on a business date (YYYY-MM-DD), from the
+ * organization's rule versions (or, for a calculation stored before the
+ * rules were settings, the fixed rules of that time). Always given.
  */
 export type DayRulesFor = (businessDate: string) => DayRules;
-const DEFAULT_RULES_FOR: DayRulesFor = () => DEFAULT_WORK_RULES;
 
 /**
  * A month of payroll from plain data (Step 7): which compensation profile
@@ -70,7 +69,7 @@ export interface EntryCompensation {
 export function computeEntryCompensation(
   entry: { approvedRegularMinutes: number | null; approvedOvertimeMinutes: number | null; fullDayCredit: boolean },
   profile: Pick<PayrollCompensationProfile, "compensationType" | "dailyBaseRateAgorot" | "baseHourlyRateAgorot" | "overtimeHourlyRateAgorot">,
-  rules: DayRules = DEFAULT_WORK_RULES,
+  rules: DayRules,
 ): EntryCompensation {
   const approvedMinutes = (entry.approvedRegularMinutes ?? 0) + (entry.approvedOvertimeMinutes ?? 0);
 
@@ -209,7 +208,7 @@ export function calculateWorkerPayroll(
   entries: readonly PayrollMonthEntry[],
   profiles: readonly PayrollCompensationProfile[],
   adjustments: readonly PayrollMonthAdjustment[],
-  rulesFor: DayRulesFor = DEFAULT_RULES_FOR,
+  rulesFor: DayRulesFor,
 ): { worker: PayrollWorkerResult; entries: PayrollEntryResult[] } {
   const entryResults: PayrollEntryResult[] = [];
   let approvedShifts = 0;
@@ -302,7 +301,7 @@ export function calculatePayrollMonth(input: {
   entries: readonly PayrollMonthEntry[];
   profiles: readonly PayrollCompensationProfile[];
   adjustments: readonly PayrollMonthAdjustment[];
-  rulesFor?: DayRulesFor;
+  rulesFor: DayRulesFor;
 }): { workers: PayrollWorkerResult[]; entries: PayrollEntryResult[] } {
   const workers: PayrollWorkerResult[] = [];
   const entries: PayrollEntryResult[] = [];

@@ -10,6 +10,7 @@ import {
   ShiftStatus,
   SummarySource,
   TimeEntryStatus,
+  NotificationSubjectKind,
 } from "@fieldmaster/shared-types";
 import { calculateShiftCompensation, rawDurationMinutes as minutesBetween, toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -31,6 +32,7 @@ import { AttendanceAttachmentsService } from "./attendance-attachments.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import type { ClockInDto } from "./dto/clock-in.dto";
 import type { ClockOutDto } from "./dto/clock-out.dto";
+import type { SubjectRef } from "../notifications/notification-subjects.service";
 
 @Injectable()
 export class ClockEventsService {
@@ -491,6 +493,8 @@ export class ClockEventsService {
       ownerBody: string;
       managerData: NotificationData;
       ownerData: NotificationData;
+      /** Mobile manager mode: what the notification asks the managers to settle (a clock-out: the entry to review). */
+      subject?: SubjectRef;
     },
   ) {
     const recipients = await this.notificationAudience.recipients(organizationId, content.type, {
@@ -507,6 +511,7 @@ export class ClockEventsService {
           title: content.title,
           body: withMoney ? content.ownerBody : content.managerBody,
           data: withMoney ? content.ownerData : withoutFinancialData(content.managerData),
+          subject: content.subject,
         };
       }),
     );
@@ -571,6 +576,7 @@ export class ClockEventsService {
       ownerBody,
       managerData,
       ownerData,
+      subject: { kind: NotificationSubjectKind.ATTENDANCE, refId: refs.timeEntryId },
     });
   }
 }

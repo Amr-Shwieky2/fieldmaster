@@ -153,6 +153,35 @@ Against a real running NestJS app + Postgres, covering (see
   - changed on purpose: the 2-Owner limit test in `auth-and-rbac` became
     the configurable-limit test, and two tests in `users-devices` set the
     limit to 2 to keep checking the limit reached.
+- **Mobile manager mode** (13 tests: two new suites and one new work-rules
+  test, plus the scanner's new routes):
+  - `manager-mode.e2e-spec.ts`: two managers share one subject (the Field
+    Manager approves, the Owner's copy shows who handled it and when);
+    a requested correction settles with its note; an open entry's alert
+    marked followed up by a member who may settle attendance, and reopened
+    by the clock-out; a restricted member's subjects and counters; the home
+    counters per permission («محاسب» gets none) matching the approvals list;
+    the application summary (nothing decrypted, the bank masked by
+    permission, settled by approving, a late rejection refused); a
+    supervisor report resolved once, the supervisor told; a work location
+    in one transaction (a failing step leaves nothing), the budget only with
+    money permission, edits audited per field and new geofence versions; a
+    shift with its workers (conflicts listed and refused together); an entry
+    photo per view, audited; one worker's offline records; a notification
+    stored before subjects asks for its action only while its record waits.
+  - `seeded-salary.e2e-spec.ts`: runs the development seed and signs in as
+    every seeded member: 200 from both salary endpoints with a worker
+    profile, `404 NO_WORKER_PROFILE` otherwise; the pending applicant cannot
+    sign in.
+  - `work-rules.e2e-spec.ts`: an eight-hour day set from next month, once
+    in force: the emergency's estimate (notification and estimated cost),
+    the overtime alert, the clock-out split (480 + 60) for the manager and
+    the Owner's 540.00 ₪, the list's and evidence's `dayRules`, the cost,
+    the approval and the worker's own pay all use 480.
+  - changed on purpose: the work-rules test that expected defaults and a
+    "baseline" now expects the stored version 1; `mobile-worker` expects
+    `NO_WORKER_PROFILE` instead of `NOT_FOUND`, and the subject id in a
+    manager's push.
 - **Load test** (not part of `test:e2e`): `apps/api/scripts/load-test/`, see
   `scalability.md` for how to run it and the numbers.
 - **Offline sync** (5 tests, added this pass): full offline clock-in/out
@@ -161,7 +190,19 @@ Against a real running NestJS app + Postgres, covering (see
   attendance record; unregistered-device rejection; duplicate-submission
   detection; Owner-revoked-key rejection
 
-### Admin web (`apps/admin-web`, 789 tests)
+### Mobile app (`apps/mobile`, 773 tests)
+
+Every screen renders the real Arabic messages. Mobile manager mode adds the
+manager home for an Owner, a Field Manager, a custom «محاسب» and a member
+restricted to some projects (no ₪ without `VIEW_FINANCIALS`, and the
+financial dashboard never called), live operations, approvals, the
+attendance review (each action, no cost without the money permissions, the
+day rules' preview), the work-location editor and the new shift, every
+notification action screen, the notifications list (tabs, grouping, the
+handled state), the salary empty state and «راتبي» hidden from members who
+do not clock in.
+
+### Admin web (`apps/admin-web`, 792 tests)
 
 The app is Arabic only, so every test renders the real `ar.json`
 (`src/test/render-with-intl.tsx`). Each page has tests for its content,

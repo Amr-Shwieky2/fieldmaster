@@ -32,9 +32,11 @@ interface OrgOption {
  */
 type Failure = { cause: unknown } | { missing: "phoneRequired" | "codeRequired" } | { unexpected: true };
 
-const ROLE_GROUPS: { role: OrgRole; titleKey: "groupOwners" | "groupFieldManagers" | "groupWorkers" }[] = [
+const ROLE_GROUPS: { role: OrgRole; titleKey: "groupOwners" | "groupFieldManagers" | "groupCustomRoles" | "groupWorkers" }[] = [
   { role: OrgRole.OWNER, titleKey: "groupOwners" },
   { role: OrgRole.FIELD_MANAGER, titleKey: "groupFieldManagers" },
+  // Members of a role an Owner built (e.g. «محاسب»): the app shows them what their permissions allow.
+  { role: OrgRole.CUSTOM, titleKey: "groupCustomRoles" },
   { role: OrgRole.WORKER, titleKey: "groupWorkers" },
 ];
 

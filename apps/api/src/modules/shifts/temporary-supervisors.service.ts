@@ -12,6 +12,7 @@ import {
   TemporaryPointStatus,
   TemporarySupervisorState,
   TimeEntryStatus,
+  NotificationSubjectKind,
 } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
@@ -24,6 +25,7 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { NotificationAudienceService } from "../notifications/notification-audience.service";
 import { OperationsChangeKind, RealtimeEventsService } from "../notifications/realtime-events";
 import { loadWorkerName } from "../notifications/notification-data";
+import { NotificationSubjectsService } from "../notifications/notification-subjects.service";
 import type { AssignTemporarySupervisorDto, ReportIssueDto } from "./dto/temporary-supervisor.dto";
 
 /** Shift statuses after which nobody supervises it any more (and no point can be opened for it). */
@@ -64,6 +66,7 @@ export class TemporarySupervisorsService {
     private readonly notifications: NotificationsService,
     private readonly notificationAudience: NotificationAudienceService,
     private readonly realtime: RealtimeEventsService,
+    private readonly subjects: NotificationSubjectsService,
   ) {}
 
   // ── Managers ──────────────────────────────────────────────────────────
@@ -355,6 +358,12 @@ export class TemporarySupervisorsService {
     const assignment = await this.requireActiveAssignment(organizationId, assignmentId, actor);
     const text = dto.text.trim();
     const supervisorName = await loadWorkerName(this.prisma, assignment.workerProfileId);
+    // Mobile manager mode: the report is kept, so a manager can mark it resolved (its subject's handled state).
+    const report = await this.prisma.supervisorIssueReport.create({
+      data: { id: generateId(), organizationId, assignmentId: assignment.id, shiftId: assignment.shiftId, reportedBy: actor.sub, text },
+    });
+    const subject = { kind: NotificationSubjectKind.SUPERVISOR_ISSUE, refId: report.id };
+    await this.subjects.open(organizationId, subject);
 
     const recipients = await this.notificationAudience.recipients(organizationId, NotificationType.TEMPORARY_SUPERVISOR_ISSUE_REPORTED, {
       managerUserId: assignment.shift.managerId,
@@ -375,6 +384,7 @@ export class TemporarySupervisorsService {
           workerName: supervisorName,
           issueText: text,
         },
+        subject,
       })),
     );
 

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { ApprovalAction, NotificationType, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { ApprovalAction, NotificationHandledOutcome, NotificationSubjectKind, NotificationType, TimeEntryStatus } from "@fieldmaster/shared-types";
 import { splitWorkedMinutes } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
@@ -10,6 +10,7 @@ import { generateId } from "../../common/ids";
 import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { WorkRulesService } from "../../common/settings/work-rules.service";
+import { NotificationSubjectsService } from "../notifications/notification-subjects.service";
 import { scopeOf, timeEntryScopeWhere } from "../../common/scope/scope-filters";
 import { listOrPage, type PageWindow } from "../../common/validation/page-query";
 
@@ -38,6 +39,7 @@ export class AttendanceApprovalsService {
     private readonly notifications: NotificationsService,
     private readonly realtime: RealtimeEventsService,
     private readonly workRules: WorkRulesService,
+    private readonly subjects: NotificationSubjectsService,
   ) {}
 
   /**
@@ -176,6 +178,8 @@ export class AttendanceApprovalsService {
       approvedOvertimeMinutes,
     });
 
+    // Mobile manager mode: the entry's notifications show as handled for every manager.
+    await this.subjects.settle(organizationId, { kind: NotificationSubjectKind.ATTENDANCE, refId: timeEntryId }, actor, NotificationHandledOutcome.APPROVED, notes ?? null, correlationId);
     this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE, timeEntry.shiftId);
     return updated;
   }
@@ -210,6 +214,8 @@ export class AttendanceApprovalsService {
       reason,
     });
 
+    // Mobile manager mode: the entry's notifications show as handled for every manager.
+    await this.subjects.settle(organizationId, { kind: NotificationSubjectKind.ATTENDANCE, refId: timeEntryId }, actor, NotificationHandledOutcome.REJECTED, reason, correlationId);
     this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE, timeEntry.shiftId);
     return updated;
   }
@@ -232,6 +238,8 @@ export class AttendanceApprovalsService {
       return entry;
     });
 
+    // Mobile manager mode: the entry's notifications show as handled for every manager.
+    await this.subjects.settle(organizationId, { kind: NotificationSubjectKind.ATTENDANCE, refId: timeEntryId }, actor, NotificationHandledOutcome.CORRECTION_REQUESTED, notes, correlationId);
     this.realtime.operationsChanged(organizationId, OperationsChangeKind.ATTENDANCE, timeEntry.shiftId);
     return updated;
   }

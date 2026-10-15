@@ -25,6 +25,8 @@ import {
   FileAssetPurpose,
   GovernmentIdType,
   LocationValidationStatus,
+  NotificationHandledOutcome,
+  NotificationSubjectKind,
   NotificationType,
   OrgRole,
   PayrollAdjustmentSource,
@@ -53,7 +55,7 @@ import { FilesService } from "../src/common/files/files.service";
 import { PayrollInputsService } from "../src/modules/payroll/payroll-inputs.service";
 import { WorkRulesService } from "../src/common/settings/work-rules.service";
 import { ensureSystemRoles } from "../src/modules/roles/system-roles";
-import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION } from "../src/modules/payroll/payroll-snapshot";
+import { buildPayrollSnapshotResult, PAYROLL_SNAPSHOT_SCHEMA_VERSION, snapshotRulesFor } from "../src/modules/payroll/payroll-snapshot";
 
 const prisma = new PrismaClient();
 const id = () => uuidv7();
@@ -163,7 +165,7 @@ async function main() {
       unpaid_breaks, rejected_clock_attempts, clock_events, emergency_callouts, time_entries,
       temporary_check_in_points, temporary_supervisor_assignments, shift_assignments, shifts,
       turan_assignments, geofences, sites, projects,
-      notification_deliveries, notifications,
+      notification_deliveries, notifications, notification_subjects, supervisor_issue_reports,
       onboarding_invitations, identity_documents, encrypted_bank_accounts, compensation_profiles, worker_profiles, file_assets,
       refresh_token_families, user_devices, member_scopes, organization_memberships, roles, work_rule_versions, users,
       audit_logs, organization_settings, organizations
@@ -175,6 +177,9 @@ async function main() {
   await prisma.organizationSettings.create({ data: { id: id(), organizationId: org.id } });
   // The built-in roles (Owner, Field Manager, Worker): every membership below points at its own.
   await ensureSystemRoles(prisma as unknown as Prisma.TransactionClient, org.id);
+  // The organization's first work-rule version (the starting values); everything below is priced with it.
+  const workRules = new WorkRulesService(prisma as unknown as PrismaService);
+  const rules = await workRules.current(org.id);
 
   // ── Users & memberships ──────────────────────────────────────────────
   async function createUser(phoneNumber: string, fullLegalName: string, preferredName?: string) {
@@ -477,7 +482,7 @@ async function main() {
         status: TimeEntryStatus.APPROVED, businessDate: toBusinessDate(clockIn),
         clockInAt: clockIn, clockOutAt: clockOut, checkInMethod: CheckInMethod.GEOFENCED,
         rawDurationMinutes: raw, fullDayCredit,
-        approvedRegularMinutes: Math.min(raw, 540), approvedOvertimeMinutes: Math.max(0, raw - 540),
+        approvedRegularMinutes: Math.min(raw, rules.overtimeThresholdMinutes), approvedOvertimeMinutes: Math.max(0, raw - rules.overtimeThresholdMinutes),
         approvedBy: fm1User.id, approvedAt: clockOut,
       },
     });
@@ -583,7 +588,7 @@ async function main() {
         reason: CorrectionReason.FORGOTTEN_CLOCK_IN, editedBy: fm1User.id, correlationId: id(),
       },
     });
-    const evaluation = evaluateForgottenStampInfraction(i + 1);
+    const evaluation = evaluateForgottenStampInfraction(i + 1, rules);
     const infraction = await prisma.forgottenStampInfraction.create({
       data: {
         id: id(), organizationId: org.id, workerProfileId: forgottenWorker.profile.id, timeEntryId: entry.id, correctionId: correction.id,
@@ -606,7 +611,7 @@ async function main() {
   console.log("Creating emergency call-out...");
   const emergencyActualStart = new Date(nightTuranStart.getTime() + 2 * 3_600_000);
   const emergencyActualEnd = new Date(emergencyActualStart.getTime() + 3 * 3_600_000);
-  const emergencyComp = computeEmergencyCompensation(emergencyActualStart, emergencyActualEnd);
+  const emergencyComp = computeEmergencyCompensation(emergencyActualStart, emergencyActualEnd, rules);
 
   const emergencyShift = await prisma.shift.create({
     data: {
@@ -624,8 +629,8 @@ async function main() {
       status: TimeEntryStatus.APPROVED, businessDate: toBusinessDate(emergencyComp.compensatedStart),
       clockInAt: emergencyComp.compensatedStart, clockOutAt: emergencyComp.compensatedEnd,
       rawDurationMinutes: emergencyComp.compensatedDurationMinutes,
-      approvedRegularMinutes: Math.min(emergencyComp.compensatedDurationMinutes, 540),
-      approvedOvertimeMinutes: Math.max(0, emergencyComp.compensatedDurationMinutes - 540),
+      approvedRegularMinutes: Math.min(emergencyComp.compensatedDurationMinutes, rules.overtimeThresholdMinutes),
+      approvedOvertimeMinutes: Math.max(0, emergencyComp.compensatedDurationMinutes - rules.overtimeThresholdMinutes),
       checkInMethod: CheckInMethod.FLEXI_CHECK, isEmergency: true, approvedBy: fm1User.id, approvedAt: emergencyComp.compensatedEnd,
     },
   });
@@ -667,11 +672,13 @@ async function main() {
     await approvedEntry(shift, workers[workerIndex], hours);
   }
 
-  const { inputs: payrollInputs, inputsHash } = await new PayrollInputsService(
-    prisma as unknown as PrismaService,
-    new WorkRulesService(prisma as unknown as PrismaService),
-  ).load(org.id, yearMonth);
-  const payrollMonth = calculatePayrollMonth({ entries: payrollInputs.entries, profiles: payrollInputs.compensationProfiles, adjustments: payrollInputs.adjustments });
+  const { inputs: payrollInputs, inputsHash } = await new PayrollInputsService(prisma as unknown as PrismaService, workRules).load(org.id, yearMonth);
+  const payrollMonth = calculatePayrollMonth({
+    entries: payrollInputs.entries,
+    profiles: payrollInputs.compensationProfiles,
+    adjustments: payrollInputs.adjustments,
+    rulesFor: snapshotRulesFor(payrollInputs),
+  });
   const { result: payrollResult, totals: payrollTotals } = buildPayrollSnapshotResult(payrollInputs, payrollMonth.workers, payrollMonth.entries);
   const calculatedAt = new Date();
   const payrollPeriod = await prisma.payrollPeriod.create({
@@ -810,7 +817,7 @@ async function main() {
       dailyBaseRateAgorot: profile.dailyBaseRateAgorot ?? undefined,
       baseHourlyRateAgorot: profile.baseHourlyRateAgorot ?? undefined,
       overtimeHourlyRateAgorot: profile.overtimeHourlyRateAgorot,
-    }).totalCompensationAgorot;
+    }, rules).totalCompensationAgorot;
   }
   async function seedNotification(
     recipientUserId: string,
@@ -818,14 +825,29 @@ async function main() {
     title: string,
     body: string,
     data: Record<string, string | number | boolean | null>,
-    options: { createdAt?: Date; readAt?: Date } = {},
+    options: { createdAt?: Date; readAt?: Date; subjectId?: string } = {},
   ) {
     await prisma.notification.create({
       data: { id: id(), organizationId: org.id, recipientUserId, type, title, body, dataJson: data, ...options },
     });
   }
 
+  /** What several managers' notifications are about (mobile manager mode); settled already when its record was decided. */
+  async function seedSubject(kind: NotificationSubjectKind, refId: string, handled?: { by: string; at: Date; outcome: NotificationHandledOutcome; note: string | null }) {
+    const subject = await prisma.notificationSubject.create({
+      data: {
+        id: id(),
+        organizationId: org.id,
+        kind,
+        refId,
+        ...(handled ? { handledAt: handled.at, handledBy: handled.by, handledOutcome: handled.outcome, handledNote: handled.note } : {}),
+      },
+    });
+    return subject.id;
+  }
+
   // The pending application: Owners are told (names only, never an ID number or bank detail).
+  const applicationSubjectId = await seedSubject(NotificationSubjectKind.ONBOARDING, applicantProfile.id);
   for (const owner of [owner1User, owner2User]) {
     await seedNotification(
       owner.id,
@@ -833,7 +855,7 @@ async function main() {
       "New worker application",
       `${applicantName} submitted an onboarding application awaiting your review.`,
       { workerProfileId: applicantProfile.id, workerName: applicantName },
-      { createdAt: appliedAt },
+      { createdAt: appliedAt, subjectId: applicationSubjectId },
     );
   }
 
@@ -850,7 +872,14 @@ async function main() {
   const emergencyCost = await estimatedCostAgorot(emergencyWorker.profile.id, emergencyMinutes);
   const emergencyManagerBody = `Emergency call-out ended. Compensated duration: ${formatHm(emergencyMinutes)}. Approval is required.`;
   const emergencyOwnerBody = `Emergency call-out ended. Compensated duration: ${formatHm(emergencyMinutes)}. Estimated cost: ₪${(emergencyCost / 100).toFixed(2)}`;
-  const emergencyRead = { createdAt: emergencyComp.actualEndClick, readAt: emergencyComp.compensatedEnd };
+  // Approved by the first Field Manager already: every manager's copy shows who handled it.
+  const emergencySubjectId = await seedSubject(NotificationSubjectKind.ATTENDANCE, emergencyEntry.id, {
+    by: fm1User.id,
+    at: emergencyComp.compensatedEnd,
+    outcome: NotificationHandledOutcome.APPROVED,
+    note: null,
+  });
+  const emergencyRead = { createdAt: emergencyComp.actualEndClick, readAt: emergencyComp.compensatedEnd, subjectId: emergencySubjectId };
   for (const owner of [owner1User, owner2User]) {
     await seedNotification(owner.id, "EMERGENCY_SHIFT_ENDED", "Emergency call-out ended", emergencyOwnerBody, { ...emergencyData, estimatedCostAgorot: emergencyCost }, emergencyRead);
   }
@@ -861,7 +890,8 @@ async function main() {
   // The pending-approval entry's clock-out: the shift's manager gets no cost, Owners do.
   const pendingWorker = workers[7];
   const pendingMinutes = pendingEntry.rawDurationMinutes ?? 0;
-  const pendingSplit = `Total: ${formatHm(pendingMinutes)}\nRegular: ${formatHm(Math.min(pendingMinutes, 540))}\nOvertime: ${formatHm(Math.max(0, pendingMinutes - 540))}`;
+  const threshold = rules.overtimeThresholdMinutes;
+  const pendingSplit = `Total: ${formatHm(pendingMinutes)}\nRegular: ${formatHm(Math.min(pendingMinutes, threshold))}\nOvertime: ${formatHm(Math.max(0, pendingMinutes - threshold))}`;
   const clockOutData = {
     timeEntryId: pendingEntry.id,
     shiftId: pendingShift.id,
@@ -870,12 +900,15 @@ async function main() {
     workerName: pendingWorker.user.fullLegalName,
     clockOutAt: pendingClockOut.toISOString(),
     durationMinutes: pendingMinutes,
-    regularMinutes: Math.min(pendingMinutes, 540),
-    overtimeMinutes: Math.max(0, pendingMinutes - 540),
+    regularMinutes: Math.min(pendingMinutes, threshold),
+    overtimeMinutes: Math.max(0, pendingMinutes - threshold),
   };
+  // Waiting for approval: the first manager to decide settles it for every copy.
+  const pendingSubjectId = await seedSubject(NotificationSubjectKind.ATTENDANCE, pendingEntry.id);
   const clockOutCost = await estimatedCostAgorot(pendingWorker.profile.id, pendingMinutes);
   await seedNotification(fm1User.id, "WORKER_CLOCKED_OUT", "Worker clocked out", `Worker clocked out of "${pendingShift.title}".\n${pendingSplit}\nApproval is required.`, clockOutData, {
     createdAt: pendingClockOut,
+    subjectId: pendingSubjectId,
   });
   for (const owner of [owner1User, owner2User]) {
     await seedNotification(
@@ -884,20 +917,27 @@ async function main() {
       "Worker clocked out",
       `Worker clocked out of "${pendingShift.title}".\n${pendingSplit}\nEstimated cost: ₪${(clockOutCost / 100).toFixed(2)}`,
       { ...clockOutData, estimatedCostAgorot: clockOutCost },
-      { createdAt: pendingClockOut },
+      { createdAt: pendingClockOut, subjectId: pendingSubjectId },
     );
   }
 
   await seedNotification(owner1User.id, "PAYROLL_FINALIZED", "Payroll finalized", `Payroll for ${yearMonth} has been finalized.`, { yearMonth });
-  await seedNotification(fm1User.id, "SHIFT_AWAITING_APPROVAL", "Attendance awaiting approval", "A worker clocked out and needs approval.", {
-    timeEntryId: pendingEntry.id,
-    shiftId: pendingShift.id,
-    shiftTitle: pendingShift.title,
-    workerProfileId: pendingWorker.profile.id,
-    workerName: pendingWorker.user.fullLegalName,
-    clockOutAt: pendingClockOut.toISOString(),
-    durationMinutes: pendingMinutes,
-  });
+  await seedNotification(
+    fm1User.id,
+    "SHIFT_AWAITING_APPROVAL",
+    "Attendance awaiting approval",
+    "A worker clocked out and needs approval.",
+    {
+      timeEntryId: pendingEntry.id,
+      shiftId: pendingShift.id,
+      shiftTitle: pendingShift.title,
+      workerProfileId: pendingWorker.profile.id,
+      workerName: pendingWorker.user.fullLegalName,
+      clockOutAt: pendingClockOut.toISOString(),
+      durationMinutes: pendingMinutes,
+    },
+    { subjectId: pendingSubjectId },
+  );
 
   console.log("\nSeed complete.\n");
   console.log("Development login phone numbers (full list: docs/seed-accounts.md).");
@@ -911,11 +951,26 @@ async function main() {
   console.log(`  Worker with forgotten-stamp deduction: ${forgottenWorker.user.phoneNumber} (${forgottenWorker.user.fullLegalName})`);
 }
 
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  })
-  .finally(async () => {
+/**
+ * The same data on the database of `DATABASE_URL` from code: the e2e test
+ * that signs in as every seeded member (their salary screens).
+ */
+export async function seedDevelopmentData(): Promise<void> {
+  try {
+    await main();
+  } finally {
     await prisma.$disconnect();
-  });
+  }
+}
+
+// `pnpm db:seed` runs this file; the e2e test imports it.
+if (require.main === module) {
+  main()
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

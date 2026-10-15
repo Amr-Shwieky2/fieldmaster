@@ -212,6 +212,33 @@ test code `123456`:
   session refresh answered with `ACCOUNT_SUSPENDED` or
   `NO_ACTIVE_MEMBERSHIP` shows that screen at once.)
 
+### Manager mode (one app for everyone, decided by permissions)
+
+Sign in on the same phone as each member in turn (Settings → sign out
+between them):
+
+- **Owner** سلمى منصور `+972500000001`: the «الإدارة» tab with every
+  counter (بانتظار الموافقة، في الدوام الآن، متأخرون، تنبيهات الموقع، طلبات
+  الانضمام), the four quick actions and the month's money card; no «دوامي»
+  tab and no «راتبي» (she does not clock in).
+- **Field Manager** يوسف الخطيب `+972500000011` (clocks in himself):
+  «الإدارة» without any ₪, and «دوامي» with his own shifts and «راتبي».
+  رنا عودة `+972500000012`: the same without «دوامي».
+- **Custom role «محاسب»** سمر الحداد `+972500020001`: the money card only,
+  no counters or actions she may not use.
+- **Restricted «مدير مشروع»** طارق منصور `+972500020002`: «عرض مقيَّد
+  بمشاريعك», counters and lists of his project only, no applications.
+- **Worker** مهند صالح `+972500010008`: the worker home as before, with
+  «راتبي» (an empty month says «لا يوجد راتب لهذا الشهر بعد»).
+
+Then, as a manager: approve the pending entry from «الموافقات» and see
+«تمت المعالجة بواسطة …» on the other manager's notification; open a
+notification of each kind (attendance, offline records, an application, a
+temporary supervisor's report, an entry open for nine hours) and solve it
+there; add a work location with «استخدم موقعي الحالي», drag the pin and
+change the radius; create a shift with a worker who is already busy (the
+warning) and one who is free.
+
 ## 7. Automated flows (Maestro)
 
 `apps/mobile/.maestro/` holds the critical flows: quick sign-in, clock-in
@@ -235,6 +262,11 @@ as it should. The flows therefore set the position with
   (`EXPO_PUBLIC_*` values are written into the bundle), or rebuild the APK.
 - **Expo Go says the project is incompatible:** update Expo Go to the SDK 57
   version.
+- **A floating blue gear over the screen (e.g. over «رجوع»):** Expo's
+  developer-menu button. It appears only in Expo Go and development builds,
+  never in a release build, and is not part of the app. Hide it from the
+  developer menu (shake the phone, or tap the gear) → turn off «Tools
+  button».
 - **No push notifications:** check the projectId (section 3, step 2), the
   phone's notification permission, FCM on Android, and
   `PUSH_PROVIDER=expo` on the API.

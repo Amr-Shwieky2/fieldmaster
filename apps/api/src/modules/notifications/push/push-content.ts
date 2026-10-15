@@ -21,6 +21,10 @@ export interface PushData {
   assignmentId?: string;
   /** A Turan assignment (TURAN_ASSIGNMENT_CREATED / TURAN_ASSIGNMENT_CHANGED for a Turan). */
   turanAssignmentId?: string;
+  /** Mobile manager mode: the subject several managers' notifications share (opens the screen where it is settled). */
+  subjectId?: string;
+  /** Mobile manager mode: a supervisor's report (TEMPORARY_SUPERVISOR_ISSUE_REPORTED), from its subject. */
+  issueId?: string;
   /** YYYY-MM. */
   yearMonth?: string;
 }
@@ -46,8 +50,12 @@ export function pushBody(): string {
   return `${sharedMessages.common.view} ${sharedMessages.common.details}`;
 }
 
-/** Only ids (UUIDs) and a month, from an allow list: anything else in the notification's data stays out. */
-export function pushData(notification: { id: string; type: string; dataJson: unknown }): PushData {
+/**
+ * Only ids (UUIDs) and a month, from an allow list: anything else in the
+ * notification's data stays out. Never a worker's id (a push can show on a
+ * locked screen): a subject about a worker travels as its own id only.
+ */
+export function pushData(notification: PushSource): PushData {
   const data: PushData = { notificationId: notification.id, type: notification.type as NotificationType };
   const source = notification.dataJson !== null && typeof notification.dataJson === "object" && !Array.isArray(notification.dataJson) ? (notification.dataJson as Record<string, unknown>) : {};
   for (const key of PUSH_DATA_ID_KEYS) {
@@ -55,9 +63,20 @@ export function pushData(notification: { id: string; type: string; dataJson: unk
     if (typeof value === "string" && UUID_PATTERN.test(value)) data[key] = value;
   }
   if (typeof source.yearMonth === "string" && YEAR_MONTH_PATTERN.test(source.yearMonth)) data.yearMonth = source.yearMonth;
+  if (notification.subjectId && UUID_PATTERN.test(notification.subjectId)) data.subjectId = notification.subjectId;
+  if (notification.subject?.kind === "SUPERVISOR_ISSUE" && UUID_PATTERN.test(notification.subject.refId)) data.issueId = notification.subject.refId;
   return data;
 }
 
-export function buildPushContent(notification: { id: string; type: string; dataJson: unknown }): PushContent {
+/** A stored notification, with its subject when it has one. */
+export interface PushSource {
+  id: string;
+  type: string;
+  dataJson: unknown;
+  subjectId?: string | null;
+  subject?: { kind: string; refId: string } | null;
+}
+
+export function buildPushContent(notification: PushSource): PushContent {
   return { title: pushTitle(notification.type), body: pushBody(), data: pushData(notification) };
 }

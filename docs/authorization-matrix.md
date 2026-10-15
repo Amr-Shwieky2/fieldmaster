@@ -314,7 +314,7 @@ are 403 `SCOPE_RESTRICTED` for them.
 | `POST /attachments`, `POST /attachments/:id/transcription` | members with a worker profile; transcription of their own voice note only | no worker profile: 403; someone else's file: 404 |
 | `GET /emergency-callouts/eligibility` | `CLOCK_IN_OUT`, the caller only | — |
 | `GET /time-entries/:id` (own detail), `GET /time-entries/:id/my-pay` | the entry's own worker | another worker's entry: 404 |
-| `GET /payroll-statements/me/current` | the caller's own worker profile (no id in the route) | no worker profile: 404 |
+| `GET /payroll-statements/me/current` | the caller's own worker profile (no id in the route) | no worker profile: 404 `NO_WORKER_PROFILE` (also `GET /payroll-statements/me` and `my-payslip`) |
 | `GET/PATCH /notifications/preferences`, `POST /notifications/read-all` | the caller's own membership | — |
 
 - **Own pay only:** `my-pay` and `me/current` are Worker-own-money routes.
@@ -328,6 +328,45 @@ are 403 `SCOPE_RESTRICTED` for them.
 - **Push content:** a push carries an Arabic type label, a generic body and
   ids for the deep link. It never carries another person's name or any
   amount.
+
+## Mobile manager mode: one app, decided by permissions
+
+The phone shows what `GET /auth/me` allows, never what a role is called:
+the manager home, its counters and quick actions, each notification's
+action and each screen come from the member's permissions and project
+scope. A member with any permission beyond a worker's own
+(`CLOCK_IN_OUT`, `VIEW_OWN_ATTENDANCE`) gets the manager tabs; a member
+with a time-trackable worker profile also gets «دوامي» and «راتبي». A
+custom role (e.g. «محاسب») gets exactly what its permissions allow. Every
+route below applies the same project scope as the web (a record of another
+project is a 404).
+
+| Route | Who | Not allowed |
+|---|---|---|
+| `GET /operations/summary` | any member; each counter only with its permission: pending approvals `APPROVE_ATTENDANCE`, on shift / late / site alerts `VIEW_OPERATIONS`, applications `APPROVE_ONBOARDING` | a counter without its permission is absent |
+| `GET /notification-subjects/:id` | the permission of the subject's screen: attendance and offline records `VIEW_ATTENDANCE`, applications `APPROVE_ONBOARDING`, supervisor reports `VIEW_OPERATIONS`; within the member's projects | otherwise 404 |
+| `POST /notification-subjects/:id/handle` | attendance: `APPROVE_ATTENDANCE` or `CORRECT_TIME_ENTRIES`; offline records: `VIEW_ATTENDANCE` | applications and supervisor reports: 409 `NOTIFICATION_SUBJECT_NOT_HANDLED_HERE` (settled by their decision); already handled: 409 |
+| `GET /supervisor-issues/:id`, `POST /supervisor-issues/:id/resolve` | `VIEW_OPERATIONS`, the report's shift within the member's projects | another project: 404; resolved already: 409 |
+| `GET /work-locations/defaults`, `GET /work-locations/:id`, `POST /work-locations`, `PATCH /work-locations/:id` | `MANAGE_SITES`, within the member's projects | a new project: not for a restricted member (403 `SCOPE_RESTRICTED`); a budget needs `VIEW_FINANCIALS` (403) |
+| `GET /shifts/assignable-workers?start&end`, `POST /shifts` with `workerProfileIds` | `MANAGE_SHIFTS`, within the member's projects | another project's site: 403 |
+| `GET /sites` | `MANAGE_SITES` or `MANAGE_SHIFTS` (whoever plans a shift picks its site) | — |
+| `GET /workers/:id/onboarding-summary` | `APPROVE_ONBOARDING`; the masked bank account (bank, branch, last four digits) only with `VIEW_BANK_INFO` | nothing decrypted for display; the full review stays `GET /workers/:id/onboarding-review` (`VIEW_BANK_INFO`, audited) |
+| `GET /time-entries/:id/photos/:photoId/view-url` | `VIEW_ATTENDANCE`, the entry within the member's projects; one short-lived URL per view, audited (`FILE_ASSET_VIEWED`), `Cache-Control: no-store` | another project or entry: 404 |
+| `GET /offline-sync/batches?workerProfileId=` | `VIEW_ATTENDANCE`: one worker's (within the member's projects); `VIEW_OWN_ATTENDANCE` alone: always the caller's own | malformed id: 400 |
+
+- **Handled once, seen by all:** the action that solves a notification's
+  subject settles it (approve, reject, ask for a correction, decide an
+  application, resolve a report, or «تمت المتابعة» / «تمّت المراجعة»), and
+  every manager's copy shows «تمت المعالجة بواسطة … في …». Settling is
+  audited (`NOTIFICATION_SUBJECT_HANDLED`). A late second decision is
+  refused (409), including rejecting an application that is no longer
+  pending.
+- **Money:** the review screen asks for an entry's estimate only with
+  `VIEW_FINANCIALS` and `VIEW_COMPENSATION`; the manager home's money card
+  needs `VIEW_FINANCIALS` and `VIEW_FINANCIAL_DASHBOARD`. The leak scanner
+  covers every new GET route for every role without `VIEW_FINANCIALS`.
+- **Pushes** carry the subject's id (and a supervisor report's id), never a
+  worker's id or name.
 
 ## Defense in depth for financial data (spec section 6.2 / 23.5)
 

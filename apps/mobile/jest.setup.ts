@@ -44,6 +44,8 @@ jest.mock("expo-font", () => ({ ...jest.requireActual("expo-font"), useFonts: ()
 // Importing these throws in jest (their native modules are missing): small fakes the tests drive (jest/*.ts).
 jest.mock("expo-audio", () => jest.requireActual("./jest/expo-audio-mock"));
 jest.mock("react-native-webview", () => jest.requireActual("./jest/react-native-webview-mock"));
+jest.mock("react-native-maps", () => jest.requireActual("./jest/react-native-maps-mock"));
+jest.mock("expo-image", () => jest.requireActual("./jest/expo-image-mock"));
 // expo-notifications warns about Expo Go when imported under jest-expo; a fake whose listeners tests can drive.
 jest.mock("expo-notifications", () => jest.requireActual("./jest/expo-notifications-mock"));
 

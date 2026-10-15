@@ -24,6 +24,7 @@ import { AMOUNT, ARABIC_INDIC_DIGIT, extractPdfText, pdfHasArabic, waitForReport
 import { PrismaService } from "../src/common/prisma/prisma.service";
 import { FilesService } from "../src/common/files/files.service";
 import { ReportDataService } from "../src/modules/reports/report-data.service";
+import { WorkRulesService } from "../src/common/settings/work-rules.service";
 
 /**
  * Step 8: the seven report types as background jobs (Arabic PDF + CSV), who
@@ -259,7 +260,11 @@ describe("Reports: Arabic PDF + CSV as background jobs (e2e, Step 8)", () => {
     // ── The other worker: a Night Turan emergency (02:00-03:00) and a Flexi-Check day. ──
     const emergencyDay = morningOf(3);
     const actualStartClick = new Date(Date.UTC(emergencyDay.getUTCFullYear(), emergencyDay.getUTCMonth(), emergencyDay.getUTCDate(), 0, 0, 0));
-    const compensation = computeEmergencyCompensation(actualStartClick, new Date(actualStartClick.getTime() + minutes(60)));
+    const compensation = computeEmergencyCompensation(
+      actualStartClick,
+      new Date(actualStartClick.getTime() + minutes(60)),
+      await app.get(WorkRulesService).rulesOn(organizationId, toBusinessDate(actualStartClick)),
+    );
     const turan = await prisma.turanAssignment.create({
       data: {
         id: uuidv7(),

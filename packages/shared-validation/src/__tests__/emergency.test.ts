@@ -1,10 +1,11 @@
 import { computeEmergencyCompensation } from "../emergency";
+import { RULES } from "./rules";
 
 describe("computeEmergencyCompensation", () => {
   it("applies -60min retroactive start and +15min return buffer (scenario 7)", () => {
     const start = new Date("2026-08-03T02:00:00Z");
     const end = new Date("2026-08-03T03:00:00Z");
-    const result = computeEmergencyCompensation(start, end);
+    const result = computeEmergencyCompensation(start, end, RULES);
 
     expect(result.compensatedStart.toISOString()).toBe("2026-08-03T01:00:00.000Z");
     expect(result.compensatedEnd.toISOString()).toBe("2026-08-03T03:15:00.000Z");
@@ -17,13 +18,13 @@ describe("computeEmergencyCompensation", () => {
   it("never mutates the original click timestamps", () => {
     const start = new Date("2026-08-03T02:00:00Z");
     const end = new Date("2026-08-03T03:00:00Z");
-    const result = computeEmergencyCompensation(start, end);
+    const result = computeEmergencyCompensation(start, end, RULES);
     expect(result.actualStartClick.toISOString()).toBe(start.toISOString());
     expect(result.actualEndClick.toISOString()).toBe(end.toISOString());
   });
 
   it("rejects an end timestamp at or before the start timestamp", () => {
     const start = new Date("2026-08-03T02:00:00Z");
-    expect(() => computeEmergencyCompensation(start, start)).toThrow();
+    expect(() => computeEmergencyCompensation(start, start, RULES)).toThrow();
   });
 });

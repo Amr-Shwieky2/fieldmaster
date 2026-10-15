@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
-import { AccountStatus, NotificationType, OrgRole, Permission } from "@fieldmaster/shared-types";
+import { AccountStatus, NotificationType, OrgRole, Permission, NotificationHandledOutcome, NotificationSubjectKind } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { AuditService } from "../../common/audit/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -14,6 +14,7 @@ import { scopeOf, workerScopeWhere } from "../../common/scope/scope-filters";
 import type { ApproveWorkerDto, RejectWorkerDto } from "./dto/approve-worker.dto";
 import type { CreateCompensationProfileDto } from "./dto/create-compensation-profile.dto";
 import { listOrPage, mapRows, type PageWindow } from "../../common/validation/page-query";
+import { NotificationSubjectsService } from "../notifications/notification-subjects.service";
 
 @Injectable()
 export class WorkersService {
@@ -21,10 +22,14 @@ export class WorkersService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly subjects: NotificationSubjectsService,
   ) {}
 
-  /** The workers (those of the viewer's projects, when restricted), with each one's pay only for someone who may see compensation (and for the worker themself). */
-  /** Every worker (of the viewer's projects, when restricted), or one page of them (`?page=` / `?pageSize=`), oldest first. */
+  /**
+   * Every worker (of the viewer's projects, when restricted), or one page of
+   * them (`?page=` / `?pageSize=`), oldest first; each one's pay only for
+   * someone who may see compensation (and for the worker themself).
+   */
   async list(organizationId: string, viewer: AuthenticatedUser, window: PageWindow | null = null) {
     const where = { organizationId, archivedAt: null, ...(workerScopeWhere(scopeOf(viewer)) ?? {}) };
     const list = await listOrPage(
@@ -119,15 +124,24 @@ export class WorkersService {
       data: { workerProfileId },
     });
 
+    // Mobile manager mode: the application's notifications show as handled for every manager.
+    await this.subjects.settle(organizationId, { kind: NotificationSubjectKind.ONBOARDING, refId: workerProfileId }, actor, NotificationHandledOutcome.WORKER_APPROVED, null, correlationId);
     return { workerProfileId, compensationProfile: result };
   }
 
   async reject(organizationId: string, workerProfileId: string, dto: RejectWorkerDto, actor: AuthenticatedUser, correlationId: string) {
-    const wp = UUID_PATTERN.test(workerProfileId) ? await this.prisma.workerProfile.findFirst({ where: { id: workerProfileId, organizationId } }) : null;
+    const wp = UUID_PATTERN.test(workerProfileId)
+      ? await this.prisma.workerProfile.findFirst({ where: { id: workerProfileId, organizationId }, include: { membership: { select: { status: true } } } })
+      : null;
     if (!wp) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
+    // Like approving: only an application still waiting (a second manager's late tap must not reject an active worker).
+    if (wp.membership.status !== AccountStatus.PENDING_APPROVAL) {
+      throw new AppException(409, ErrorCodes.CONFLICT, "This worker is not pending approval.");
+    }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.organizationMembership.update({ where: { id: wp.membershipId }, data: { status: AccountStatus.REJECTED } });
+      const rejected = await tx.organizationMembership.updateMany({ where: { id: wp.membershipId, status: AccountStatus.PENDING_APPROVAL }, data: { status: AccountStatus.REJECTED } });
+      if (rejected.count === 0) throw new AppException(409, ErrorCodes.CONFLICT, "This worker is not pending approval.");
       await this.auditService.record(
         {
           organizationId,
@@ -142,6 +156,7 @@ export class WorkersService {
       );
     });
 
+    await this.subjects.settle(organizationId, { kind: NotificationSubjectKind.ONBOARDING, refId: workerProfileId }, actor, NotificationHandledOutcome.WORKER_REJECTED, dto.reason, correlationId);
     return { workerProfileId, status: AccountStatus.REJECTED };
   }
 

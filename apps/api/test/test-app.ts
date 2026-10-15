@@ -33,7 +33,7 @@ export async function resetDatabase(app: INestApplication) {
       unpaid_breaks, rejected_clock_attempts, clock_events, emergency_callouts, time_entries,
       temporary_check_in_points, temporary_supervisor_assignments, shift_assignments, shifts,
       turan_assignments, geofences, sites, projects,
-      notification_deliveries, notifications,
+      notification_deliveries, notifications, notification_subjects, supervisor_issue_reports,
       offline_sync_events, offline_sync_batches, device_public_keys,
       onboarding_invitations, identity_documents, encrypted_bank_accounts, compensation_profiles, worker_profiles, file_assets,
       refresh_token_families, user_devices, member_scopes, organization_memberships, roles, work_rule_versions, users,

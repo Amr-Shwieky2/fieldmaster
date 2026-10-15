@@ -11,6 +11,7 @@ import { scopeOf, shiftScopeWhere } from "../../common/scope/scope-filters";
 import { hasFinancialData, withoutFinancialData } from "./notification-data";
 import { readPushPreferences, receivableNotificationTypes, withPushPreferences } from "./notification-preferences";
 import { PushDeliveryService } from "./push/push-delivery.service";
+import { actionOf, NotificationSubjectsService, type SubjectRef } from "./notification-subjects.service";
 
 export interface NotifyInput {
   organizationId: string;
@@ -20,6 +21,13 @@ export interface NotifyInput {
   body: string;
   /** Values the text is built from, for localized rendering (see notification-data.ts). Money only for recipients who may see money (VIEW_FINANCIALS). */
   data?: Record<string, unknown>;
+  /**
+   * Mobile manager mode: what the notification is about (an entry to review,
+   * a worker's offline records, an application, a supervisor's report).
+   * Every manager's notification about it shares one subject, opened again
+   * by each new notification; settling it shows as handled for all of them.
+   */
+  subject?: SubjectRef;
 }
 
 export const NOTIFICATION_CREATED_EVENT = "notification.created";
@@ -50,10 +58,12 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly push: PushDeliveryService,
+    private readonly subjects: NotificationSubjectsService,
   ) {}
 
-  async notify(input: NotifyInput) {
+  async notify(input: NotifyInput, subjectId?: string) {
     const data = await this.guardFinancialData(input);
+    const resolvedSubjectId = subjectId ?? (input.subject ? await this.subjects.open(input.organizationId, input.subject) : null);
     const notification = await this.prisma.notification.create({
       data: {
         id: generateId(),
@@ -63,6 +73,7 @@ export class NotificationsService {
         title: input.title,
         body: input.body,
         dataJson: data as Prisma.InputJsonValue,
+        subjectId: resolvedSubjectId,
       },
     });
 
@@ -88,7 +99,16 @@ export class NotificationsService {
   }
 
   async notifyMany(inputs: NotifyInput[]) {
-    return Promise.all(inputs.map((input) => this.notify(input)));
+    // One subject per thing the notifications are about (opened once, shared by every recipient's copy).
+    const subjectIds = new Map<string, string>();
+    for (const input of inputs) {
+      if (!input.subject) continue;
+      const key = `${input.organizationId}:${input.subject.kind}:${input.subject.refId}`;
+      if (!subjectIds.has(key)) subjectIds.set(key, await this.subjects.open(input.organizationId, input.subject));
+    }
+    return Promise.all(
+      inputs.map((input) => this.notify(input, input.subject ? subjectIds.get(`${input.organizationId}:${input.subject.kind}:${input.subject.refId}`) : undefined)),
+    );
   }
 
   /**
@@ -111,8 +131,14 @@ export class NotificationsService {
     return withoutFinancialData(data);
   }
 
+  /**
+   * The caller's newest notifications. Since the mobile manager mode each
+   * also carries what it asks the reader to do (`action`, only when the
+   * reader may open the screen where it is settled) and who settled its
+   * subject (`handled`, shared by every manager's copy).
+   */
   async listForUser(organizationId: string, recipientUserId: string, viewer?: AuthenticatedUser) {
-    const notifications = await this.prisma.notification.findMany({
+    const all = await this.prisma.notification.findMany({
       where: { organizationId, recipientUserId },
       orderBy: { createdAt: "desc" },
       take: 100,
@@ -120,13 +146,31 @@ export class NotificationsService {
     // A member restricted to some projects: what is about a shift of another project is not theirs to read
     // (notifications are filtered when they are created; this covers a restriction added later).
     const shiftScope = viewer ? shiftScopeWhere(scopeOf(viewer)) : undefined;
-    if (!shiftScope) return notifications;
-    const shiftIds = [...new Set(notifications.map((notification) => shiftIdOf(notification.dataJson)).filter((id): id is string => id !== null))];
-    const visible = new Set((await this.prisma.shift.findMany({ where: { organizationId, id: { in: shiftIds }, ...shiftScope }, select: { id: true } })).map((shift) => shift.id));
-    return notifications.filter((notification) => {
-      const shiftId = shiftIdOf(notification.dataJson);
-      return shiftId === null || visible.has(shiftId);
+    let notifications = all;
+    if (shiftScope) {
+      const shiftIds = [...new Set(all.map((notification) => shiftIdOf(notification.dataJson)).filter((id): id is string => id !== null))];
+      const visible = new Set((await this.prisma.shift.findMany({ where: { organizationId, id: { in: shiftIds }, ...shiftScope }, select: { id: true } })).map((shift) => shift.id));
+      notifications = all.filter((notification) => {
+        const shiftId = shiftIdOf(notification.dataJson);
+        return shiftId === null || visible.has(shiftId);
+      });
+    }
+    const subjects = await this.subjects.views(notifications.flatMap((notification) => (notification.subjectId ? [notification.subjectId] : [])));
+    const rows = notifications.map((notification) => {
+      const subject = notification.subjectId ? (subjects.get(notification.subjectId) ?? null) : null;
+      return { notification, subject, action: viewer ? actionOf(notification, subject, viewer) : null };
     });
+    // A notification from before subjects (none stored with it) cannot be settled: its action stays only while its
+    // record still waits for it, so a decision made since takes it out of «تحتاج إجراء».
+    const stillWaits = await this.subjects.stillWaiting(
+      organizationId,
+      rows.flatMap((row) => (row.action && !row.notification.subjectId ? [row.action] : [])),
+    );
+    return rows.map(({ notification, subject, action }) => ({
+      ...notification,
+      action: action && (notification.subjectId || stillWaits(action)) ? action : null,
+      handled: subject?.handled ?? null,
+    }));
   }
 
   async markRead(notificationId: string, recipientUserId: string) {

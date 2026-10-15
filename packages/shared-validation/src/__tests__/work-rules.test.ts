@@ -5,22 +5,23 @@ import { evaluateForgottenStampInfraction } from "../forgotten-stamp";
 import { calculateDailyCompensation, calculateHourlyCompensation, calculateShiftCompensation } from "../payroll";
 import { calculatePayrollMonth, computeEntryCompensation, type PayrollCompensationProfile, type PayrollMonthEntry } from "../payroll-month";
 
-/** Work rules (flexible organization model): every calculation takes the rules as an optional argument whose default is today's numbers. */
+/** Work rules (flexible organization model): every calculation takes the rules in force as a required argument -- there is no default. */
 
 const EIGHT_HOUR_DAY: Pick<WorkRules, "standardDayMinutes" | "overtimeThresholdMinutes"> = { standardDayMinutes: 480, overtimeThresholdMinutes: 480 };
 
-describe("without rules the calculations are exactly what they were", () => {
+describe("with the first version's rules (what every organization starts with) the calculations are exactly what they were", () => {
   it("splits, prices, penalizes and compensates with a 9-hour day, 2 free stamps, 1000 agorot, -60 / +15", () => {
-    expect(splitWorkedMinutes({ rawDurationMinutes: 600, unpaidBreakMinutes: 30, fullDayCredit: false })).toEqual({
+    const first: WorkRules = { ...DEFAULT_WORK_RULES };
+    expect(splitWorkedMinutes({ rawDurationMinutes: 600, unpaidBreakMinutes: 30, fullDayCredit: false }, first)).toEqual({
       workedMinutes: 570,
       regularMinutes: 540,
       overtimeMinutes: 30,
       fullDayCreditApplied: false,
     });
-    expect(calculateDailyCompensation({ dailyBaseRateAgorot: 45_000, overtimeHourlyRateAgorot: 7_000, approvedMinutes: 360, fullDayCredit: false }).totalCompensationAgorot).toBe(30_000);
-    expect(evaluateForgottenStampInfraction(2).deductionAgorot).toBe(0);
-    expect(evaluateForgottenStampInfraction(3).deductionAgorot).toBe(1_000);
-    const callout = computeEmergencyCompensation(new Date("2026-10-14T00:00:00Z"), new Date("2026-10-14T03:00:00Z"));
+    expect(calculateDailyCompensation({ dailyBaseRateAgorot: 45_000, overtimeHourlyRateAgorot: 7_000, approvedMinutes: 360, fullDayCredit: false }, first).totalCompensationAgorot).toBe(30_000);
+    expect(evaluateForgottenStampInfraction(2, first).deductionAgorot).toBe(0);
+    expect(evaluateForgottenStampInfraction(3, first).deductionAgorot).toBe(1_000);
+    const callout = computeEmergencyCompensation(new Date("2026-10-14T00:00:00Z"), new Date("2026-10-14T03:00:00Z"), first);
     expect(callout).toMatchObject({ retroactiveMinutes: 60, returnBufferMinutes: 15, compensatedDurationMinutes: 255 });
     expect(DEFAULT_WORK_RULES).toMatchObject({ standardDayMinutes: 540, overtimeThresholdMinutes: 540, freeForgottenStampsPerMonth: 2, forgottenStampPenaltyAgorot: 1_000 });
   });
@@ -114,10 +115,10 @@ describe("a month is priced entry by entry with the rules of each entry's own bu
     expect(month.workers[0]).toMatchObject({ overtimeMinutes: 60, netPayableAgorot: 48_000 + 54_000 });
   });
 
-  it("without a rules function every entry uses the defaults (nothing changes for an organization that never changed a rule)", () => {
-    const month = calculatePayrollMonth({ entries: [entry("a", "2026-10-16")], profiles: [profile], adjustments: [] });
+  it("with only the first version every entry is priced as before (nothing changes for an organization that never changed a rule)", () => {
+    const month = calculatePayrollMonth({ entries: [entry("a", "2026-10-16")], profiles: [profile], adjustments: [], rulesFor: (date) => pickWorkRules(versions.slice(0, 1), date) });
     expect(month.entries[0]).toMatchObject({ overtimeMinutes: 0, totalAgorot: 48_000 });
-    expect(computeEntryCompensation(entry("a", "2026-10-16"), profile)).toMatchObject({ overtimeMinutes: 0 });
+    expect(computeEntryCompensation(entry("a", "2026-10-16"), profile, pickWorkRules(versions.slice(0, 1), "2026-10-16"))).toMatchObject({ overtimeMinutes: 0 });
   });
 });
 
@@ -138,8 +139,10 @@ describe("pickWorkRules and checkWorkRules", () => {
     expect(pickWorkRules(versions, "2026-11-01").standardDayMinutes).toBe(450);
     expect(pickWorkRules(versions, "2026-11-30").standardDayMinutes).toBe(450);
     expect(pickWorkRules(versions, "2027-01-01").standardDayMinutes).toBe(420);
-    expect(pickWorkRules([], "2026-11-01")).toEqual(DEFAULT_WORK_RULES);
-    expect(pickWorkRules([version("late", "2030-01-01", 1, 400)], "2026-11-01")).toEqual(DEFAULT_WORK_RULES);
+    // No fallback to default values: an organization always has its first version; none at all is an error,
+    // and a date before every version gets the first one.
+    expect(() => pickWorkRules([], "2026-11-01")).toThrow();
+    expect(pickWorkRules([version("late", "2030-01-01", 1, 400)], "2026-11-01").standardDayMinutes).toBe(400);
   });
 
   it("refuses values out of range, fractions, and an overtime threshold below the standard day", () => {

@@ -304,6 +304,18 @@ const BUILDERS: Record<string, Builder> = {
       issueText: isolateText(issueText),
     });
   },
+
+  // To the temporary supervisor when a manager resolved their report (mobile manager mode): who did, and the note.
+  TEMPORARY_SUPERVISOR_ISSUE_RESOLVED: (data, ctx) => {
+    const values = { shiftTitle: readShiftTitle(data, ctx), note: text(data, "note") };
+    if (!allDefined(values)) return null;
+    const resolver = text(data, "resolverName");
+    return simple("TEMPORARY_SUPERVISOR_ISSUE_RESOLVED", {
+      shiftTitle: isolateText(values.shiftTitle),
+      note: isolateText(values.note),
+      resolverName: resolver !== undefined ? isolateText(resolver) : ctx.t("someManager"),
+    });
+  },
 };
 
 /** Notification types the renderer knows (every shared-types NotificationType). */

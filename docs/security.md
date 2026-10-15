@@ -140,7 +140,10 @@ delivery. A real malware scanner is not bound yet: the scan hook exists
   - private storage, type checked by content, image metadata removed;
   - unattached uploads bounded per worker;
   - attached only by their own uploader;
-  - viewable only by an Owner (an audited 60-second URL).
+  - viewable by an Owner (an audited 60-second URL), and since mobile
+    manager mode by a member with `VIEW_ATTENDANCE` reviewing the entry,
+    within their projects: one audited short-lived URL per view, never
+    cached on the phone (`cachePolicy="none"`).
 - **Transcripts** are never logged; production has no transcription
   provider by default (`TRANSCRIPTION_PROVIDER=none`).
 - **Co-workers' data:** before Step 9 a worker's shift list and detail
@@ -149,6 +152,29 @@ delivery. A real malware scanner is not bound yet: the scan hook exists
 - **Android cleartext:** allowed only in builds whose API address is plain
   `http://` (a phone testing against a computer on the LAN). Production
   builds (`https://`) keep Android's default.
+
+## Mobile manager mode
+
+- **The phone decides from permissions** (`GET /auth/me`), and the API
+  checks every call again with the same permission and project scope as the
+  web. A notification offers an action only to a reader who may perform it.
+- **Applications on the phone:** the summary decrypts nothing for display
+  (a masked bank account, last four digits, only with `VIEW_BANK_INFO`).
+  The ID number, the full bank details and the ID image come only from an
+  explicit tap, through the audited review and a short-lived URL. They live
+  only in the screen's memory, the image is never cached, and they are
+  dropped when the screen loses focus, when the app leaves the foreground
+  (the iOS app switcher stores a picture of the screen) and after a
+  decision. An ID document that is a PDF is not opened on the phone (it
+  would land in another app's cache).
+- **Pushes** add the notification subject's id, and a supervisor report's
+  id, never a worker's id or name (a push can show on a locked screen).
+- **Late decisions are refused:** rejecting an application that is no
+  longer pending is 409 (it could reject an active worker before), and a
+  settled notification subject cannot be settled again.
+- **Leak scanner:** every new GET route is scanned for every role without
+  `VIEW_FINANCIALS` (seeded subject, supervisor report, work location and
+  entry photo; the assignable workers with a time window).
 
 ## Sensitive logging
 

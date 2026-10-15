@@ -49,6 +49,13 @@ export class ShiftsController {
     return this.shiftsService.list(user.organizationId, { status, businessDate, shiftType }, user, scope, pageWindow({ page, pageSize }));
   }
 
+  /** Mobile manager mode (declared before `:id`): the workers a shift at this time can have, with their overlapping shifts. */
+  @Get("assignable-workers")
+  @RequirePermissions(Permission.MANAGE_SHIFTS)
+  assignableWorkers(@CurrentUser() user: AuthenticatedUser, @Query("start") start?: string, @Query("end") end?: string) {
+    return this.shiftsService.assignableWorkers(user.organizationId, start, end, user);
+  }
+
   @Get(":id")
   getById(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     const scope = this.scopeFor(user);

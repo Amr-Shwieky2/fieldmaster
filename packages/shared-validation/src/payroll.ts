@@ -1,4 +1,4 @@
-import { CompensationType, DEFAULT_WORK_RULES } from "@fieldmaster/shared-types";
+import { CompensationType } from "@fieldmaster/shared-types";
 import type { DayRules } from "./attendance";
 
 /**
@@ -28,11 +28,12 @@ export interface DailyCompensationResult {
 
 /**
  * `rules` are the work rules in force on the entry's business date (the
- * standard day and the overtime threshold); without them, today's defaults.
+ * standard day and the overtime threshold). Required: a caller always prices
+ * with the organization's rules, never a default.
  */
 export function calculateDailyCompensation(
   input: DailyCompensationInput,
-  rules: DayRules = DEFAULT_WORK_RULES,
+  rules: DayRules,
 ): DailyCompensationResult {
   const { dailyBaseRateAgorot, overtimeHourlyRateAgorot, approvedMinutes, fullDayCredit } = input;
 
@@ -85,7 +86,7 @@ export interface HourlyCompensationResult {
 
 export function calculateHourlyCompensation(
   input: HourlyCompensationInput,
-  rules: DayRules = DEFAULT_WORK_RULES,
+  rules: DayRules,
 ): HourlyCompensationResult {
   const { baseHourlyRateAgorot, overtimeHourlyRateAgorot, approvedMinutes, fullDayCredit } = input;
 
@@ -122,7 +123,7 @@ export interface CompensationCalcInput {
   overtimeHourlyRateAgorot: number;
 }
 
-export function calculateShiftCompensation(input: CompensationCalcInput, rules: DayRules = DEFAULT_WORK_RULES): {
+export function calculateShiftCompensation(input: CompensationCalcInput, rules: DayRules): {
   totalCompensationAgorot: number;
   regularMinutes: number;
   overtimeMinutes: number;

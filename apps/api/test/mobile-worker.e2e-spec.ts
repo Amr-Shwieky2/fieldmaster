@@ -832,11 +832,12 @@ describe("Mobile worker app API (Step 9)", () => {
         pendingEntries: 1,
       });
 
-      // No worker id is taken: an Owner without a worker profile gets 404 even when naming the worker, and a
-      // time-trackable Field Manager gets their own (empty) month, never the worker's.
+      // No worker id is taken: an Owner without a worker profile gets 404 even when naming the worker (mobile manager
+      // mode: with its own code, NO_WORKER_PROFILE, not a generic "not found"), and a time-trackable Field Manager gets
+      // their own (empty) month, never the worker's.
       for (const path of ["/api/v1/payroll-statements/me/current", `/api/v1/payroll-statements/me/current?workerProfileId=${ctx.worker.workerProfile.id}`]) {
-        expectError(await request(http).get(path).set(auth(ctx.tokens.owner)), 404, "NOT_FOUND");
-        expectError(await request(http).get(path).set(auth(ctx.tokens.manager)), 404, "NOT_FOUND");
+        expectError(await request(http).get(path).set(auth(ctx.tokens.owner)), 404, "NO_WORKER_PROFILE");
+        expectError(await request(http).get(path).set(auth(ctx.tokens.manager)), 404, "NO_WORKER_PROFILE");
         const managersOwn = await request(http).get(path).set(auth(ctx.tokens.trackedManager)).expect(200);
         expect(managersOwn.body).toMatchObject({ yearMonth, approvedShifts: 0, netPayableAgorot: 0, pendingEntries: 0 });
         expect(JSON.stringify(managersOwn.body)).not.toContain(ctx.worker.workerProfile.id);
@@ -1042,8 +1043,14 @@ describe("Mobile worker app API (Step 9)", () => {
         expect(Object.keys(ownerNotice.dataJson as object)).toEqual(expect.arrayContaining(["estimatedCostAgorot", "workerName", "workerProfileId"]));
         await pushDelivery(ownerNotice.id);
         const ownerPush = sentFor(ownerNotice.id);
+        // Mobile manager mode: also the subject every manager's copy shares (the tap opens the entry to review).
+        expect(ownerNotice.subjectId).toEqual(expect.any(String));
         expect(ownerPush).toEqual([
-          expect.objectContaining({ to: OWNER_PUSH_TOKEN, title: "أنهى عامل الدوام", data: { notificationId: ownerNotice.id, type: "WORKER_CLOCKED_OUT", timeEntryId: entry.id, shiftId: ctx.shift.id } }),
+          expect.objectContaining({
+            to: OWNER_PUSH_TOKEN,
+            title: "أنهى عامل الدوام",
+            data: { notificationId: ownerNotice.id, type: "WORKER_CLOCKED_OUT", timeEntryId: entry.id, shiftId: ctx.shift.id, subjectId: ownerNotice.subjectId },
+          }),
         ]);
 
         // Nothing in any push is money, a person, or English text; no push token ever reaches the logs.

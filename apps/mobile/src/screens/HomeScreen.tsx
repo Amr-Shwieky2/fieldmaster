@@ -14,6 +14,7 @@ import { Button } from "../components/Button";
 import { ConnectionBanner } from "../components/ConnectionBanner";
 import { EmptyView, ErrorView, LoadingView } from "../components/StateViews";
 import { useEnumLabel, useErrorMessage, useFormat, useShiftTitle } from "../i18n/hooks";
+import { useAccess } from "../lib/access-context";
 import { useAuth } from "../lib/auth-context";
 import { formatElapsed, useNow } from "../lib/elapsed";
 import { useNotifications } from "../lib/notifications-context";
@@ -92,6 +93,8 @@ export function HomeScreen({ navigation }: Props) {
   const errorMessage = useErrorMessage();
   const shiftTitle = useShiftTitle();
   const { client, logout, session } = useAuth();
+  // «راتبي» only for a member who clocks in themselves: anyone else has no worker profile, hence no salary (GET /payroll-statements/me refuses them).
+  const { hasWorkerHome } = useAccess();
   const { pendingCount, queue } = useOfflineSync();
   const { unreadCount, refresh: refreshNotifications } = useNotifications();
 
@@ -491,7 +494,9 @@ export function HomeScreen({ navigation }: Props) {
       {/* Always reachable (loading, error, empty, loaded), and as large as every other button. */}
       <View style={styles.footer}>
         <Button testID="home-history" label={t("history")} variant="secondary" onPress={() => navigation.navigate("History")} style={styles.footerButton} />
-        <Button testID="home-salary" label={t("salary")} variant="secondary" onPress={() => navigation.navigate("Salary")} style={styles.footerButton} />
+        {hasWorkerHome ? (
+          <Button testID="home-salary" label={t("salary")} variant="secondary" onPress={() => navigation.navigate("Salary")} style={styles.footerButton} />
+        ) : null}
       </View>
     </SafeAreaView>
   );

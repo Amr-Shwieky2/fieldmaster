@@ -1,4 +1,4 @@
-import { DEFAULT_WORK_RULES, type WorkRules } from "@fieldmaster/shared-types";
+import type { WorkRules } from "@fieldmaster/shared-types";
 import { toBusinessYearMonth } from "./business-date";
 
 /** The rules the two-strike rule needs. */
@@ -17,7 +17,7 @@ export interface ForgottenStampEvaluation {
  * all forgotten-clock-in/forgotten-clock-out infractions for the worker in
  * that month, including this one.
  */
-export function evaluateForgottenStampInfraction(monthlySequenceNumber: number, rules: ForgottenStampRules = DEFAULT_WORK_RULES): ForgottenStampEvaluation {
+export function evaluateForgottenStampInfraction(monthlySequenceNumber: number, rules: ForgottenStampRules): ForgottenStampEvaluation {
   if (monthlySequenceNumber < 1) {
     throw new Error("monthlySequenceNumber must be >= 1");
   }

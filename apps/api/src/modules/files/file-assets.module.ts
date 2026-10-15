@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { FileAssetsController } from "./file-assets.controller";
+import { EntryPhotosController, FileAssetsController } from "./file-assets.controller";
 import { FileAssetsService } from "./file-assets.service";
 import { UploadsService } from "./uploads.service";
 import { MALWARE_SCANNER, NoopMalwareScanner } from "./malware-scanner";
@@ -11,7 +11,7 @@ import { MALWARE_SCANNER, NoopMalwareScanner } from "./malware-scanner";
  * URLs (`GET /file-assets/:id/view-url`).
  */
 @Module({
-  controllers: [FileAssetsController],
+  controllers: [FileAssetsController, EntryPhotosController],
   providers: [UploadsService, FileAssetsService, { provide: MALWARE_SCANNER, useClass: NoopMalwareScanner }],
   exports: [UploadsService],
 })

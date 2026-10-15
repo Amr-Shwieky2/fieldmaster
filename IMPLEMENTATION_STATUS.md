@@ -1,5 +1,152 @@
 # FieldMaster — Implementation Status
 
+## Mobile manager mode — one role-aware app, actionable notifications, the salary fix (2026-10-15)
+
+Scope: `apps/mobile` and the API it needs, after the fixes from the review
+of PR #18. Arabic only, RTL. Every financial-isolation rule unchanged. Not
+Step 10A. Built on main after PR #18. Rules: `docs/authorization-matrix.md`
+("Mobile manager mode"); routes: `docs/api.md`; design:
+`docs/technical-decisions.md`; trying it on a phone:
+`docs/mobile-device-testing.md` (section 6).
+
+**PR #18 review fixes (done first):**
+- The end of an emergency call-out estimated the Owner's cost with the
+  default rules: it now uses the rules (and the compensation profile) of
+  the call-out's business date.
+- The rules argument is required in `calculateDailyCompensation`,
+  `calculateHourlyCompensation`, `calculateShiftCompensation`,
+  `computeEntryCompensation`, `splitWorkedMinutes`,
+  `computeEmergencyCompensation`, `calculatePayrollMonth` (`rulesFor`) and
+  `PayrollCalculationService.computeEntryCompensation`; every caller passes
+  the rules in force. Every organization has a stored version 1 (the
+  migration adds it; a new organization gets it the first time its rules
+  are read); `DEFAULT_WORK_RULES` only seeds it, and the default constants
+  (`STANDARD_DAY_MINUTES` …) are gone. `pickWorkRules` never invents rules.
+- The API sends each entry's `dayRules` with every attendance item and
+  evidence; the correction dialog, the attendance list and the worker tab
+  no longer fall back to defaults. The dialog's penalty preview uses the
+  stored rules of the infraction's day (no amount when unknown).
+- New test: an eight-hour day set from next month; once in force, an
+  emergency ended and a nine-hour shift clocked out — every estimate,
+  notification and preview uses 480.
+
+**The salary error («تعذّر تحميل الراتب — لم نتمكن من العثور على العنصر
+المطلوب»): the real cause.** Reproduced for every seeded member (18
+sign-ins, both salary endpoints): the 12 workers and the Field Manager who
+clocks in (يوسف الخطيب) got 200; the two Owners, the other Field Manager
+and both custom roles got a generic `404 NOT_FOUND`. They have no worker
+profile, and the app offered «راتبي» to every member. Now «راتبي» is only
+for a member with a time-trackable worker profile, the API answers `404
+NO_WORKER_PROFILE`, and an empty month shows «لا يوجد راتب لهذا الشهر بعد»
+(never an error). An e2e test runs the seed and calls both endpoints as
+every member.
+
+**The floating blue gear:** Expo's developer-menu button
+(`expo-dev-menu`, «Tools button»), shown only in Expo Go and development
+builds. Not the app's code; nothing to remove.
+
+**The two «حضور دون اتصال يحتاج إلى مراجعة» showing «للمراجعة: 0، مرفوضة:
+1»:** each synced batch sent its own notification, and the text said
+"needs review" when records had been refused. Now a worker's offline
+records are one subject (one row in the list), the text says what happened
+(refused / location to review / both) and the row opens the offline review.
+
+**Built — mobile:**
+- One app, decided by `GET /auth/me` (permissions, scope, worker profile,
+  rules in force), never by a role's name: members who manage get
+  «الإدارة», «دوامي» (only if they clock in themselves) and «الإشعارات»;
+  workers keep their home.
+- Manager home: counters by permission (بانتظار الموافقة، في الدوام الآن،
+  متأخرون، تنبيهات الموقع، طلبات الانضمام), quick actions (موقع عمل جديد،
+  وردية جديدة، الموافقات، العمليات المباشرة), the month's money card only with
+  `VIEW_FINANCIALS` + `VIEW_FINANCIAL_DASHBOARD`, «عرض مقيَّد بمشاريعك» for a
+  restricted member; live operations (map and lists) and the approvals list.
+- Work locations: the list and the editor (react-native-maps on the current
+  position, «استخدم موقعي الحالي», a draggable pin, the radius slider and
+  circle from the settings' default; name, address, instructions,
+  emergency contact; a project picked or created — its budget only with
+  `VIEW_FINANCIALS`). New shift: sites nearest first, Jerusalem date and
+  times, the workers with the API's conflict warnings, the check-in method,
+  publish.
+- Actionable notifications: «تحتاج إجراء» / «للعلم», repeated
+  notifications grouped, the action said in words, «تمت المعالجة بواسطة …
+  في …» on every manager's copy. Each opens the screen that solves it:
+  - attendance review: approve, reject (reason), full-day credit (reason),
+    request a correction (reason), manual correction previewed with the
+    entry's day rules; the cost only with `VIEW_FINANCIALS` +
+    `VIEW_COMPENSATION`; photos one at a time (no cache); an open entry
+    shows how long it has run, «اتصل بالعامل» and «تمت المتابعة»;
+  - offline records: why each was refused, the flagged ones' entries,
+    «تمّت المراجعة»;
+  - an application: the summary, the bank account masked, full details and
+    the ID image only on a tap (audited, never cached, cleared on leaving
+    the screen or the app), approve with the compensation or reject with a
+    reason;
+  - a temporary supervisor's report: «تم الحل» with a note (the supervisor
+    is told).
+- The emergency screen's «+N دقيقة» come from the rules in force.
+
+**Built — API:** notification subjects (grouping key, the shared handled
+state, the action per reader, audited settling), stored supervisor reports
+and their resolution, `GET /operations/summary`, the onboarding summary,
+work locations in one transaction, a shift with its workers (conflicts
+refused together) and the assignable workers, an entry photo's view URL,
+one worker's offline batches, the site list for shift planners
+(`MANAGE_SHIFTS`), a 409 for rejecting an application that is no longer
+pending, and the subject's id in managers' pushes (never a worker's id).
+Notifications stored before subjects keep their action only while their
+record still waits for it (decided since: information). The seed stores its
+notifications with subjects, and the phone's quick login lists the members
+of custom roles («أدوار مخصّصة»).
+
+**Migrations:** `20261015120000_notification_issue_resolved`,
+`20261015120100_mobile_manager_mode` (new ones only; nothing on main
+edited).
+
+**Tests:** 1,845 → 2,141 (shared-validation 115, i18n 88 → 90, mobile 496 →
+773, API unit 147 → 148, admin web 789 → 792, e2e 210 → 223). Lint,
+typecheck, build and e2e green for the whole repository. Also tried on the
+mobile web target against the API: the Owner, a Field Manager who clocks
+in, «محاسب», the restricted «مدير مشروع» and a worker — the Field
+Manager's approval showed «تمت المعالجة بواسطة …» on the Owner's copy.
+
+Changed on purpose (the behavior the spec asks for), nothing removed or
+weakened:
+- shared-validation: the PR #18 tests of calls *without* rules now pass the
+  rules (the argument is required); `pickWorkRules([])` throws instead of
+  answering defaults.
+- work-rules e2e: the first test expected `defaults` and a "baseline"
+  version 0 with nothing stored; it now expects the stored version 1. The
+  clock-in window test stores its version as number 2.
+- mobile-worker e2e: `NO_WORKER_PROFILE` instead of `NOT_FOUND` (still
+  404); the Owner's push also carries `subjectId`.
+- admin web: fixtures and dialog tests give each entry its `dayRules`; the
+  work-rules page test drops `defaults`.
+- mobile: the HomeScreen salary-footer test signs in a worker whose session
+  has a worker profile (as every real worker's has); the EmergencyScreen
+  tests supply the rules in force (60 / 15) the screen now reads.
+
+**Known gaps (for later):**
+- Not tried on a phone yet: the tests and the type check cover the screens
+  (the checklist is in `docs/mobile-device-testing.md`).
+- The admin web shows the same misleading offline wording the phone had
+  (its existing test pins the text).
+- The admin dashboard's pending count (from PR #18) still reads the whole
+  list.
+- Push for `TEMPORARY_SUPERVISOR_ISSUE_RESOLVED` follows the default (on);
+  it has no switch of its own in the worker's notification settings.
+- The penalty preview in the correction dialog needs `VIEW_ORG_SETTINGS`
+  (the rules route); without it the dialog shows no amount.
+- Open payroll months show "changed since calculation" once after this is
+  deployed (version 1 is now stored and part of the fingerprint).
+- An entry photo's `eventType` is not recorded (null).
+- Offline review opened from a push does not name the worker (a push
+  carries no names); from the list it does.
+- The app registers an offline-signing key at sign-in for every member;
+  for one who does not clock in the API answers 403 (harmless, from Step 9).
+- Old offline-record notifications (stored before subjects) are information
+  only.
+
 ## Flexible organization model — configurable roles, limits and work rules (2026-10-14)
 
 Scope: API, database and the admin web's settings screens (the mobile app

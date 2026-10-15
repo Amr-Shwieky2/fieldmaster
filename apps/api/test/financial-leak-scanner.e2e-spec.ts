@@ -140,7 +140,8 @@ const EXPECTED_NOT_FOUND = {
     "GET /api/v1/payroll-statements/me/current",
     "GET /api/v1/time-entries/:id/my-pay",
   ]),
-  worker: new Set(["GET /api/v1/temporary-supervisors/:assignmentId/shift"]),
+  // Mobile manager mode: a notification subject exists only for members who may open its screen.
+  worker: new Set(["GET /api/v1/temporary-supervisors/:assignmentId/shift", "GET /api/v1/notification-subjects/:id"]),
   // A custom role is a member without a worker profile, like the Field Manager: the same routes answer 404.
   custom: new Set([
     "GET /api/v1/payroll-periods/:yearMonth/my-payslip",
@@ -162,7 +163,15 @@ const EXPECTED_NOT_FOUND = {
     "GET /api/v1/reports/:id/verify",
     // Step 9: another worker's time entry does not exist for them (it was 403).
     "GET /api/v1/time-entries/:id",
+    "GET /api/v1/notification-subjects/:id",
   ]),
+};
+
+/** Routes that answer only with query parameters, and what the scan sends them. */
+const ROUTE_QUERIES: Record<string, () => string> = {
+  // Mobile manager mode: the workers a new shift could have (one starting in two hours).
+  "GET /api/v1/shifts/assignable-workers": () =>
+    `?start=${encodeURIComponent(new Date(Date.now() + 2 * 3_600_000).toISOString())}&end=${encodeURIComponent(new Date(Date.now() + 10 * 3_600_000).toISOString())}`,
 };
 
 interface GetRoute {
@@ -198,7 +207,7 @@ function discoverGetRoutes(app: INestApplication, idsByResource: Record<string, 
           if (!id) throw new Error(`No seeded id for ${segment} in GET ${template}: add one for "${resource}" to the scanner's seed.`);
           return id;
         });
-        routes.push({ route: `GET ${template}`, path: `/api/v1/${filled.join("/")}` });
+        routes.push({ route: `GET ${template}`, path: `/api/v1/${filled.join("/")}${ROUTE_QUERIES[`GET ${template}`]?.() ?? ""}` });
       }
     }
   }
@@ -380,6 +389,29 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
       .expect(201);
     const calloutId: string = calloutStart.body.calloutId;
 
+    // Mobile manager mode: the supervisor's report (resolved from the phone) and a photo of the entry (opened one at a time).
+    await request(http)
+      .post(`/api/v1/temporary-supervisors/${supervision.body.id}/report-issue`)
+      .set("Authorization", `Bearer ${supervisorToken}`)
+      .send({ text: "The arrow board battery is flat." })
+      .expect(201);
+    const issue = await prisma.supervisorIssueReport.findFirstOrThrow({ where: { organizationId } });
+    const subject = await prisma.notificationSubject.findFirstOrThrow({ where: { organizationId, kind: "ATTENDANCE", refId: timeEntryId } });
+    const entryPhoto = await prisma.fileAsset.create({
+      data: {
+        id: uuidv7(),
+        organizationId,
+        purpose: FileAssetPurpose.ATTENDANCE_PHOTO,
+        storageKey: `attendance/${organizationId}/scanner/${uuidv7()}`,
+        contentType: "image/jpeg",
+        sizeBytes: 1024,
+        sha256: "0".repeat(64),
+        scanResult: "CLEAN",
+        timeEntryId,
+        workerProfileId: worker.workerProfile.id,
+      },
+    });
+
     const batch = await prisma.offlineSyncBatch.create({
       data: { id: uuidv7(), organizationId, workerProfileId: worker.workerProfile.id, deviceId: "scanner-worker-device", eventCount: 0 },
     });
@@ -521,6 +553,11 @@ describe("Financial leak scanner (dev login, every GET route)", () => {
         // Step 8: the public page reads `/onboarding/invitations/:token`; the Owner views the Worker's ID document.
         invitations: openInvitation.body.token as string,
         "file-assets": workerIdDocument.id,
+        // Mobile manager mode.
+        "notification-subjects": subject.id,
+        "supervisor-issues": issue.id,
+        "work-locations": site.id,
+        photos: entryPhoto.id,
       },
     };
   }

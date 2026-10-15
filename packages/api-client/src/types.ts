@@ -105,6 +105,7 @@ export interface Site {
   latitude: number;
   longitude: number;
   defaultGeofenceRadiusMeters: number;
+  address?: string | null;
   /** Step 9: shown on the worker's shift screen (GET /shifts/:id). */
   instructions?: string | null;
   geofences?: Geofence[];
@@ -626,6 +627,12 @@ export interface NotificationItem {
   dataJson: Record<string, unknown> | null;
   readAt: string | null;
   createdAt: string;
+  /** Mobile manager mode: the subject several notifications share (group by it); null for information only. */
+  subjectId?: string | null;
+  /** What the notification asks the reader to do; null for information only. */
+  action?: NotificationAction | null;
+  /** Shared by every manager's copy: who settled the subject, and when. */
+  handled?: NotificationHandled | null;
 }
 
 export interface TuranAssignment {
@@ -680,6 +687,8 @@ export interface OfflineSyncBatchRecord {
     status: OfflineSyncEventStatus;
     rejectionReason: string | null;
     deviceTimestamp: string;
+    /** The time entry the event created or closed, once accepted. */
+    resultTimeEntryId: string | null;
   }[];
 }
 
@@ -890,7 +899,7 @@ export interface AttendanceListItem {
   devRewoundAt: string | null;
   checkInMethod: CheckInMethod;
   /** The standard day and overtime threshold in force on the entry's business date. */
-  dayRules?: { standardDayMinutes: number; overtimeThresholdMinutes: number };
+  dayRules: { standardDayMinutes: number; overtimeThresholdMinutes: number };
   worker: { id: string; fullLegalName: string };
   shift: { id: string; title: string; shiftType: ShiftType; project: { id: string; name: string } | null; site: { id: string; name: string } | null };
   dailySummary: { text: string | null; taskCategory: string } | null;
@@ -983,7 +992,9 @@ export interface TimeEntryEvidence {
   approvedByName: string | null;
   periodFinalized: boolean;
   /** The day-length rules in force on the entry's business date (no money): the correction preview splits minutes with them. */
-  dayRules?: { standardDayMinutes: number; overtimeThresholdMinutes: number };
+  dayRules: { standardDayMinutes: number; overtimeThresholdMinutes: number };
+  /** Mobile manager mode: the entry's attendance photos (opened one at a time through an audited, short-lived URL). */
+  photos?: EvidencePhoto[];
   worker: { id: string; fullLegalName: string; phoneNumber: string };
   shift: {
     id: string;
@@ -1657,7 +1668,6 @@ export interface WorkRulesView {
   canSeeMoney: boolean;
   /** The rules in force today. */
   current: Partial<WorkRules>;
-  defaults: Partial<WorkRules>;
   limits: Partial<Record<WorkRuleKey, { min: number; max: number }>>;
   /** Oldest first. A version whose `effectiveFrom` is after `today` has not started yet. */
   versions: WorkRuleVersionView[];
@@ -1675,4 +1685,196 @@ export interface WorkRulesImpact {
 export interface CreateWorkRuleVersionInput extends Partial<WorkRules> {
   effectiveFrom: string;
   reason: string;
+}
+
+// ── Mobile manager mode (2026-10-15) ────────────────────────────────────
+
+/**
+ * `GET /operations/summary`: the counters of the mobile manager home. Each is
+ * present only when the caller holds its permission, and counts only the
+ * caller's projects when they are restricted to some (the lists they open
+ * show the same rows).
+ */
+export interface OperationsSummary {
+  generatedAt: string;
+  /** APPROVE_ATTENDANCE: entries waiting for approval. */
+  pendingApprovals?: number;
+  /** VIEW_OPERATIONS: workers clocked in now. */
+  onShift?: number;
+  /** VIEW_OPERATIONS: assigned workers past their shift's start and grace who have not clocked in. */
+  late?: number;
+  /** VIEW_OPERATIONS: refused clock attempts and suspicious locations of the last hours. */
+  siteAlerts?: number;
+  /** APPROVE_ONBOARDING: join applications waiting for a decision. */
+  onboardingRequests?: number;
+}
+
+/** What a notification asks its reader to do; absent (null) for a notification that is only for information. */
+export type NotificationActionKind = "REVIEW_ATTENDANCE" | "OPEN_ENTRY" | "REVIEW_OFFLINE" | "REVIEW_ONBOARDING" | "RESOLVE_SUPERVISOR_ISSUE";
+
+export interface NotificationAction {
+  kind: NotificationActionKind;
+  /** REVIEW_ATTENDANCE / OPEN_ENTRY. */
+  timeEntryId?: string;
+  /** REVIEW_OFFLINE / REVIEW_ONBOARDING (and the worker of an entry). */
+  workerProfileId?: string;
+  /** RESOLVE_SUPERVISOR_ISSUE. */
+  issueId?: string;
+}
+
+/** How the thing a notification is about was settled. */
+export type NotificationHandledOutcome =
+  | "APPROVED"
+  | "REJECTED"
+  | "FULL_DAY_CREDIT"
+  | "CORRECTION_REQUESTED"
+  | "CORRECTED"
+  | "RESOLVED"
+  | "REVIEWED"
+  | "WORKER_APPROVED"
+  | "WORKER_REJECTED";
+
+/** Shared by every manager's copy of a notification: who settled its subject, and when. */
+export interface NotificationHandled {
+  at: string;
+  by: { userId: string; fullLegalName: string };
+  outcome: NotificationHandledOutcome;
+  note: string | null;
+}
+
+/**
+ * The thing notifications are about (an entry to review, a worker's offline
+ * records, an application, a supervisor's report). Every notification about
+ * it, to every manager, points at the same subject: settling it once shows as
+ * handled for all of them. A new notification about a settled subject opens
+ * it again.
+ */
+export interface NotificationSubject {
+  id: string;
+  kind: "ATTENDANCE" | "OFFLINE_REVIEW" | "ONBOARDING" | "SUPERVISOR_ISSUE";
+  handled: NotificationHandled | null;
+}
+
+/** `GET /notifications` items since the mobile manager mode: the fields below are added to `NotificationItem`. */
+export interface ActionableNotificationFields {
+  /** The subject several notifications share (group the list by it); null for information only. */
+  subjectId: string | null;
+  action: NotificationAction | null;
+  handled: NotificationHandled | null;
+}
+
+/** `GET /supervisor-issues/:id`: a temporary supervisor's report (VIEW_OPERATIONS, within the reader's projects). */
+export interface SupervisorIssue {
+  id: string;
+  text: string;
+  reportedAt: string;
+  shift: { id: string; title: string; siteName: string | null; scheduledStart: string; scheduledEnd: string };
+  supervisor: { workerProfileId: string; fullLegalName: string; phoneNumber: string };
+  resolved: { at: string; by: { userId: string; fullLegalName: string }; note: string } | null;
+}
+
+/**
+ * `GET /workers/:id/onboarding-summary` (APPROVE_ONBOARDING): an application
+ * without any decrypted value. The bank account's last four digits only for
+ * a member who may see bank details; the full numbers and the ID image only
+ * through the audited `GET /workers/:id/onboarding-review` and
+ * `GET /file-assets/:id/view-url`, on an explicit request.
+ */
+export interface OnboardingSummary {
+  workerProfileId: string;
+  membershipStatus: AccountStatus;
+  fullLegalName: string;
+  preferredName: string | null;
+  phoneNumber: string;
+  submittedAt: string;
+  governmentIdType: GovernmentIdType | null;
+  hasIdentityDocument: boolean;
+  hasProfilePhoto: boolean;
+  /** Only for a member who may see bank details (otherwise the key is absent): bank, branch, the account number's last four digits. */
+  bankAccount?: { bankName: string; branchNumber: string; accountNumberLast4: string } | null;
+  /** VIEW_BANK_INFO: may open the full details and the ID image. */
+  canRevealDetails: boolean;
+  /** APPROVE_ONBOARDING with MANAGE_COMPENSATION: may approve (with a compensation profile). */
+  canApprove: boolean;
+  /** APPROVE_ONBOARDING: may reject (with a reason). */
+  canReject: boolean;
+}
+
+/** `GET /work-locations/defaults` (MANAGE_SITES): what a new work location starts with. */
+export interface WorkLocationDefaults {
+  defaultGeofenceRadiusMeters: number;
+  minRadiusMeters: number;
+  maxRadiusMeters: number;
+}
+
+/**
+ * `POST /work-locations`: the site, its first geofence (and a new project)
+ * in one transaction -- nothing half-created. `newProject`
+ * instead of `projectId` is refused for a member restricted to some projects;
+ * its `budgetAgorot` needs VIEW_FINANCIALS.
+ */
+export interface CreateWorkLocationInput {
+  projectId?: string;
+  newProject?: { name: string; client?: string; budgetAgorot?: number };
+  name: string;
+  address?: string;
+  latitude: number;
+  longitude: number;
+  geofenceRadiusMeters: number;
+  instructions?: string;
+  emergencyContact?: string;
+}
+
+/** `PATCH /work-locations/:id`: only the fields sent change; a new center or radius makes a new geofence version (in the same transaction). */
+export interface UpdateWorkLocationInput {
+  name?: string;
+  address?: string | null;
+  latitude?: number;
+  longitude?: number;
+  geofenceRadiusMeters?: number;
+  instructions?: string | null;
+  emergencyContact?: string | null;
+  reason?: string;
+}
+
+/** A work location as the phone edits it: the site, its project and its current geofence. */
+export interface WorkLocation {
+  id: string;
+  projectId: string;
+  projectName: string;
+  name: string;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  instructions: string | null;
+  emergencyContact: string | null;
+  geofence: { id: string; centerLatitude: number; centerLongitude: number; radiusMeters: number; version: number } | null;
+}
+
+/** `GET /shifts/assignable-workers?start=&end=` (MANAGE_SHIFTS): the workers of the caller's projects, with their shifts overlapping that time. */
+export interface AssignableWorker {
+  workerProfileId: string;
+  fullLegalName: string;
+  conflicts: { shiftId: string; title: string; scheduledStart: string; scheduledEnd: string }[];
+}
+
+/** `POST /shifts` with workers: the shift and its assignments in one transaction (409 SHIFT_ASSIGNMENT_CONFLICT with `details.conflicts`, nothing created). */
+export interface CreateShiftWithWorkersInput {
+  siteId: string;
+  title: string;
+  shiftType: ShiftType;
+  scheduledStart: string;
+  scheduledEnd: string;
+  checkInMethod?: CheckInMethod;
+  graceMinutes?: number;
+  workerProfileIds: string[];
+}
+
+/** An attendance photo of an entry (`TimeEntryEvidence.photos`); opened through `GET /time-entries/:id/photos/:photoId/view-url`. */
+export interface EvidencePhoto {
+  id: string;
+  contentType: string;
+  uploadedAt: string;
+  /** CLOCK_IN or CLOCK_OUT: the event that used it (null if not known). */
+  eventType: ClockEventType | null;
 }

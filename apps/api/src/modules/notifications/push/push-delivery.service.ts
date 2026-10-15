@@ -61,7 +61,7 @@ export class PushDeliveryService {
    * job retries.
    */
   async deliver(notificationId: string): Promise<PushDeliveryStatus | null> {
-    const notification = await this.prisma.notification.findUnique({ where: { id: notificationId } });
+    const notification = await this.prisma.notification.findUnique({ where: { id: notificationId }, include: { subject: { select: { kind: true, refId: true } } } });
     if (!notification) return null;
     const existing = await this.prisma.notificationDelivery.findFirst({ where: { notificationId, channel: this.provider.channel } });
     if (existing && existing.status !== PushDeliveryStatus.FAILED) return existing.status as PushDeliveryStatus;

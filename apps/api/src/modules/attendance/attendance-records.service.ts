@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import {
+  FileAssetPurpose,
   AttendanceFlag,
   AttendanceListTab,
   CheckInMethod,
@@ -29,8 +30,11 @@ import type { ListAttendanceQueryDto } from "./dto/attendance-list.dto";
  * column added later never reaches these screens by accident.
  */
 
+/** The «pending» tab: entries waiting for a manager's decision or for the correction asked for (the manager home counts the same). */
+export const PENDING_TAB_STATUSES: TimeEntryStatus[] = [TimeEntryStatus.PENDING_APPROVAL, TimeEntryStatus.CORRECTION_REQUESTED];
+
 const TAB_STATUSES: Record<AttendanceListTab, TimeEntryStatus[] | null> = {
-  [AttendanceListTab.PENDING]: [TimeEntryStatus.PENDING_APPROVAL, TimeEntryStatus.CORRECTION_REQUESTED],
+  [AttendanceListTab.PENDING]: PENDING_TAB_STATUSES,
   [AttendanceListTab.APPROVED]: [TimeEntryStatus.APPROVED],
   [AttendanceListTab.REJECTED]: [TimeEntryStatus.REJECTED],
   [AttendanceListTab.ALL]: null,
@@ -333,7 +337,7 @@ export class AttendanceRecordsService {
     if (!entry) throw new AppException(404, ErrorCodes.NOT_FOUND, "Time entry not found.");
 
     const offlineEventIds = entry.clockEvents.filter((event) => event.origin === EventOrigin.OFFLINE).map((event) => event.id);
-    const [syncEvents, auditEvents, period] = await Promise.all([
+    const [syncEvents, auditEvents, period, photos] = await Promise.all([
       offlineEventIds.length > 0
         ? this.prisma.offlineSyncEvent.findMany({
             where: { resultClockEventId: { in: offlineEventIds } },
@@ -369,6 +373,12 @@ export class AttendanceRecordsService {
         where: { organizationId, yearMonth: entry.businessDate.slice(0, 7) },
         orderBy: { version: "desc" },
         select: { status: true },
+      }),
+      // Mobile manager mode: the entry's attendance photos (each opened through an audited, short-lived URL).
+      this.prisma.fileAsset.findMany({
+        where: { organizationId, timeEntryId: entry.id, purpose: FileAssetPurpose.ATTENDANCE_PHOTO },
+        select: { id: true, contentType: true, createdAt: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       }),
     ]);
 
@@ -421,6 +431,7 @@ export class AttendanceRecordsService {
       periodFinalized,
       /** The day-length rules of the entry's business date (no money): the correction preview uses them. */
       dayRules: dayRulesOf(rules),
+      photos: photos.map((photo) => ({ id: photo.id, contentType: photo.contentType, uploadedAt: photo.createdAt.toISOString(), eventType: null })),
       worker: {
         id: entry.worker.id,
         fullLegalName: entry.worker.membership.user.fullLegalName,

@@ -54,6 +54,8 @@ export const ENUM_NAMES = [
   "Permission",
   "PermissionGroup",
   "SystemRoleKey",
+  "NotificationSubjectKind",
+  "NotificationHandledOutcome",
 ] as const;
 
 export type EnumName = (typeof ENUM_NAMES)[number];

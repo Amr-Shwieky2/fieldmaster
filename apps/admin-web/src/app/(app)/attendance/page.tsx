@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { AttendanceListFilters, AttendanceListItem } from "@fieldmaster/api-client";
-import { AttendanceFlag, AttendanceListTab, DEFAULT_WORK_RULES, Permission, ShiftType, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { AttendanceFlag, AttendanceListTab, Permission, ShiftType, TimeEntryStatus } from "@fieldmaster/shared-types";
 import { isForbidden } from "@fieldmaster/i18n";
 import { useAuth } from "@/lib/auth-context";
 import { useAccess } from "@/lib/use-access";
@@ -386,8 +386,8 @@ function EntryCard({
   const { can } = useAccess();
   const name = entry.worker.fullLegalName;
   const awaiting = AWAITING.includes(entry.status);
-  // A day shorter than the standard day of the entry's own date may be credited as a full day (the API decides; the defaults when the list does not say).
-  const standardDayMinutes = (entry as AttendanceListItem & { dayRules?: { standardDayMinutes: number } }).dayRules?.standardDayMinutes ?? DEFAULT_WORK_RULES.standardDayMinutes;
+  // A day shorter than the standard day of the entry's own date (sent with the row) may be credited as a full day (the API decides).
+  const standardDayMinutes = entry.dayRules.standardDayMinutes;
   const allowed = {
     approve: can(Permission.APPROVE_ATTENDANCE),
     reject: can(Permission.APPROVE_ATTENDANCE),

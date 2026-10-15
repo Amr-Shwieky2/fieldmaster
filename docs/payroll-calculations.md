@@ -17,9 +17,10 @@ rounding step.
 
 The numbers below were fixed constants until the flexible organization
 model. They are now the organization's **work rules**
-(`packages/shared-types/src/work-rules.ts`), with these defaults:
+(`packages/shared-types/src/work-rules.ts`). Every organization's first
+version holds these starting values:
 
-| Rule | Key | Default |
+| Rule | Key | First version |
 |---|---|---|
 | Standard day | `standardDayMinutes` | 540 (9 h) |
 | Overtime threshold | `overtimeThresholdMinutes` | 540 |
@@ -35,10 +36,22 @@ How history is protected:
   with an effective date (Settings → قواعد العمل). A database trigger
   refuses any UPDATE or DELETE of a version. The effective date must be
   after today (`WORK_RULES_EFFECTIVE_DATE_PAST`), so a change never reaches
-  a day that already happened. The first change also stores the starting
-  values as version 1 (effective 2000-01-01, «القيم الأصلية»), so the
-  history is whole. An organization that never changed a rule has no rows
-  and uses the defaults.
+  a day that already happened.
+- **Always stored, never defaulted (mobile manager mode).** Every
+  organization has version 1 (effective 2000-01-01, «القيم الأصلية»): the
+  migration `20261015120100_mobile_manager_mode` stored it for the existing
+  organizations, and a new one gets it the first time its rules are read
+  (`WorkRulesService`). Every calculation function takes the rules as a
+  required argument (`calculateDailyCompensation`,
+  `calculateHourlyCompensation`, `calculateShiftCompensation`,
+  `computeEntryCompensation`, `splitWorkedMinutes`,
+  `computeEmergencyCompensation`, `calculatePayrollMonth`'s `rulesFor`, and
+  `PayrollCalculationService.computeEntryCompensation`); nothing falls back
+  to default values. `DEFAULT_WORK_RULES` only seeds version 1. The API
+  sends the rules of each entry's day (`dayRules`) with every attendance
+  item and evidence the screens preview, so no screen guesses them either.
+  A payroll snapshot stored before work rules existed (no `workRules` in
+  it) is read with `LEGACY_FIXED_WORK_RULES`, the values in force then.
 - **Each calculation uses the version in force on the date it is about**
   (`pickWorkRules`: the latest effective date on or before it):
   - an entry's standard day, threshold and split (approval, payroll,
@@ -63,15 +76,15 @@ How history is protected:
 - **Money stays money:** the penalty and its limits are only shown to, and
   only changeable by, a member with `VIEW_FINANCIALS`.
 
-The formulas below use the default numbers; read 540 as "the standard day
+The formulas below use the first version's numbers; read 540 as "the standard day
 (or overtime threshold) in force on the entry's business date", 60 / 15 as
 the emergency minutes in force, and so on.
 
 ## The nine-hour standard day
 
-`STANDARD_DAY_MINUTES = 540` (9 hours) is the default standard day
-(`DEFAULT_WORK_RULES` in `packages/shared-types`); each organization's
-versions can change it from a future date. Daily pay counts a full day from
+540 minutes (9 hours) is the standard day of every organization's first
+version (seeded from `DEFAULT_WORK_RULES` in `packages/shared-types`); each
+organization's versions can change it from a future date. Daily pay counts a full day from
 the standard day and overtime beyond the overtime threshold (equal by
 default); hourly pay counts regular minutes up to the threshold.
 
@@ -127,7 +140,11 @@ split for both the Owner and Field Manager notification bodies, but only
 the Owner's body appends an estimated cost line (computed via
 `calculateShiftCompensation` against the worker's currently-effective
 compensation profile). The Field Manager's message ends at "Approval is
-required."
+required." The split and the estimate use the rules in force on the entry's
+business date; the end of an emergency call-out is estimated the same way
+(the rules and the compensation profile of the call-out's business date).
+The alert for an entry still open (`OVERTIME_THRESHOLD_CROSSED`) fires
+after the standard day in force today.
 
 ## Emergency call-out compensation (Night Turan)
 

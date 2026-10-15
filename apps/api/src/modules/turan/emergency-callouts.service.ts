@@ -12,6 +12,7 @@ import {
   TimeEntryStatus,
   TuranStatus,
   TuranType,
+  NotificationSubjectKind,
 } from "@fieldmaster/shared-types";
 import { calculateShiftCompensation, computeEmergencyCompensation, toBusinessDate } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -364,7 +365,7 @@ export class EmergencyCalloutsService {
       });
 
       this.realtime.operationsChanged(organizationId, OperationsChangeKind.EMERGENCY);
-      await this.notifyEmergencyEnd(organizationId, actor.workerProfileId, compensation.compensatedDurationMinutes, {
+      await this.notifyEmergencyEnd(organizationId, actor.workerProfileId, compensation.compensatedDurationMinutes, timeEntry.businessDate, {
         timeEntryId: timeEntry.id,
         calloutId: timeEntry.emergencyCallout.id,
         endedAt: actualEndClick.toISOString(),
@@ -400,10 +401,12 @@ export class EmergencyCalloutsService {
     await this.notifications.notifyMany(recipients.map((recipient) => ({ organizationId, recipientUserId: recipient.userId, type, title, body, data: sharedData })));
   }
 
+  /** `businessDate`: the call-out entry's business date -- its compensation profile and work rules are those in force then. */
   private async notifyEmergencyEnd(
     organizationId: string,
     workerProfileId: string,
     compensatedDurationMinutes: number,
+    businessDate: string,
     refs: { timeEntryId: string; calloutId: string; endedAt: string },
   ) {
     const formatHm = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`;
@@ -420,19 +423,25 @@ export class EmergencyCalloutsService {
     let ownerBody = managerBody;
     let ownerData: NotificationData = managerData;
 
+    const day = new Date(`${businessDate}T00:00:00.000Z`);
     const activeCompensation = await this.prisma.compensationProfile.findFirst({
-      where: { workerProfileId, effectiveStartDate: { lte: new Date() }, OR: [{ effectiveEndDate: null }, { effectiveEndDate: { gte: new Date() } }] },
+      where: { workerProfileId, effectiveStartDate: { lte: day }, OR: [{ effectiveEndDate: null }, { effectiveEndDate: { gte: day } }] },
       orderBy: { effectiveStartDate: "desc" },
     });
     if (activeCompensation) {
-      const estimate = calculateShiftCompensation({
-        compensationType: activeCompensation.compensationType,
-        approvedMinutes: compensatedDurationMinutes,
-        fullDayCredit: false,
-        dailyBaseRateAgorot: activeCompensation.dailyBaseRateAgorot ?? undefined,
-        baseHourlyRateAgorot: activeCompensation.baseHourlyRateAgorot ?? undefined,
-        overtimeHourlyRateAgorot: activeCompensation.overtimeHourlyRateAgorot,
-      });
+      // Priced like payroll will price the entry: with the work rules in force on its business date.
+      const rules = await this.workRules.rulesOn(organizationId, businessDate);
+      const estimate = calculateShiftCompensation(
+        {
+          compensationType: activeCompensation.compensationType,
+          approvedMinutes: compensatedDurationMinutes,
+          fullDayCredit: false,
+          dailyBaseRateAgorot: activeCompensation.dailyBaseRateAgorot ?? undefined,
+          baseHourlyRateAgorot: activeCompensation.baseHourlyRateAgorot ?? undefined,
+          overtimeHourlyRateAgorot: activeCompensation.overtimeHourlyRateAgorot,
+        },
+        rules,
+      );
       ownerBody = `Emergency call-out ended. Compensated duration: ${formatHm(compensatedDurationMinutes)}. Estimated cost: ₪${(estimate.totalCompensationAgorot / 100).toFixed(2)}`;
       // Only for recipients who may see money: the same estimate as the cost line in ownerBody.
       ownerData = { ...managerData, estimatedCostAgorot: estimate.totalCompensationAgorot };
@@ -446,6 +455,7 @@ export class EmergencyCalloutsService {
         title: "Emergency call-out ended",
         body: recipient.financial ? ownerBody : managerBody,
         data: recipient.financial ? ownerData : withoutFinancialData(managerData),
+        subject: { kind: NotificationSubjectKind.ATTENDANCE, refId: refs.timeEntryId },
       })),
     );
   }

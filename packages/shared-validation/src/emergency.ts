@@ -1,4 +1,4 @@
-import { DEFAULT_WORK_RULES, type WorkRules } from "@fieldmaster/shared-types";
+import type { WorkRules } from "@fieldmaster/shared-types";
 
 /** The rules an emergency call-out needs: the minutes paid before the start click and after the end click. */
 export type EmergencyRules = Pick<WorkRules, "emergencyMinutesBefore" | "emergencyMinutesAfter">;
@@ -22,7 +22,7 @@ export interface EmergencyCompensationResult {
 export function computeEmergencyCompensation(
   actualStartClick: Date,
   actualEndClick: Date,
-  rules: EmergencyRules = DEFAULT_WORK_RULES,
+  rules: EmergencyRules,
 ): EmergencyCompensationResult {
   if (actualEndClick.getTime() <= actualStartClick.getTime()) {
     throw new Error("actualEndClick must be after actualStartClick");

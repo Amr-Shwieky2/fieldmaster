@@ -104,12 +104,21 @@ function turanRange(data: Data, ctx: Context): Record<string, string> | null {
   return { turanType: ctx.enumLabel("TuranType", values.type), start: ctx.fmt.dateTime(values.start), end: ctx.fmt.dateTime(values.end) };
 }
 
+/**
+ * A worker's offline records the server refused or flagged (OFFLINE_EVENT_REJECTED when any was refused,
+ * SUSPICIOUS_LOCATION_DETECTED when only flagged ones). The text says what happened to them: a refused
+ * record is final (it was not recorded), a flagged one was recorded and waits for a location review.
+ */
 const offlineReview =
   (type: string) =>
   (data: Data, ctx: Context): Built | null => {
-    const values = { flagged: wholeNumber(data, "flaggedCount"), rejected: wholeNumber(data, "rejectedCount") };
-    if (!allDefined(values)) return null;
-    return simple(type, { workerName: workerName(data, ctx), flagged: ctx.fmt.number(values.flagged), rejected: ctx.fmt.number(values.rejected) });
+    const counts = { flagged: wholeNumber(data, "flaggedCount"), rejected: wholeNumber(data, "rejectedCount") };
+    if (!allDefined(counts)) return null;
+    const values = { workerName: workerName(data, ctx), flagged: ctx.fmt.number(counts.flagged), rejected: ctx.fmt.number(counts.rejected) };
+    if (counts.rejected > 0 && counts.flagged > 0) return simple(type, values, "rejectedAndFlaggedBody");
+    if (counts.rejected > 0) return simple(type, values, "rejectedBody");
+    if (counts.flagged > 0) return simple(type, values, "flaggedBody");
+    return null;
   };
 
 type Builder = (data: Data, ctx: Context) => Built | null;
@@ -208,9 +217,20 @@ const BUILDERS: Record<string, Builder> = {
     if (!allDefined(values)) return null;
     return simple("TEMPORARY_SUPERVISOR_ISSUE_REPORTED", { workerName: workerName(data, ctx), shiftTitle: values.shiftTitle, issueText: isolateAuto(values.issueText) });
   },
+  // To the temporary supervisor (a worker) when a manager settles their report: who did, and the note they wrote.
+  TEMPORARY_SUPERVISOR_ISSUE_RESOLVED: (data, ctx) => {
+    const values = { shiftTitle: shiftTitle(data, ctx), note: text(data, "note") };
+    if (!allDefined(values)) return null;
+    const resolver = text(data, "resolverName");
+    return simple("TEMPORARY_SUPERVISOR_ISSUE_RESOLVED", {
+      shiftTitle: values.shiftTitle,
+      note: isolateAuto(values.note),
+      resolverName: resolver !== undefined ? isolateAuto(resolver) : ctx.t("someManager"),
+    });
+  },
 };
 
-/** Every notification type this module renders (each has `title`, `body` and `fallbackBody` messages). */
+/** Every notification type this module renders (each has `title` and `fallbackBody` messages, and its body messages). */
 export const RENDERED_NOTIFICATION_TYPES = Object.keys(BUILDERS);
 
 function asData(value: unknown): Data {
@@ -230,4 +250,25 @@ export function renderNotificationText(
   return builder !== undefined && t.has(typeKey(notification.type, "fallbackBody"))
     ? { title: t(typeKey(notification.type, "title")), body: t(typeKey(notification.type, "fallbackBody")), source: "fallback" }
     : { title: t("genericTitle"), body: t("genericBody"), source: "fallback" };
+}
+
+/**
+ * What an actionable notification (mobile manager mode) asks its reader to do, in Arabic
+ * (`notifications.actions.<KIND>`); null for a notification that is only for information. An entry
+ * open for too long says for how long (`openMinutes` in its data) when known.
+ */
+export function renderNotificationAction(
+  t: NotificationTranslator,
+  fmt: Formatter,
+  notification: { action?: NotificationItem["action"]; dataJson: NotificationItem["dataJson"] },
+): string | null {
+  const action = notification.action;
+  if (!action) return null;
+  if (action.kind === "OPEN_ENTRY") {
+    const minutes = wholeNumber(asData(notification.dataJson), "openMinutes");
+    return minutes !== undefined && minutes > 0 ? t("actions.OPEN_ENTRY", { duration: fmt.minutes(minutes) }) : t("actions.OPEN_ENTRY_NO_DURATION");
+  }
+  // A kind this version of the app does not know yet: still say that something is expected.
+  const key = `actions.${action.kind}`;
+  return t.has(key) ? t(key) : t("actions.generic");
 }

@@ -1,4 +1,4 @@
-import { DEFAULT_WORK_RULES, type WorkRules } from "@fieldmaster/shared-types";
+import type { WorkRules } from "@fieldmaster/shared-types";
 
 /** The rules the day split and the pay formulas need. */
 export type DayRules = Pick<WorkRules, "standardDayMinutes" | "overtimeThresholdMinutes">;
@@ -34,7 +34,7 @@ export interface WorkedMinutesSplit {
  * The approval endpoint stores exactly this split, and the admin web's
  * correction preview shows it before a correction is saved.
  */
-export function splitWorkedMinutes(input: WorkedMinutesInput, rules: DayRules = DEFAULT_WORK_RULES): WorkedMinutesSplit {
+export function splitWorkedMinutes(input: WorkedMinutesInput, rules: DayRules): WorkedMinutesSplit {
   const workedMinutes = Math.max(0, input.rawDurationMinutes - input.unpaidBreakMinutes);
   if (input.fullDayCredit && workedMinutes < rules.standardDayMinutes) {
     return { workedMinutes, regularMinutes: rules.standardDayMinutes, overtimeMinutes: 0, fullDayCreditApplied: true };

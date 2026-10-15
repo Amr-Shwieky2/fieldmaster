@@ -11,6 +11,7 @@ import {
   type PayrollCompensationProfile,
   type PayrollMonthEntry,
 } from "../payroll-month";
+import { RULES, RULES_FOR } from "./rules";
 
 // The Step 7 fixtures: daily 45,000 agorot, hourly 5,000, overtime 7,000.
 const DAILY: PayrollCompensationProfile = {
@@ -77,19 +78,19 @@ describe("computeEntryCompensation (Step 7 fixture numbers)", () => {
     ["6 h with full-day credit (approval lifts it to 540 regular)", 540, 0, true, 45_000, 0],
     ["10 h 30 m", 540, 90, false, 45_000, 10_500],
   ])("daily, %s", (_label, regular, overtime, fullDayCredit, base, overtimePay) => {
-    const pay = computeEntryCompensation({ approvedRegularMinutes: regular, approvedOvertimeMinutes: overtime, fullDayCredit }, DAILY);
+    const pay = computeEntryCompensation({ approvedRegularMinutes: regular, approvedOvertimeMinutes: overtime, fullDayCredit }, DAILY, RULES);
     expect(pay.baseAgorot).toBe(base);
     expect(pay.overtimeAgorot).toBe(overtimePay);
   });
 
   it("daily 6 h with the credit flag but only 360 approved minutes still pays the full day", () => {
-    const pay = computeEntryCompensation({ approvedRegularMinutes: 360, approvedOvertimeMinutes: 0, fullDayCredit: true }, DAILY);
+    const pay = computeEntryCompensation({ approvedRegularMinutes: 360, approvedOvertimeMinutes: 0, fullDayCredit: true }, DAILY, RULES);
     expect(pay).toMatchObject({ standardDayCredited: true, baseAgorot: 45_000, overtimeAgorot: 0 });
   });
 
   it("hourly 6 h, and a Night Turan emergency 02:00-03:00 paid as 135 compensated minutes", () => {
-    expect(computeEntryCompensation({ approvedRegularMinutes: 360, approvedOvertimeMinutes: 0, fullDayCredit: false }, HOURLY).baseAgorot).toBe(30_000);
-    const emergency = computeEntryCompensation({ approvedRegularMinutes: 135, approvedOvertimeMinutes: 0, fullDayCredit: false }, HOURLY);
+    expect(computeEntryCompensation({ approvedRegularMinutes: 360, approvedOvertimeMinutes: 0, fullDayCredit: false }, HOURLY, RULES).baseAgorot).toBe(30_000);
+    const emergency = computeEntryCompensation({ approvedRegularMinutes: 135, approvedOvertimeMinutes: 0, fullDayCredit: false }, HOURLY, RULES);
     expect(emergency).toMatchObject({ regularMinutes: 135, overtimeMinutes: 0, baseAgorot: 11_250, overtimeAgorot: 0 });
   });
 });
@@ -131,7 +132,7 @@ describe("calculateWorkerPayroll / calculatePayrollMonth", () => {
       { id: "a2", workerProfileId: "w-daily", type: PayrollAdjustmentType.MANUAL_BONUS, amountAgorot: 500 },
       { id: "a3", workerProfileId: "someone-else", type: PayrollAdjustmentType.MANUAL_BONUS, amountAgorot: 99_999 },
     ];
-    const { worker, entries: lines } = calculateWorkerPayroll("w-daily", entries, [DAILY], adjustments);
+    const { worker, entries: lines } = calculateWorkerPayroll("w-daily", entries, [DAILY], adjustments, RULES_FOR);
     expect(worker).toMatchObject({
       approvedShifts: 3,
       standardDaysCredited: 2,
@@ -155,7 +156,7 @@ describe("calculateWorkerPayroll / calculatePayrollMonth", () => {
       projectId: null,
       siteId: null,
     });
-    const { worker } = calculateWorkerPayroll("w-hourly", [emergency], [HOURLY], []);
+    const { worker } = calculateWorkerPayroll("w-hourly", [emergency], [HOURLY], [], RULES_FOR);
     expect(worker).toMatchObject({
       approvedShifts: 1,
       emergencyRetroactiveMinutes: 60,
@@ -166,7 +167,7 @@ describe("calculateWorkerPayroll / calculatePayrollMonth", () => {
   });
 
   it("does not pay an approved entry without a compensation profile and counts it for the warning", () => {
-    const { worker, entries: lines } = calculateWorkerPayroll("w-new", [entry("w-new", "2026-10-04", 540)], [DAILY], []);
+    const { worker, entries: lines } = calculateWorkerPayroll("w-new", [entry("w-new", "2026-10-04", 540)], [DAILY], [], RULES_FOR);
     expect(worker).toMatchObject({ approvedShifts: 0, entriesWithoutCompensation: 1, grossBaseAgorot: 0, netPayableAgorot: 0 });
     expect(lines[0]).toMatchObject({ compensationProfileId: null, compensationType: null, totalAgorot: 0 });
   });
@@ -174,7 +175,7 @@ describe("calculateWorkerPayroll / calculatePayrollMonth", () => {
   it("uses each shift date's rate when the rate changes mid-month", () => {
     const old: PayrollCompensationProfile = { ...DAILY, id: "old", effectiveEndDate: "2026-10-14" };
     const raised: PayrollCompensationProfile = { ...DAILY, id: "raised", dailyBaseRateAgorot: 50_000, effectiveStartDate: "2026-10-15" };
-    const { worker } = calculateWorkerPayroll("w-daily", [entry("w-daily", "2026-10-14", 540), entry("w-daily", "2026-10-15", 540)], [old, raised], []);
+    const { worker } = calculateWorkerPayroll("w-daily", [entry("w-daily", "2026-10-14", 540), entry("w-daily", "2026-10-15", 540)], [old, raised], [], RULES_FOR);
     expect(worker.grossBaseAgorot).toBe(95_000);
   });
 
@@ -183,6 +184,7 @@ describe("calculateWorkerPayroll / calculatePayrollMonth", () => {
       entries: [entry("w-daily", "2026-10-04", 540)],
       profiles: [DAILY],
       adjustments: [{ id: "a1", workerProfileId: "w-bonus-only", type: PayrollAdjustmentType.MANUAL_BONUS, amountAgorot: 1_000 }],
+      rulesFor: RULES_FOR,
     });
     expect(month.workers.map((worker) => [worker.workerProfileId, worker.netPayableAgorot])).toEqual([
       ["w-daily", 45_000],
@@ -202,8 +204,8 @@ describe("calculateWorkerPayroll / calculatePayrollMonth", () => {
       { id: "a1", workerProfileId: "w-hourly", type: PayrollAdjustmentType.MANUAL_BONUS, amountAgorot: 700 },
       { id: "a2", workerProfileId: "w-daily", type: PayrollAdjustmentType.FORGOTTEN_STAMP_PENALTY, amountAgorot: -1_000 },
     ];
-    const month = calculatePayrollMonth({ entries, profiles: [HOURLY, DAILY], adjustments });
-    const alone = ["w-daily", "w-hourly"].map((id) => calculateWorkerPayroll(id, entries, [HOURLY, DAILY], adjustments));
+    const month = calculatePayrollMonth({ entries, profiles: [HOURLY, DAILY], adjustments, rulesFor: RULES_FOR });
+    const alone = ["w-daily", "w-hourly"].map((id) => calculateWorkerPayroll(id, entries, [HOURLY, DAILY], adjustments, RULES_FOR));
     expect(month.workers).toEqual(alone.map((result) => result.worker));
     expect(month.entries).toEqual(alone.flatMap((result) => result.entries));
   });
@@ -217,7 +219,7 @@ describe("groupPayrollEntryCosts", () => {
       entry("w-hourly", "2026-10-05", 135, 0, { projectId: null, siteId: null, isEmergency: true }),
       entry("w-nobody", "2026-10-05", 540, 0, { projectId: "p2", siteId: "s3" }),
     ];
-    const { entries: results } = calculatePayrollMonth({ entries, profiles: [DAILY, HOURLY], adjustments: [] });
+    const { entries: results } = calculatePayrollMonth({ entries, profiles: [DAILY, HOURLY], adjustments: [], rulesFor: RULES_FOR });
     expect(groupPayrollEntryCosts(entries, results, "projectId")).toEqual([
       { id: "p1", approvedShifts: 2, workers: 2, regularMinutes: 900, overtimeMinutes: 0, grossBaseAgorot: 75_000, overtimeAgorot: 0, totalAgorot: 75_000 },
       { id: null, approvedShifts: 1, workers: 1, regularMinutes: 135, overtimeMinutes: 0, grossBaseAgorot: 11_250, overtimeAgorot: 0, totalAgorot: 11_250 },
