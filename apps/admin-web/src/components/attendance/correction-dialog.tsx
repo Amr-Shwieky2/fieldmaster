@@ -4,13 +4,14 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "rea
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import type { ManualCorrectionInput, Shift } from "@fieldmaster/api-client";
-import { CorrectionReason, DEFAULT_WORK_RULES, Permission, ShiftType, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { CorrectionReason, Permission, ShiftType, TimeEntryStatus, pickWorkRules, type WorkRules } from "@fieldmaster/shared-types";
 import {
   evaluateForgottenStampInfraction,
   forgottenStampInfractionMonth,
   rawDurationMinutes,
   splitWorkedMinutes,
   type DayRules,
+  toBusinessDate,
 } from "@fieldmaster/shared-validation";
 import { useAuth } from "@/lib/auth-context";
 import { useAccess } from "@/lib/use-access";
@@ -44,8 +45,8 @@ export interface CorrectionEntry {
   rawDurationMinutes: number | null;
   unpaidBreakMinutes: number;
   fullDayCredit: boolean;
-  /** The standard day and overtime threshold in force on the entry's business date (the evidence's `dayRules`); the defaults when absent. */
-  dayRules?: DayRules;
+  /** The standard day and overtime threshold in force on the entry's business date (the evidence's `dayRules`, always sent by the API). */
+  dayRules: DayRules;
 }
 
 const FORGOTTEN_STAMP_REASONS: CorrectionReason[] = [CorrectionReason.FORGOTTEN_CLOCK_IN, CorrectionReason.FORGOTTEN_CLOCK_OUT];
@@ -146,11 +147,11 @@ export function CorrectionDialog({ entry, onClose, onSaved }: { entry?: Correcti
   const minutes = Number(breakMinutes);
   const breakValid = breakMinutes.trim() !== "" && Number.isInteger(minutes) && minutes >= 0;
 
-  // The preview: the entry's minutes now and after the correction, split by the shared approval rule with the entry's own day rules.
+  // The preview: the entry's minutes now and after the correction, split by the shared approval rule with the day rules
+  // the API sends with the entry (those in force on its business date). A new entry has no preview.
   const preview = useMemo(() => {
-    const dayRules = entry?.dayRules ?? DEFAULT_WORK_RULES;
     const split = (raw: number | null, unpaid: number) =>
-      raw === null ? null : splitWorkedMinutes({ rawDurationMinutes: raw, unpaidBreakMinutes: unpaid, fullDayCredit: entry?.fullDayCredit ?? false }, dayRules);
+      raw === null || !entry ? null : splitWorkedMinutes({ rawDurationMinutes: raw, unpaidBreakMinutes: unpaid, fullDayCredit: entry.fullDayCredit }, entry.dayRules);
     const current = entry ? split(entry.rawDurationMinutes, entry.unpaidBreakMinutes) : null;
     let orderError: "clockOutBeforeClockIn" | "clockInAfterClockOut" | null = null;
     let next: ReturnType<typeof split> = null;
@@ -179,7 +180,17 @@ export function CorrectionDialog({ entry, onClose, onSaved }: { entry?: Correcti
     enabled: infractionMonth !== null && subjectWorkerId !== "",
   });
   const infractionNumber = infractionsQuery.data ? infractionsQuery.data.length + 1 : null;
-  const deductionAgorot = infractionNumber !== null ? evaluateForgottenStampInfraction(infractionNumber).deductionAgorot : 0;
+  // The deduction (money: only for a member who may see it) with the organization's rules in force on the infraction's day --
+  // the added clock-in's date, or today for a correction to an entry, as the API counts it. Unknown rules: no amount shown.
+  const seesDeduction = can(Permission.VIEW_FINANCIALS) && can(Permission.VIEW_ORG_SETTINGS);
+  const rulesQuery = useQuery({ queryKey: ["work-rules"], queryFn: () => client.getWorkRules(), enabled: isForgottenStamp && seesDeduction });
+  const infractionDay = isCreate ? (instant ? toBusinessDate(instant) : null) : toBusinessDate(new Date());
+  const stampRules =
+    rulesQuery.data && infractionDay ? (pickWorkRules(rulesQuery.data.versions as { effectiveFrom: string; version: number; rules: WorkRules }[], infractionDay) as Partial<WorkRules>) : null;
+  const deductionAgorot =
+    infractionNumber !== null && stampRules?.forgottenStampPenaltyAgorot !== undefined && stampRules.freeForgottenStampsPerMonth !== undefined
+      ? evaluateForgottenStampInfraction(infractionNumber, { freeForgottenStampsPerMonth: stampRules.freeForgottenStampsPerMonth, forgottenStampPenaltyAgorot: stampRules.forgottenStampPenaltyAgorot }).deductionAgorot
+      : 0;
 
   const problems: Partial<Record<Field, string>> = {};
   if (isCreate && !workerProfileId) problems.worker = t("errors.workerRequired");

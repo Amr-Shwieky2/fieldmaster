@@ -28,6 +28,8 @@ export const LIST_ITEM: AttendanceListItem = {
   isEmergency: false,
   devRewoundAt: null,
   checkInMethod: "GEOFENCED",
+  // What the API sends with every row: the day rules in force on its business date.
+  dayRules: { standardDayMinutes: 540, overtimeThresholdMinutes: 540 },
   worker: { id: "wp-1", fullLegalName: "خالد ناصر" },
   shift: { id: "s-1", title: "تنظيم حركة المرور صباحًا", shiftType: "STANDARD", project: { id: "p-1", name: "مشروع أيالون" }, site: { id: "site-1", name: "تقاطع الشمال" } },
   dailySummary: { text: "أغلقت المسرب ونظّمت حركة المرور.", taskCategory: "TRAFFIC_CONTROL" },
@@ -40,6 +42,7 @@ export function listPage(items: AttendanceListItem[], overrides: Partial<Attenda
 
 /** A pending 10 h 30 m entry with one refused clock-in (outside the geofence) and a corrected clock-in. */
 export const EVIDENCE: TimeEntryEvidence = {
+  dayRules: { standardDayMinutes: 540, overtimeThresholdMinutes: 540 },
   id: "te-1",
   status: "PENDING_APPROVAL",
   businessDate: "2026-10-04",

@@ -200,7 +200,10 @@
     "SCOPE_RESTRICTED": "هذا الإجراء يخص المؤسسة كلها، ولا يتاح لعضو مقيَّد بمشاريع محددة.",
     "WORK_RULES_INVALID": "قيم قواعد العمل غير صالحة. راجع الحدود المسموحة لكل قاعدة.",
     "WORK_RULES_EFFECTIVE_DATE_PAST": "يجب أن يبدأ سريان التغيير بعد اليوم. لا تُعدَّل الأيام الماضية.",
-    "CLOCK_IN_TOO_EARLY": "لم يحن وقت بدء الدوام لهذه الوردية بعد."
+    "CLOCK_IN_TOO_EARLY": "لم يحن وقت بدء الدوام لهذه الوردية بعد.",
+    "NO_WORKER_PROFILE": "لا يوجد ملف عامل لهذا الحساب، لذلك لا يوجد له راتب ولا دوام شخصي.",
+    "SHIFT_ASSIGNMENT_CONFLICT": "بعض العمال لديهم وردية متداخلة مع هذا الوقت. لم يُنشأ شيء.",
+    "NOTIFICATION_SUBJECT_NOT_HANDLED_HERE": "يُحسم هذا الأمر من شاشته الخاصة (اعتماد العامل أو رفضه)."
   },
   "enums": {
     "OrgRole": {
@@ -404,7 +407,8 @@
       "OFFLINE_EVENT_SYNCED": "تمت مزامنة حضور دون اتصال",
       "OFFLINE_EVENT_REJECTED": "تم رفض حضور مسجّل دون اتصال",
       "SUSPICIOUS_LOCATION_DETECTED": "تم رصد موقع مشبوه",
-      "TEMPORARY_SUPERVISOR_ISSUE_REPORTED": "بلاغ من مشرف مؤقت"
+      "TEMPORARY_SUPERVISOR_ISSUE_REPORTED": "بلاغ من مشرف مؤقت",
+      "TEMPORARY_SUPERVISOR_ISSUE_RESOLVED": "تم حل بلاغ المشرف المؤقت"
     },
     "OfflineSyncEventStatus": {
       "PENDING": "قيد الانتظار",
@@ -484,6 +488,23 @@
       "MANAGE_ORG_USERS": "إدارة المستخدمين والأجهزة",
       "MANAGE_ROLES": "إدارة الأدوار والصلاحيات",
       "VIEW_AUDIT_LOG": "رؤية سجل التدقيق"
+    },
+    "NotificationSubjectKind": {
+      "ATTENDANCE": "حضور للمراجعة",
+      "OFFLINE_REVIEW": "حضور دون اتصال",
+      "ONBOARDING": "طلب انضمام",
+      "SUPERVISOR_ISSUE": "بلاغ مشرف مؤقت"
+    },
+    "NotificationHandledOutcome": {
+      "APPROVED": "تم الاعتماد",
+      "REJECTED": "تم الرفض",
+      "FULL_DAY_CREDIT": "احتُسب يومًا كاملًا",
+      "CORRECTION_REQUESTED": "طُلب تصحيح",
+      "CORRECTED": "تم التصحيح",
+      "RESOLVED": "تم الحل",
+      "REVIEWED": "تمت المراجعة",
+      "WORKER_APPROVED": "تم اعتماد العامل",
+      "WORKER_REJECTED": "رُفض طلب الانضمام"
     }
   },
   "units": {
@@ -517,6 +538,7 @@
     "quickLoginDescription": "اضغط على أي مستخدم تجريبي لتسجيل الدخول باسمه مباشرة، بدون رسالة أو رمز.",
     "groupOwners": "المالكون",
     "groupFieldManagers": "مدراء الميدان",
+    "groupCustomRoles": "أدوار مخصّصة",
     "groupWorkers": "العمال",
     "groupCount": "({count})",
     "signInAs": "تسجيل الدخول باسم {name} ({role})",

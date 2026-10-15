@@ -24,6 +24,10 @@ const client = vi.hoisted(() => ({
   listForgottenStampInfractions: vi.fn(),
   listWorkers: vi.fn(),
   listShifts: vi.fn(),
+  // The organization's rule versions (since the rules are required: the deduction comes from them, never a default).
+  getWorkRules: vi.fn(async () => ({
+    versions: [{ id: "v1", version: 1, effectiveFrom: "2000-01-01", rules: { freeForgottenStampsPerMonth: 2, forgottenStampPenaltyAgorot: 1000 } }],
+  })),
 }));
 const auth = vi.hoisted(() => ({ role: "FIELD_MANAGER" as "OWNER" | "FIELD_MANAGER" }));
 vi.mock("@/lib/auth-context", () => ({ useAuth: () => ({ client, session: { role: auth.role } }) }));
@@ -40,6 +44,7 @@ const ENDED: CorrectionEntry = {
   rawDurationMinutes: 480,
   unpaidBreakMinutes: EVIDENCE.duration.unpaidBreakMinutes,
   fullDayCredit: EVIDENCE.fullDayCredit.applied,
+  dayRules: EVIDENCE.dayRules,
 };
 
 /** The same entry while the worker is still on shift (no clock-out yet). */
@@ -255,7 +260,7 @@ describe("CorrectionDialog", () => {
 
     setTime("2026-10-04T17:30"); // 14:30Z: 10 h 30 m after the 07:00 clock-in
     const raw = rawDurationMinutes(new Date("2026-10-04T04:00:00.000Z"), new Date("2026-10-04T14:30:00.000Z"));
-    const split = splitWorkedMinutes({ rawDurationMinutes: raw, unpaidBreakMinutes: 0, fullDayCredit: false });
+    const split = splitWorkedMinutes({ rawDurationMinutes: raw, unpaidBreakMinutes: 0, fullDayCredit: false }, ENDED.dayRules);
     expect(split).toMatchObject({ workedMinutes: 630, regularMinutes: 540, overtimeMinutes: 90 });
 
     const table = within(dialog).getByRole("table", { name: "معاينة قبل الحفظ" });

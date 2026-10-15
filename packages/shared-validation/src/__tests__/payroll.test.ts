@@ -1,4 +1,5 @@
 import { calculateDailyCompensation, calculateHourlyCompensation } from "../payroll";
+import { RULES } from "./rules";
 
 describe("calculateDailyCompensation", () => {
   const base = {
@@ -7,7 +8,7 @@ describe("calculateDailyCompensation", () => {
   };
 
   it("credits exactly one standard day at 9 approved hours with no overtime", () => {
-    const result = calculateDailyCompensation({ ...base, approvedMinutes: 540, fullDayCredit: false });
+    const result = calculateDailyCompensation({ ...base, approvedMinutes: 540, fullDayCredit: false }, RULES);
     expect(result.standardDaysCredited).toBe(1);
     expect(result.baseCompensationAgorot).toBe(40_000);
     expect(result.overtimeMinutes).toBe(0);
@@ -16,14 +17,14 @@ describe("calculateDailyCompensation", () => {
 
   it("prorates a short day with no full-day credit (6h of 9h)", () => {
     // 360 approved minutes of 540 => 40000 * 360/540 = 26666.67 -> 26667
-    const result = calculateDailyCompensation({ ...base, approvedMinutes: 360, fullDayCredit: false });
+    const result = calculateDailyCompensation({ ...base, approvedMinutes: 360, fullDayCredit: false }, RULES);
     expect(result.standardDaysCredited).toBe(0);
     expect(result.baseCompensationAgorot).toBe(26_667);
     expect(result.totalCompensationAgorot).toBe(26_667);
   });
 
   it("credits a full day when manual full-day credit is applied to a short day", () => {
-    const result = calculateDailyCompensation({ ...base, approvedMinutes: 360, fullDayCredit: true });
+    const result = calculateDailyCompensation({ ...base, approvedMinutes: 360, fullDayCredit: true }, RULES);
     expect(result.standardDaysCredited).toBe(1);
     expect(result.baseCompensationAgorot).toBe(40_000);
     expect(result.overtimeMinutes).toBe(0);
@@ -31,7 +32,7 @@ describe("calculateDailyCompensation", () => {
   });
 
   it("computes overtime for a shift of 10h30m (1h30m overtime)", () => {
-    const result = calculateDailyCompensation({ ...base, approvedMinutes: 630, fullDayCredit: false });
+    const result = calculateDailyCompensation({ ...base, approvedMinutes: 630, fullDayCredit: false }, RULES);
     expect(result.standardDaysCredited).toBe(1);
     expect(result.overtimeMinutes).toBe(90);
     // 90 min * 6000 agorot/hr / 60 = 9000
@@ -40,7 +41,7 @@ describe("calculateDailyCompensation", () => {
   });
 
   it("never credits more than one standard day for a single shift", () => {
-    const result = calculateDailyCompensation({ ...base, approvedMinutes: 1080, fullDayCredit: false });
+    const result = calculateDailyCompensation({ ...base, approvedMinutes: 1080, fullDayCredit: false }, RULES);
     expect(result.standardDaysCredited).toBe(1);
   });
 });
@@ -52,7 +53,7 @@ describe("calculateHourlyCompensation", () => {
   };
 
   it("pays base rate for a 6-hour day with no full-day credit", () => {
-    const result = calculateHourlyCompensation({ ...base, approvedMinutes: 360, fullDayCredit: false });
+    const result = calculateHourlyCompensation({ ...base, approvedMinutes: 360, fullDayCredit: false }, RULES);
     expect(result.regularMinutes).toBe(360);
     expect(result.overtimeMinutes).toBe(0);
     // 360/60 * 5000 = 30000
@@ -61,7 +62,7 @@ describe("calculateHourlyCompensation", () => {
   });
 
   it("credits 9 regular hours when full-day credit applied to a short day, no overtime", () => {
-    const result = calculateHourlyCompensation({ ...base, approvedMinutes: 300, fullDayCredit: true });
+    const result = calculateHourlyCompensation({ ...base, approvedMinutes: 300, fullDayCredit: true }, RULES);
     expect(result.regularMinutes).toBe(540);
     expect(result.overtimeMinutes).toBe(0);
     expect(result.regularCompensationAgorot).toBe(45_000); // 9 * 5000
@@ -69,7 +70,7 @@ describe("calculateHourlyCompensation", () => {
   });
 
   it("splits regular and overtime minutes at the 9-hour boundary", () => {
-    const result = calculateHourlyCompensation({ ...base, approvedMinutes: 630, fullDayCredit: false });
+    const result = calculateHourlyCompensation({ ...base, approvedMinutes: 630, fullDayCredit: false }, RULES);
     expect(result.regularMinutes).toBe(540);
     expect(result.overtimeMinutes).toBe(90);
     expect(result.regularCompensationAgorot).toBe(45_000);

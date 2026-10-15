@@ -918,6 +918,8 @@ describe("HomeScreen: the worker's home (Step 9)", () => {
   });
 
   it("opens the salary screen from the footer", async () => {
+    // A worker who clocks in (their session carries their worker profile): «راتبي» is theirs.
+    mockAuth.session = { role: "WORKER", workerProfileId: "worker-1" };
     await renderHome();
     const salary = await screen.findByRole("button", { name: ar.home.salary });
     expect(salary).toHaveStyle({ minHeight: 56 });

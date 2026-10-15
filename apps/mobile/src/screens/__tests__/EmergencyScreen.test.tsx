@@ -14,6 +14,12 @@ import { deferred, expectArabicOnly, fill, freezeDate, renderInArabic } from "./
 jest.mock("../../lib/auth-context", () => ({ useAuth: jest.fn() }));
 jest.mock("../../lib/offline-sync-context", () => ({ useOfflineSync: jest.fn() }));
 jest.mock("../../lib/device-id", () => ({ getDeviceId: jest.fn() }));
+// The minutes before and after come from the organization's rules in force (GET /auth/me): here its original values.
+jest.mock("../../lib/access-context", () => ({
+  useAccess: () => ({
+    workRules: { standardDayMinutes: 540, overtimeThresholdMinutes: 540, emergencyMinutesBefore: 60, emergencyMinutesAfter: 15, clockInEarlyWindowMinutes: 60 },
+  }),
+}));
 jest.mock("expo-location", () => ({
   ...jest.requireActual("expo-location"),
   requestForegroundPermissionsAsync: jest.fn(),

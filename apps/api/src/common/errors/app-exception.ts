@@ -106,4 +106,11 @@ export const ErrorCodes = {
   WORK_RULES_EFFECTIVE_DATE_PAST: "WORK_RULES_EFFECTIVE_DATE_PAST",
   /** Clock-in earlier than the work rules allow before the shift starts (details.opensAt). */
   CLOCK_IN_TOO_EARLY: "CLOCK_IN_TOO_EARLY",
+  // Mobile manager mode.
+  /** The caller has no worker profile with time tracking: no salary, no own attendance (404). */
+  NO_WORKER_PROFILE: "NO_WORKER_PROFILE",
+  /** Workers of a new shift already have an overlapping shift (409, `details.conflicts`); nothing was created. */
+  SHIFT_ASSIGNMENT_CONFLICT: "SHIFT_ASSIGNMENT_CONFLICT",
+  /** A subject settled only by its own decision (an application: approve or reject), not marked handled directly (409). */
+  NOTIFICATION_SUBJECT_NOT_HANDLED_HERE: "NOTIFICATION_SUBJECT_NOT_HANDLED_HERE",
 } as const;

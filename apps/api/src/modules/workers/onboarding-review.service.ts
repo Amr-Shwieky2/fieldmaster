@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { GovernmentIdType } from "@fieldmaster/shared-types";
+import { Permission, type GovernmentIdType } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { EncryptionService } from "../../common/encryption/encryption.service";
 import { AuditService } from "../../common/audit/audit.service";
@@ -7,6 +7,7 @@ import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import { UUID_PATTERN } from "../../common/validation/patterns";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { isGovernmentIdType } from "./government-id";
+import { hasPermission } from "../../common/auth/permissions";
 
 export interface UploadedFileSummary {
   fileAssetId: string;
@@ -55,6 +56,51 @@ export class OnboardingReviewService {
     private readonly encryption: EncryptionService,
     private readonly auditService: AuditService,
   ) {}
+
+  /**
+   * Mobile manager mode: an application without any decrypted value, for
+   * whoever decides applications (APPROVE_ONBOARDING). With bank access
+   * (VIEW_BANK_INFO) it adds the bank, branch and the account number's last
+   * four digits (the full numbers and the ID image only through the audited
+   * review and file view, on an explicit request); without it there is no
+   * bank key at all. Says what the reader may do here.
+   */
+  async getSummary(organizationId: string, workerProfileId: string, reader: AuthenticatedUser) {
+    const worker = UUID_PATTERN.test(workerProfileId)
+      ? await this.prisma.workerProfile.findFirst({
+          where: { id: workerProfileId, organizationId },
+          include: {
+            membership: { include: { user: true } },
+            bankAccount: true,
+            identityDocuments: { orderBy: { createdAt: "desc" }, take: 1, select: { documentType: true } },
+            profilePhotoAsset: { select: { id: true } },
+          },
+        })
+      : null;
+    if (!worker) throw new AppException(404, ErrorCodes.NOT_FOUND, "Worker not found.");
+
+    const canRevealDetails = hasPermission(reader, Permission.VIEW_BANK_INFO);
+    const masked = canRevealDetails && worker.bankAccount ? bankAccountFrom(await this.encryption.decrypt(worker.bankAccount)) : null;
+    const documentType = worker.identityDocuments[0]?.documentType ?? worker.governmentIdType;
+    const user = worker.membership.user;
+    return {
+      workerProfileId: worker.id,
+      membershipStatus: worker.membership.status,
+      fullLegalName: user.fullLegalName,
+      preferredName: user.preferredName,
+      phoneNumber: user.phoneNumber,
+      submittedAt: worker.membership.createdAt.toISOString(),
+      governmentIdType: isGovernmentIdType(documentType) ? documentType : null,
+      hasIdentityDocument: worker.identityDocuments.length > 0,
+      hasProfilePhoto: worker.profilePhotoAsset !== null,
+      ...(canRevealDetails
+        ? { bankAccount: masked ? { bankName: masked.bankName, branchNumber: masked.branchNumber, accountNumberLast4: masked.accountNumber.slice(-4) } : null }
+        : {}),
+      canRevealDetails,
+      canApprove: hasPermission(reader, Permission.APPROVE_ONBOARDING) && hasPermission(reader, Permission.MANAGE_COMPENSATION),
+      canReject: hasPermission(reader, Permission.APPROVE_ONBOARDING),
+    };
+  }
 
   async getReview(organizationId: string, workerProfileId: string, actor: AuthenticatedUser, correlationId: string): Promise<OnboardingReview> {
     const worker = UUID_PATTERN.test(workerProfileId)

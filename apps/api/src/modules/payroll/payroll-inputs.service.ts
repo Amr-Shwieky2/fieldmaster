@@ -205,8 +205,8 @@ export class PayrollInputsService {
       })),
       workers,
       pending: { entries: byWorker.reduce((sum, row) => sum + row.entries, 0), byWorker },
-      // The rule versions the entries are priced with (only when the organization has changed a rule: none = the defaults).
-      ...(workRuleVersions.length > 0 ? { workRules: workRuleVersions } : {}),
+      // The rule versions the entries are priced with (every organization has at least its first one).
+      workRules: workRuleVersions,
     };
     return { rows: approved, figures, profiles, workRuleVersions };
   }

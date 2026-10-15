@@ -92,6 +92,52 @@ describe("push content (Arabic, from the shared labels; ids only)", () => {
       type: NotificationType.WORKER_APPROVED,
     });
   });
+
+  it("mobile manager mode: a manager's push carries its subject (and a supervisor report's id), never the worker the subject is about", () => {
+    const SUBJECT_ID = "0192f0aa-0000-7000-8000-0000000000b1";
+    const ISSUE_ID = "0192f0aa-0000-7000-8000-0000000000b2";
+    const ASSIGNMENT_ID = "0192f0aa-0000-7000-8000-0000000000b3";
+    // An entry to review: the subject's id next to the entry's.
+    const review = buildPushContent({
+      id: NOTIFICATION_ID,
+      type: NotificationType.WORKER_CLOCKED_OUT,
+      dataJson: { timeEntryId: ENTRY_ID, shiftId: SHIFT_ID, workerProfileId: WORKER_PROFILE_ID, workerName: "Eli Worker" },
+      subjectId: SUBJECT_ID,
+      subject: { kind: "ATTENDANCE", refId: ENTRY_ID },
+    });
+    expect(review.data).toEqual({ notificationId: NOTIFICATION_ID, type: NotificationType.WORKER_CLOCKED_OUT, timeEntryId: ENTRY_ID, shiftId: SHIFT_ID, subjectId: SUBJECT_ID });
+    // A supervisor's report: its id comes from the subject (the report is what the screen resolves).
+    const report = buildPushContent({
+      id: NOTIFICATION_ID,
+      type: NotificationType.TEMPORARY_SUPERVISOR_ISSUE_REPORTED,
+      dataJson: { assignmentId: ASSIGNMENT_ID, shiftId: SHIFT_ID, text: "The arrow board battery is flat" },
+      subjectId: SUBJECT_ID,
+      subject: { kind: "SUPERVISOR_ISSUE", refId: ISSUE_ID },
+    });
+    expect(report.data).toEqual({
+      notificationId: NOTIFICATION_ID,
+      type: NotificationType.TEMPORARY_SUPERVISOR_ISSUE_REPORTED,
+      assignmentId: ASSIGNMENT_ID,
+      shiftId: SHIFT_ID,
+      subjectId: SUBJECT_ID,
+      issueId: ISSUE_ID,
+    });
+    expect(JSON.stringify(report)).not.toContain("battery");
+    // Offline records and applications are subjects about a worker: the push has the subject, not the worker's id.
+    for (const [type, kind] of [
+      [NotificationType.OFFLINE_EVENT_REJECTED, "OFFLINE_REVIEW"],
+      [NotificationType.ONBOARDING_SUBMITTED, "ONBOARDING"],
+    ] as const) {
+      const content = buildPushContent({ id: NOTIFICATION_ID, type, dataJson: { workerProfileId: WORKER_PROFILE_ID, workerName: "Lina" }, subjectId: SUBJECT_ID, subject: { kind, refId: WORKER_PROFILE_ID } });
+      expect(content.data).toEqual({ notificationId: NOTIFICATION_ID, type, subjectId: SUBJECT_ID });
+      expect(JSON.stringify(content)).not.toContain(WORKER_PROFILE_ID);
+    }
+    // A subject id that is not an id stays out.
+    expect(buildPushContent({ id: NOTIFICATION_ID, type: NotificationType.WORKER_CLOCKED_OUT, dataJson: null, subjectId: "nope", subject: { kind: "SUPERVISOR_ISSUE", refId: "nope" } }).data).toEqual({
+      notificationId: NOTIFICATION_ID,
+      type: NotificationType.WORKER_CLOCKED_OUT,
+    });
+  });
 });
 
 describe("Expo push provider", () => {

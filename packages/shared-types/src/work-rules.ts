@@ -28,8 +28,27 @@ export interface WorkRules {
 
 export type WorkRuleKey = keyof WorkRules;
 
-/** The values the system used before they became settings. An organization that never changes them keeps exactly these. */
+/**
+ * The values a new organization's first rule version starts with (every
+ * organization has stored versions; the first one is created from these).
+ * Use ONLY to seed that first version -- never as a fallback when pricing.
+ */
 export const DEFAULT_WORK_RULES: Readonly<WorkRules> = {
+  standardDayMinutes: 540,
+  overtimeThresholdMinutes: 540,
+  freeForgottenStampsPerMonth: 2,
+  forgottenStampPenaltyAgorot: 1000,
+  emergencyMinutesBefore: 60,
+  emergencyMinutesAfter: 15,
+  clockInEarlyWindowMinutes: 60,
+};
+
+/**
+ * The fixed rules every calculation used before the rules became settings.
+ * Only for reading a calculation stored then (its snapshot has no
+ * `workRules`); never for pricing anything new.
+ */
+export const LEGACY_FIXED_WORK_RULES: Readonly<WorkRules> = {
   standardDayMinutes: 540,
   overtimeThresholdMinutes: 540,
   freeForgottenStampsPerMonth: 2,
@@ -101,13 +120,18 @@ export interface WorkRuleVersion {
 /**
  * The version in force on a business date: the latest effective date on or
  * before it, the later created one when two share a date. Versions may come
- * in any order. With none, the defaults apply.
+ * in any order. Every organization has at least its first version (effective
+ * 2000-01-01): there is no fallback to default values here. A date before
+ * every version gets the first one.
  */
 export function pickWorkRules<V extends { effectiveFrom: string; version: number; rules: WorkRules }>(versions: readonly V[], businessDate: string): WorkRules {
+  if (versions.length === 0) throw new Error("No work-rule version: every organization has its first version.");
   let best: V | null = null;
+  let first: V = versions[0];
   for (const candidate of versions) {
+    if (candidate.effectiveFrom < first.effectiveFrom || (candidate.effectiveFrom === first.effectiveFrom && candidate.version < first.version)) first = candidate;
     if (candidate.effectiveFrom > businessDate) continue;
     if (!best || candidate.effectiveFrom > best.effectiveFrom || (candidate.effectiveFrom === best.effectiveFrom && candidate.version > best.version)) best = candidate;
   }
-  return best ? best.rules : { ...DEFAULT_WORK_RULES };
+  return (best ?? first).rules;
 }

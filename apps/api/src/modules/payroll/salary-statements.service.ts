@@ -90,7 +90,7 @@ export class SalaryStatementsService {
 
   async myStatements(organizationId: string, actor: AuthenticatedUser) {
     const workerProfileId = actor.workerProfileId;
-    if (!workerProfileId) throw new AppException(404, ErrorCodes.NOT_FOUND, "No salary statements for this account.");
+    if (!workerProfileId) throw noWorkerProfile();
 
     const finalizedVersions = await this.latestFinalizedVersions(organizationId);
     const items = await this.prisma.payrollItem.findMany({
@@ -129,7 +129,7 @@ export class SalaryStatementsService {
    */
   async myCurrentEstimate(organizationId: string, actor: AuthenticatedUser) {
     const workerProfileId = actor.workerProfileId;
-    if (!workerProfileId) throw new AppException(404, ErrorCodes.NOT_FOUND, "No salary statements for this account.");
+    if (!workerProfileId) throw noWorkerProfile();
 
     const now = new Date();
     const yearMonth = toBusinessYearMonth(now);
@@ -263,7 +263,7 @@ export class SalaryStatementsService {
    */
   async myPayslip(organizationId: string, yearMonth: string, actor: AuthenticatedUser) {
     const workerProfileId = actor.workerProfileId;
-    if (!workerProfileId) throw new AppException(404, ErrorCodes.NOT_FOUND, "No payslip available for this account.");
+    if (!workerProfileId) throw noWorkerProfile();
     const version = await this.prisma.payrollPeriod.findFirst({
       where: { organizationId, yearMonth, status: PayrollPeriodStatus.FINALIZED },
       orderBy: { version: "desc" },
@@ -282,4 +282,13 @@ export class SalaryStatementsService {
         : item.adjustments;
     return { periodStatus: version.status, version: version.version, ...item, adjustments };
   }
+}
+
+/**
+ * A member without a worker profile with time tracking (an Owner, a manager
+ * who does not clock in, a custom role) has no salary of their own: a clear
+ * code rather than a generic "not found" (mobile manager mode).
+ */
+function noWorkerProfile(): AppException {
+  return new AppException(404, ErrorCodes.NO_WORKER_PROFILE, "This account has no worker profile, so it has no salary.");
 }

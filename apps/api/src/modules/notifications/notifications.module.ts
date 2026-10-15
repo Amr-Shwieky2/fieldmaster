@@ -8,12 +8,15 @@ import { RealtimeEventsService } from "./realtime-events";
 import { PushDeliveryService } from "./push/push-delivery.service";
 import { PushDeliveryProcessor } from "./push/push-delivery.processor";
 import { ExpoPushProvider, LogPushProvider, PUSH_PROVIDER, resolvePushProviderKind, type PushProvider } from "./push/push-provider";
+import { NotificationSubjectsService } from "./notification-subjects.service";
+import { NotificationSubjectsController } from "./notification-subjects.controller";
 
 @Global()
 @Module({
-  controllers: [NotificationsController],
+  controllers: [NotificationsController, NotificationSubjectsController],
   providers: [
     NotificationsService,
+    NotificationSubjectsService,
     NotificationsGateway,
     NotificationAudienceService,
     RealtimeAuthService,
@@ -30,6 +33,6 @@ import { ExpoPushProvider, LogPushProvider, PUSH_PROVIDER, resolvePushProviderKi
       },
     },
   ],
-  exports: [NotificationsService, NotificationAudienceService, RealtimeAuthService, RealtimeEventsService, PushDeliveryService, PUSH_PROVIDER],
+  exports: [NotificationsService, NotificationSubjectsService, NotificationAudienceService, RealtimeAuthService, RealtimeEventsService, PushDeliveryService, PUSH_PROVIDER],
 })
 export class NotificationsModule {}

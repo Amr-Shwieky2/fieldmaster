@@ -24,6 +24,7 @@ const client = vi.hoisted(() => ({
   listForgottenStampInfractions: vi.fn(),
   listWorkers: vi.fn(),
   listShifts: vi.fn(),
+  getWorkRules: vi.fn(),
 }));
 const auth = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock("@/lib/auth-context", () => ({ useAuth: () => auth.value }));
@@ -39,6 +40,8 @@ const ENDED: CorrectionEntry = {
   rawDurationMinutes: 480,
   unpaidBreakMinutes: 0,
   fullDayCredit: false,
+  // What the API sends for an organization that never changed a rule (its first version).
+  dayRules: { standardDayMinutes: 540, overtimeThresholdMinutes: 540 },
 };
 
 /** A custom role that corrects attendance but may not see money. */
@@ -65,6 +68,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   auth.value = authWithAccess(CORRECTOR, client);
   client.listForgottenStampInfractions.mockResolvedValue([]);
+  client.getWorkRules.mockResolvedValue({
+    versions: [{ id: "v1", version: 1, effectiveFrom: "2000-01-01", rules: { freeForgottenStampsPerMonth: 2, forgottenStampPenaltyAgorot: 1000 } }],
+  });
 });
 
 describe("CorrectionDialog: the entry's own day rules", () => {
@@ -80,7 +86,7 @@ describe("CorrectionDialog: the entry's own day rules", () => {
     ]);
   });
 
-  it("falls back to the default rules (540 minutes) when the evidence has none", () => {
+  it("an organization that never changed a rule: the 540-minute day the API sends with the entry", () => {
     const dialog = renderDialog(ENDED);
     correctClockOut("2026-10-04T17:30");
 
@@ -101,13 +107,45 @@ describe("CorrectionDialog: the entry's own day rules", () => {
     expect(document.body.textContent).not.toContain("سيُخصم");
   });
 
-  it("shows it to a custom role that may see money", async () => {
-    auth.value = authWithAccess(myAccess({ roleName: "محاسب", permissions: [Permission.VIEW_ATTENDANCE, Permission.CORRECT_TIME_ENTRIES, Permission.VIEW_FINANCIALS] }), client);
+  it("shows it to a custom role that may see money, from the organization's rules in force that day", async () => {
+    auth.value = authWithAccess(
+      myAccess({ roleName: "محاسب", permissions: [Permission.VIEW_ATTENDANCE, Permission.CORRECT_TIME_ENTRIES, Permission.VIEW_FINANCIALS, Permission.VIEW_ORG_SETTINGS] }),
+      client,
+    );
     client.listForgottenStampInfractions.mockResolvedValue(infractions(true).slice(0, 2));
     renderDialog(ENDED);
     fireEvent.change(screen.getByRole("combobox", { name: "السبب" }), { target: { value: "FORGOTTEN_CLOCK_OUT" } });
 
     expect(await screen.findByText("هذه المخالفة رقم 3 لهذا الشهر")).toBeTruthy();
     expect(screen.getByText("₪ 10.00").closest("p")?.textContent).toBe("سيُخصم ₪ 10.00");
+  });
+
+  it("uses the penalty of the version in force, not a default (a 25.00 penalty from a later version)", async () => {
+    auth.value = authWithAccess(
+      myAccess({ roleName: "محاسب", permissions: [Permission.VIEW_ATTENDANCE, Permission.CORRECT_TIME_ENTRIES, Permission.VIEW_FINANCIALS, Permission.VIEW_ORG_SETTINGS] }),
+      client,
+    );
+    client.getWorkRules.mockResolvedValue({
+      versions: [
+        { id: "v1", version: 1, effectiveFrom: "2000-01-01", rules: { freeForgottenStampsPerMonth: 2, forgottenStampPenaltyAgorot: 1000 } },
+        { id: "v2", version: 2, effectiveFrom: "2001-01-01", rules: { freeForgottenStampsPerMonth: 2, forgottenStampPenaltyAgorot: 2500 } },
+      ],
+    });
+    client.listForgottenStampInfractions.mockResolvedValue(infractions(true).slice(0, 2));
+    renderDialog(ENDED);
+    fireEvent.change(screen.getByRole("combobox", { name: "السبب" }), { target: { value: "FORGOTTEN_CLOCK_OUT" } });
+
+    expect(await screen.findByText("₪ 25.00")).toBeTruthy();
+  });
+
+  it("a member who may see money but not read the rules sees the count, and no guessed amount", async () => {
+    auth.value = authWithAccess(myAccess({ roleName: "محاسب", permissions: [Permission.VIEW_ATTENDANCE, Permission.CORRECT_TIME_ENTRIES, Permission.VIEW_FINANCIALS] }), client);
+    client.listForgottenStampInfractions.mockResolvedValue(infractions(true).slice(0, 2));
+    renderDialog(ENDED);
+    fireEvent.change(screen.getByRole("combobox", { name: "السبب" }), { target: { value: "FORGOTTEN_CLOCK_OUT" } });
+
+    expect(await screen.findByText("هذه المخالفة رقم 3 لهذا الشهر")).toBeTruthy();
+    expect(client.getWorkRules).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("₪");
   });
 });

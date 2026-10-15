@@ -10,6 +10,7 @@ import {
   OrgRole,
   PRIVACY_NOTICE_VERSION,
   UPLOAD_CONTENT_TYPES,
+  NotificationSubjectKind,
 } from "@fieldmaster/shared-types";
 import { isValidGovernmentIdNumber } from "@fieldmaster/shared-validation";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -411,6 +412,7 @@ export class OnboardingService {
           title: "New worker application",
           body: `${workerName} submitted an onboarding application awaiting your review.`,
           data: { workerProfileId, workerName },
+          subject: { kind: NotificationSubjectKind.ONBOARDING, refId: workerProfileId },
         })),
       );
     } catch {

@@ -227,6 +227,15 @@ describe("LoginScreen (Arabic, RTL)", () => {
       expectArabicOnly(DEV_USERS.map((u) => u.phoneNumber));
     });
 
+    it("lists members of custom roles in their own group (mobile manager mode)", async () => {
+      const accountant = devUser({ membershipId: "m-accountant", fullLegalName: "سمر الحداد", phoneNumber: "+972501000005", role: OrgRole.CUSTOM });
+      mockClient.listDevLoginUsers.mockResolvedValue([...DEV_USERS, accountant]);
+      await renderLogin();
+
+      expect(screen.getByText(`${ar.devLogin.groupCustomRoles} ${fill(ar.devLogin.groupCount, { count: "1" })}`)).toBeOnTheScreen();
+      expect(screen.getByRole("button", { name: signInAs(accountant) })).toBeEnabled();
+    });
+
     it("shows the organization name on each row when the seeded users belong to several organizations", async () => {
       const other = devUser({ ...worker2, organizationId: "org-2", organizationName: "شركة الطرق" });
       mockClient.listDevLoginUsers.mockResolvedValue([owner, other]);

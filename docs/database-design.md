@@ -7,7 +7,7 @@ live dev database, then applied with `prisma migrate deploy` — this
 environment's non-interactive shell doesn't support `prisma migrate dev`;
 see `troubleshooting.md`).
 
-## Tables (46)
+## Tables (48)
 
 Organizations & RBAC: `organizations`, `organization_settings`, `users`,
 `organization_memberships`, `roles`, `member_scopes`, `work_rule_versions`
@@ -188,7 +188,28 @@ Additive only:
   (project_id)`, `shifts (site_id)`, `sites (project_id)`,
   `forgotten_stamp_infractions (organization_id, business_month)`.
 
-Notifications: `notifications`, `notification_deliveries`.
+### Mobile manager mode (migrations `20261015120000_notification_issue_resolved`, `20261015120100_mobile_manager_mode`)
+
+- `NotificationType` gains `TEMPORARY_SUPERVISOR_ISSUE_RESOLVED` (its own
+  migration, as for any new enum value).
+- `notification_subjects`: what notifications are about, one row per
+  organization, kind (`ATTENDANCE` an entry, `OFFLINE_REVIEW` a worker's
+  offline records, `ONBOARDING` an application, `SUPERVISOR_ISSUE` a
+  report) and `ref_id` (unique together: the grouping key), with the shared
+  handled state: `handled_at`, `handled_by`, `handled_outcome`,
+  `handled_note`. A new notification about a settled subject clears it.
+- `notifications.subject_id` (→ `notification_subjects`, set null on
+  delete; indexed).
+- `supervisor_issue_reports`: a temporary supervisor's report (assignment,
+  shift, reporter, text, created at), so a manager can resolve it; indexed
+  by organization and date, assignment and shift.
+- `work_rule_versions`: every existing organization without a version gets
+  version 1 (effective 2000-01-01, the starting values, «القيم الأصلية»);
+  from here on nothing is priced with default values.
+
+Notifications: `notifications`, `notification_deliveries`,
+`notification_subjects` (mobile manager mode); supervisor reports:
+`supervisor_issue_reports`.
 
 Platform: `audit_logs`, `idempotency_records`, `generated_reports`.
 

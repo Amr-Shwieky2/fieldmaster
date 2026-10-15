@@ -190,6 +190,15 @@ describe("renderNotificationText", () => {
       expect(visible(render("ONBOARDING_SUBMITTED", { workerProfileId: "wp-9", workerName: "Ido Cone" }).body)).toBe("قدّم Ido Cone طلب انضمام، وهو بانتظار مراجعتك.");
       expect(render("WORKER_APPROVED", { workerProfileId: "wp-9" }).source).toBe("data");
     });
+
+    it("a supervisor's report resolved: who resolved it and their note, or a generic manager", () => {
+      const data = { issueId: "iss-1", shiftTitle: "Ayalon North", resolverName: "Yossi Manager", note: "Swapped the battery" };
+      expect(visible(render("TEMPORARY_SUPERVISOR_ISSUE_RESOLVED", data).body)).toBe("تم حل بلاغك عن وردية «Ayalon North» بواسطة Yossi Manager. الملاحظة: Swapped the battery");
+      expect(visible(render("TEMPORARY_SUPERVISOR_ISSUE_RESOLVED", { ...data, resolverName: null }).body)).toBe(
+        "تم حل بلاغك عن وردية «Ayalon North» بواسطة أحد المديرين. الملاحظة: Swapped the battery",
+      );
+      expect(render("TEMPORARY_SUPERVISOR_ISSUE_RESOLVED", { issueId: "iss-1" }).source).toBe("fallback");
+    });
   });
 
 describe("emergency call-out shift titles", () => {

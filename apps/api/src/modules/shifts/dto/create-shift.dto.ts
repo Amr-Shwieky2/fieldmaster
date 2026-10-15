@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Min } from "class-validator";
+import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Min, IsArray, ArrayMaxSize, Matches } from "class-validator";
 import { CheckInMethod, ShiftType } from "@fieldmaster/shared-types";
+import { UUID_PATTERN } from "../../../common/validation/patterns";
 
 export class CreateShiftDto {
   @ApiPropertyOptional()
@@ -54,4 +55,14 @@ export class CreateShiftDto {
   @IsOptional()
   @IsString()
   managerId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: "Mobile manager mode: the workers, assigned in the same transaction (409 SHIFT_ASSIGNMENT_CONFLICT when one already has an overlapping shift: nothing is created).",
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @Matches(UUID_PATTERN, { each: true })
+  workerProfileIds?: string[];
 }

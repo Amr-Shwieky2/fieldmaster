@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { pickWorkRules, type WorkRuleVersion, type WorkRules } from "@fieldmaster/shared-types";
+import { LEGACY_FIXED_WORK_RULES, pickWorkRules, type WorkRuleVersion, type WorkRules } from "@fieldmaster/shared-types";
 import {
   groupPayrollEntryCosts,
   sumPayrollWorkers,
@@ -81,9 +81,14 @@ export interface PayrollSnapshotInputs extends PayrollFigureInputs {
   entries: SnapshotEntryInput[];
 }
 
-/** The work rules of each business date of a stored calculation (or a live month). */
+/**
+ * The work rules of each business date of a stored calculation (or a live
+ * month): its versions, or -- for a calculation stored before the rules were
+ * settings, which has none -- the fixed rules of that time.
+ */
 export function snapshotRulesFor(inputs: Pick<PayrollFigureInputs, "workRules">): (businessDate: string) => WorkRules {
   const versions = inputs.workRules ?? [];
+  if (versions.length === 0) return () => ({ ...LEGACY_FIXED_WORK_RULES });
   return (businessDate) => pickWorkRules(versions, businessDate);
 }
 

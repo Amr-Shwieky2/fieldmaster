@@ -52,6 +52,7 @@ const SHORT_SHIFT: AttendanceListItem = {
   isEmergency: false,
   devRewoundAt: null,
   checkInMethod: "GEOFENCED",
+  dayRules: { standardDayMinutes: 540, overtimeThresholdMinutes: 540 },
   worker: { id: "wp-1", fullLegalName: "Eli Ramzani" },
   shift: { id: "s-1", title: "Ayalon road works", shiftType: "STANDARD", project: null, site: null },
   dailySummary: { text: "Installed 12 traffic signs", taskCategory: "TRAFFIC_SIGN" },

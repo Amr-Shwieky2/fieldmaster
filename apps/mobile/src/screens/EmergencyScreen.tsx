@@ -4,7 +4,7 @@ import { Linking, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTranslations } from "use-intl";
 import type { EmergencyCalloutEndResult, EmergencyEligibility } from "@fieldmaster/api-client";
-import { EMERGENCY_RETROACTIVE_MINUTES, EMERGENCY_RETURN_BUFFER_MINUTES, TaskCategory } from "@fieldmaster/shared-types";
+import { TaskCategory } from "@fieldmaster/shared-types";
 import { getErrorCode, isNetworkError } from "@fieldmaster/i18n";
 import { AppText } from "../components/AppText";
 import { AppTextInput } from "../components/AppTextInput";
@@ -16,6 +16,7 @@ import { ScreenHeader } from "../components/ScreenHeader";
 import { ErrorView, LoadingView } from "../components/StateViews";
 import { TaskCategoryPicker } from "../components/TaskCategoryPicker";
 import { useCodeMessage, useErrorMessage, useFormat } from "../i18n/hooks";
+import { useAccess } from "../lib/access-context";
 import { useAuth } from "../lib/auth-context";
 import { getDeviceId } from "../lib/device-id";
 import { formatElapsed, useNow } from "../lib/elapsed";
@@ -29,13 +30,21 @@ type Props = NativeStackScreenProps<RootStackParamList, "Emergency">;
 type Step = "idle" | "locating" | "starting" | "ending";
 type Failure = LocationFailure | { kind: "summary" } | { kind: "request"; cause: unknown };
 
-/** A running call-out: the two start times the server recorded. */
+/** A running call-out: the two start times the server recorded, and the minutes between them. */
 interface Running {
   actualStartClick: string;
   compensatedStart: string;
+  /** The minutes the server paid before the press (null when its times cannot tell). */
+  retroactiveMinutes: number | null;
 }
 
 type Ended = EmergencyCalloutEndResult & Running;
+
+/** The minutes between the press and the compensated start, both recorded by the server. */
+function minutesBefore(actualStartClick: string, compensatedStart: string): number | null {
+  const minutes = Math.round((Date.parse(actualStartClick) - Date.parse(compensatedStart)) / 60_000);
+  return Number.isFinite(minutes) && minutes >= 0 ? minutes : null;
+}
 
 /** The location fields the emergency start / end endpoints take (nothing else: the API refuses unknown fields). */
 function emergencyLocation(reading: LocationReading) {
@@ -64,9 +73,13 @@ function Line({ label, value, badge, testID }: { label: string; value: string; b
 
 /**
  * The Night Turan emergency call-out. Whether it can start, and every time
- * and duration, come from the API: it starts paying 60 minutes before the
- * press and adds 15 minutes for the way back after the end, and the screen
- * says so in plain Arabic before each step. Ending needs a summary.
+ * and duration, come from the API. The minutes paid before the press and
+ * added for the way back after the end are the organization's work rules in
+ * force now (`useAccess().workRules`, from GET /auth/me), and the screen says
+ * so in plain Arabic before each step; until those rules are known the
+ * explanation is given without a number (never an assumed one). A running
+ * call-out shows the minutes the server actually applied to it. Ending needs
+ * a summary.
  */
 export function EmergencyScreen({ navigation }: Props) {
   const t = useTranslations("emergency");
@@ -76,6 +89,7 @@ export function EmergencyScreen({ navigation }: Props) {
   const errorMessage = useErrorMessage();
   const codeMessage = useCodeMessage();
   const { client } = useAuth();
+  const { workRules } = useAccess();
   const { isOnline } = useOfflineSync();
 
   const [eligibility, setEligibility] = useState<EmergencyEligibility | null>(null);
@@ -96,7 +110,12 @@ export function EmergencyScreen({ navigation }: Props) {
     try {
       const result = await client.getEmergencyEligibility();
       setEligibility(result);
-      setRunning(result.activeCallout ? { actualStartClick: result.activeCallout.actualStartClick, compensatedStart: result.activeCallout.compensatedStart } : null);
+      const active = result.activeCallout;
+      setRunning(
+        active
+          ? { actualStartClick: active.actualStartClick, compensatedStart: active.compensatedStart, retroactiveMinutes: minutesBefore(active.actualStartClick, active.compensatedStart) }
+          : null,
+      );
     } catch (cause) {
       setLoadError(cause ?? new Error());
     }
@@ -142,7 +161,11 @@ export function EmergencyScreen({ navigation }: Props) {
         },
         key,
       );
-      setRunning({ actualStartClick: result.actualStartClick, compensatedStart: result.compensatedStart });
+      setRunning({
+        actualStartClick: result.actualStartClick,
+        compensatedStart: result.compensatedStart,
+        retroactiveMinutes: Number.isFinite(result.retroactiveMinutes) ? result.retroactiveMinutes : minutesBefore(result.actualStartClick, result.compensatedStart),
+      });
       setConfirming(false);
     });
   }
@@ -166,7 +189,8 @@ export function EmergencyScreen({ navigation }: Props) {
         },
         key,
       );
-      setEnded({ ...result, ...running });
+      // The end answer's own minutes win over the running call-out's (the server's final word).
+      setEnded({ ...running, ...result });
     });
   }
 
@@ -200,11 +224,20 @@ export function EmergencyScreen({ navigation }: Props) {
     </>
   );
   const busyLabel = step === "starting" ? t("starting") : step === "ending" ? t("ending") : t("locating");
-  // "+60" / "+15" keep their sign on the left inside the Arabic text (a left-to-right isolate, like phone numbers).
-  const retroBadgeFor = (minutes: number) => <Badge label={t("retroBadge", { amount: isolateLtr(`+${minutes}`) })} color={colors.warning} />;
-  const returnBadgeFor = (minutes: number) => <Badge label={t("returnBadge", { amount: isolateLtr(`+${minutes}`) })} color={colors.warning} />;
-  const retroBadge = retroBadgeFor(EMERGENCY_RETROACTIVE_MINUTES);
-  const returnBadge = returnBadgeFor(EMERGENCY_RETURN_BUFFER_MINUTES);
+  // "+45" / "+20" keep their sign on the left inside the Arabic text (a left-to-right isolate, like phone numbers).
+  // No badge without a number of minutes (not known yet, or none).
+  const retroBadgeFor = (minutes: number | null) =>
+    minutes !== null && minutes > 0 ? <Badge label={t("retroBadge", { amount: isolateLtr(`+${format.number(minutes)}`) })} color={colors.warning} /> : null;
+  const returnBadgeFor = (minutes: number | null) =>
+    minutes !== null && minutes > 0 ? <Badge label={t("returnBadge", { amount: isolateLtr(`+${format.number(minutes)}`) })} color={colors.warning} /> : null;
+  // The rules in force now (GET /auth/me); null until known: then the explanation has no number.
+  const minutesBeforeStart = workRules?.emergencyMinutesBefore ?? null;
+  const minutesAfterEnd = workRules?.emergencyMinutesAfter ?? null;
+  const retroBadge = retroBadgeFor(minutesBeforeStart);
+  const returnBadge = returnBadgeFor(minutesAfterEnd);
+  const startExplanation =
+    minutesBeforeStart === null ? t("confirmBodyUnknown") : minutesBeforeStart === 0 ? t("confirmBodyFromPress") : t("confirmBody", { minutes: format.number(minutesBeforeStart) });
+  const endExplanation = minutesAfterEnd === null ? t("endBodyUnknown") : minutesAfterEnd === 0 ? t("endBodyNoReturn") : t("endBody", { minutes: format.number(minutesAfterEnd) });
 
   // ── Ended: the breakdown from the server's answer ─────────────────────────
   if (ended) {
@@ -275,7 +308,7 @@ export function EmergencyScreen({ navigation }: Props) {
             <AppText>{t("startedAt", { time: format.dateTime(running.actualStartClick) })}</AppText>
             <View style={styles.badgeRow}>
               <AppText>{t("compensatedFrom", { time: format.dateTime(running.compensatedStart) })}</AppText>
-              {retroBadge}
+              {retroBadgeFor(running.retroactiveMinutes)}
             </View>
           </View>
 
@@ -285,7 +318,7 @@ export function EmergencyScreen({ navigation }: Props) {
             </AppText>
             <View style={styles.badgeRow}>
               {returnBadge}
-              <AppText>{t("endBody", { minutes: EMERGENCY_RETURN_BUFFER_MINUTES })}</AppText>
+              <AppText>{endExplanation}</AppText>
             </View>
             <AppText weight="semibold" style={styles.label}>
               {t("categoryLabel")}
@@ -356,7 +389,7 @@ export function EmergencyScreen({ navigation }: Props) {
                   {t("confirmTitle")}
                 </AppText>
                 {retroBadge}
-                <AppText>{t("confirmBody", { minutes: EMERGENCY_RETROACTIVE_MINUTES })}</AppText>
+                <AppText>{startExplanation}</AppText>
                 {failureViews}
                 {!isOnline ? (
                   <AppText color={colors.warning} weight="semibold">
@@ -370,7 +403,7 @@ export function EmergencyScreen({ navigation }: Props) {
               <>
                 <View style={styles.badgeRow}>
                   {retroBadge}
-                  <AppText>{t("confirmBody", { minutes: EMERGENCY_RETROACTIVE_MINUTES })}</AppText>
+                  <AppText>{startExplanation}</AppText>
                 </View>
                 {!isOnline ? (
                   <AppText color={colors.warning} weight="semibold">

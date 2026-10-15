@@ -2,7 +2,7 @@ import { createTranslator } from "use-intl";
 import { NotificationType } from "@fieldmaster/shared-types";
 import { createFormatter, getEnumLabel, INTL_LOCALE, type EnumTranslator } from "@fieldmaster/i18n";
 import ar from "../../i18n/messages";
-import { RENDERED_NOTIFICATION_TYPES, renderNotificationText, type NotificationTranslator } from "../notification-text";
+import { RENDERED_NOTIFICATION_TYPES, renderNotificationAction, renderNotificationText, type NotificationTranslator } from "../notification-text";
 
 const failOnMissing = (error: Error) => {
   throw error;
@@ -85,5 +85,76 @@ describe("Arabic notification text (built from type + data, never the stored Eng
     });
     expect(render("SOMETHING_NEW", { anything: 1 })).toEqual({ title: "إشعار جديد", body: "لديك إشعار جديد.", source: "fallback" });
     expect(render("SHIFT_REJECTED", null).source).toBe("fallback");
+  });
+});
+
+describe("a worker's offline records (refused, flagged, or both): the text says what happened", () => {
+  const offline = (type: string, rejectedCount: number, flaggedCount: number) =>
+    render(type, { workerProfileId: "wp-1", workerName: "خالد حداد", rejectedCount, flaggedCount });
+
+  it("refused only: they were refused, nothing is said to need review", () => {
+    const text = offline("OFFLINE_EVENT_REJECTED", 1, 0);
+    expect(text).toEqual({ title: "رُفضت سجلات حضور دون اتصال", body: `رُفضت 1 من سجلات حضور ${iso("خالد حداد")} المسجّلة دون اتصال.`, source: "data" });
+    expect(text.body).not.toMatch(/مراجعة|: 0/);
+  });
+
+  it("flagged only: their location needs a review, nothing was refused", () => {
+    const text = offline("SUSPICIOUS_LOCATION_DETECTED", 0, 3);
+    expect(text).toEqual({ title: "موقع مشبوه يحتاج إلى مراجعة", body: `3 من سجلات حضور ${iso("خالد حداد")} دون اتصال تحتاج إلى مراجعة الموقع.`, source: "data" });
+    expect(text.body).not.toMatch(/رُفض/);
+  });
+
+  it("both: how many were refused and how many others need a location review", () => {
+    expect(offline("OFFLINE_EVENT_REJECTED", 2, 1).body).toBe(`رُفضت 2 من سجلات حضور ${iso("خالد حداد")} المسجّلة دون اتصال، و1 أخرى تحتاج إلى مراجعة الموقع.`);
+  });
+
+  it("no counts, or nothing refused or flagged: the type's general sentence", () => {
+    expect(offline("OFFLINE_EVENT_REJECTED", 0, 0)).toEqual({ title: "رُفضت سجلات حضور دون اتصال", body: "رُفضت بعض سجلات الحضور المسجّلة دون اتصال.", source: "fallback" });
+    expect(render("SUSPICIOUS_LOCATION_DETECTED", { workerName: "خالد" }).source).toBe("fallback");
+    // Without a name: «أحد العمال».
+    expect(render("OFFLINE_EVENT_REJECTED", { rejectedCount: 1, flaggedCount: 0 }).body).toBe("رُفضت 1 من سجلات حضور أحد العمال المسجّلة دون اتصال.");
+  });
+});
+
+describe("a temporary supervisor's report resolved (to the supervisor)", () => {
+  it("says who resolved it, for which shift, with their note", () => {
+    const text = render("TEMPORARY_SUPERVISOR_ISSUE_RESOLVED", { issueId: "iss-1", assignmentId: "as-1", shiftId: "sh-1", shiftTitle: "حفريات شارع هرتسل", resolverName: "سارة لوي", note: "Delivered at 10:00" });
+    expect(text).toEqual({
+      title: "تم حل بلاغك",
+      body: `تم حل بلاغك عن وردية «${iso("حفريات شارع هرتسل")}» بواسطة ${iso("سارة لوي")}.\nالملاحظة: ${iso("Delivered at 10:00")}`,
+      source: "data",
+    });
+  });
+
+  it("without the resolver's name: «أحد المديرين»; without the note: the general sentence", () => {
+    expect(render("TEMPORARY_SUPERVISOR_ISSUE_RESOLVED", { shiftTitle: "حفريات", note: "تم" }).body).toBe(`تم حل بلاغك عن وردية «${iso("حفريات")}» بواسطة أحد المديرين.\nالملاحظة: ${iso("تم")}`);
+    expect(render("TEMPORARY_SUPERVISOR_ISSUE_RESOLVED", { shiftTitle: "حفريات", resolverName: "سارة" })).toEqual({
+      title: "تم حل بلاغك",
+      body: "تم حل بلاغ أرسلته بصفتك مشرفًا مؤقتًا.",
+      source: "fallback",
+    });
+  });
+});
+
+describe("what an actionable notification asks for (mobile manager mode)", () => {
+  const action = (kind: string, dataJson: Record<string, unknown> | null = {}) => renderNotificationAction(t, fmt, { action: { kind } as never, dataJson });
+
+  it("one clear Arabic sentence per action", () => {
+    expect(action("REVIEW_ATTENDANCE")).toBe("اعتمد الحضور أو ارفضه");
+    expect(action("REVIEW_OFFLINE")).toBe("راجع سجلات الحضور دون اتصال");
+    expect(action("REVIEW_ONBOARDING")).toBe("راجع طلب الانضمام");
+    expect(action("RESOLVE_SUPERVISOR_ISSUE")).toBe("حلّ بلاغ المشرف المؤقت");
+  });
+
+  it("an entry open for too long says for how long, when the data has it", () => {
+    expect(action("OPEN_ENTRY", { timeEntryId: "te-1", openMinutes: 541 })).toBe("تواصل مع العامل: الدوام مفتوح منذ أكثر من 9 س 1 د");
+    expect(action("OPEN_ENTRY", { timeEntryId: "te-1" })).toBe("تواصل مع العامل: الدوام مفتوح منذ مدة طويلة");
+    expect(action("OPEN_ENTRY", null)).toBe("تواصل مع العامل: الدوام مفتوح منذ مدة طويلة");
+  });
+
+  it("nothing for information only, and a general sentence for a kind this version does not know", () => {
+    expect(renderNotificationAction(t, fmt, { action: null, dataJson: {} })).toBeNull();
+    expect(renderNotificationAction(t, fmt, { dataJson: {} })).toBeNull();
+    expect(action("SOMETHING_NEW")).toBe("يحتاج هذا الإشعار إلى متابعة");
   });
 });

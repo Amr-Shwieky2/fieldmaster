@@ -10,6 +10,7 @@ import { IntlRoot } from "./src/i18n/IntlRoot";
 import { RtlRoot } from "./src/components/RtlRoot";
 import { AppServices } from "./src/lib/app-services";
 import { AuthProvider } from "./src/lib/auth-context";
+import { AccessProvider } from "./src/lib/access-context";
 import { NotificationsProvider } from "./src/lib/notifications-context";
 import { OfflineSyncProvider } from "./src/lib/offline-sync-context";
 import { ensureRtl } from "./src/lib/rtl";
@@ -48,14 +49,16 @@ export default function App() {
       <SafeAreaProvider>
         <IntlRoot>
           <AuthProvider>
-            <OfflineSyncProvider>
-              <NotificationsProvider>
-                {/* Device registration and push-notification taps (renders nothing). */}
-                <AppServices />
-                <RootNavigator />
-                <StatusBar style="dark" />
-              </NotificationsProvider>
-            </OfflineSyncProvider>
+            <AccessProvider>
+              <OfflineSyncProvider>
+                <NotificationsProvider>
+                  {/* Device registration and push-notification taps (renders nothing). */}
+                  <AppServices />
+                  <RootNavigator />
+                  <StatusBar style="dark" />
+                </NotificationsProvider>
+              </OfflineSyncProvider>
+            </AccessProvider>
           </AuthProvider>
         </IntlRoot>
       </SafeAreaProvider>

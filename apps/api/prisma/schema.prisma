@@ -202,6 +202,28 @@ enum NotificationType {
   OFFLINE_EVENT_REJECTED
   SUSPICIOUS_LOCATION_DETECTED
   TEMPORARY_SUPERVISOR_ISSUE_REPORTED
+  TEMPORARY_SUPERVISOR_ISSUE_RESOLVED
+}
+
+/// What a notification subject is about (mobile manager mode).
+enum NotificationSubjectKind {
+  ATTENDANCE
+  OFFLINE_REVIEW
+  ONBOARDING
+  SUPERVISOR_ISSUE
+}
+
+/// How a notification subject was settled.
+enum NotificationHandledOutcome {
+  APPROVED
+  REJECTED
+  FULL_DAY_CREDIT
+  CORRECTION_REQUESTED
+  CORRECTED
+  RESOLVED
+  REVIEWED
+  WORKER_APPROVED
+  WORKER_REJECTED
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -219,6 +241,8 @@ model Organization {
   memberships            OrganizationMembership[]
   roles                  Role[]
   workRuleVersions       WorkRuleVersion[]
+  notificationSubjects   NotificationSubject[]
+  supervisorIssueReports SupervisorIssueReport[]
   onboardingInvitations  OnboardingInvitation[]
   projects               Project[]
   sites                  Site[]
@@ -826,6 +850,7 @@ model Shift {
   temporaryCheckInPoints TemporaryCheckInPoint[]
   timeEntries            TimeEntry[]
   rejectedClockAttempts  RejectedClockAttempt[]
+  supervisorIssueReports SupervisorIssueReport[]
 
   @@index([organizationId, status])
   @@index([organizationId, businessDate])
@@ -868,6 +893,8 @@ model TemporarySupervisorAssignment {
   canOpenCheckInPoints Boolean @default(true) @map("can_open_check_in_points")
 
   createdAt DateTime @default(now()) @map("created_at")
+
+  issueReports SupervisorIssueReport[]
 
   @@index([shiftId])
   @@index([workerProfileId])
@@ -1478,11 +1505,16 @@ model Notification {
   dataJson Json?            @map("data_json")
   readAt   DateTime?        @map("read_at")
 
+  /// Mobile manager mode: the subject this notification is about (shared by every manager's copy; null for information only).
+  subjectId String?              @map("subject_id") @db.Uuid
+  subject   NotificationSubject? @relation(fields: [subjectId], references: [id])
+
   createdAt DateTime @default(now()) @map("created_at")
 
   deliveries NotificationDelivery[]
 
   @@index([organizationId, recipientUserId, readAt])
+  @@index([subjectId])
   @@map("notifications")
 }
 
@@ -1573,4 +1605,54 @@ model GeneratedReport {
   @@index([organizationId, subjectWorkerProfileId])
   @@index([organizationId, generatedAt])
   @@map("generated_reports")
+}
+
+/// Mobile manager mode: the thing notifications are about -- an entry to
+/// review, a worker's offline records, an application, a supervisor's report.
+/// Every manager's notification about it points here, so settling it once
+/// shows as handled for all of them; a new notification about a settled
+/// subject opens it again.
+model NotificationSubject {
+  id             String                  @id @db.Uuid
+  organizationId String                  @map("organization_id") @db.Uuid
+  organization   Organization            @relation(fields: [organizationId], references: [id])
+  kind           NotificationSubjectKind
+  /// The time entry (ATTENDANCE), worker profile (OFFLINE_REVIEW, ONBOARDING) or issue report (SUPERVISOR_ISSUE).
+  refId          String                  @map("ref_id") @db.Uuid
+
+  handledAt      DateTime?                   @map("handled_at")
+  /// The member (user) who settled it.
+  handledBy      String?                     @map("handled_by") @db.Uuid
+  handledOutcome NotificationHandledOutcome? @map("handled_outcome")
+  handledNote    String?                     @map("handled_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  notifications Notification[]
+
+  @@unique([organizationId, kind, refId])
+  @@map("notification_subjects")
+}
+
+/// A temporary supervisor's report about their shift (mobile manager mode:
+/// stored so a manager can mark it resolved; the resolution is its
+/// notification subject's handled state).
+model SupervisorIssueReport {
+  id             String                        @id @db.Uuid
+  organizationId String                        @map("organization_id") @db.Uuid
+  organization   Organization                  @relation(fields: [organizationId], references: [id])
+  assignmentId   String                        @map("assignment_id") @db.Uuid
+  assignment     TemporarySupervisorAssignment @relation(fields: [assignmentId], references: [id])
+  shiftId        String                        @map("shift_id") @db.Uuid
+  shift          Shift                         @relation(fields: [shiftId], references: [id])
+  /// The supervisor's user.
+  reportedBy     String                        @map("reported_by") @db.Uuid
+  text           String
+  createdAt      DateTime                      @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@index([assignmentId])
+  @@index([shiftId])
+  @@map("supervisor_issue_reports")
 }

@@ -37,16 +37,35 @@ export function monthRange(yearMonth: string): { fromDate: string; toDate: strin
 
 type EstimateState = { status: "loaded"; estimate: CurrentSalaryEstimate } | { status: "finalized" } | { status: "failed"; cause: unknown } | { status: "none" };
 
+/** Nothing at all yet in a month: no approved shift, none waiting, no adjustment or deduction, no amount. */
+export function isEmptyMonth(statement: SalaryStatement): boolean {
+  return (
+    (statement.approvedShifts ?? 0) === 0 &&
+    (statement.pendingEntries ?? 0) === 0 &&
+    statement.regularMinutes === 0 &&
+    statement.overtimeMinutes === 0 &&
+    statement.standardDaysCredited === 0 &&
+    statement.grossAgorot === 0 &&
+    statement.adjustmentsAgorot === 0 &&
+    statement.forgottenStampDeductionsAgorot === 0 &&
+    statement.netPayableAgorot === 0
+  );
+}
+
 /**
  * "My salary": only the caller's own money, from /me routes only.
  * - The current month: GET /payroll-statements/me/current, labelled
  *   «تقدير — غير نهائي», from approved entries only, with the entries still
  *   waiting for approval. A 409 PAYROLL_PERIOD_FINALIZED means the month is
- *   already final (it is then among the finalized months).
+ *   already final (it is then among the finalized months). A month with
+ *   nothing in it yet reads «لا يوجد راتب لهذا الشهر بعد» (never a card of
+ *   zeros, never an error).
  * - Other open months: the estimates of GET /payroll-statements/me.
  * - Finalized months: only `statements` of GET /payroll-statements/me, each
  *   with its PDF statement (the worker's own attendance ledger for the month,
  *   a Step 8 report).
+ * Only a member who clocks in themselves has a salary here (the home offers
+ * «راتبي» to them only); anyone else gets NO_WORKER_PROFILE, said plainly.
  */
 export function SalaryScreen({ navigation, route }: Props) {
   const t = useTranslations("salary");
@@ -101,10 +120,26 @@ export function SalaryScreen({ navigation, route }: Props) {
     );
   }
 
+  // No worker profile (an Owner or a manager who does not clock in): there is no salary to show, and retrying will not change it.
+  if (error && getErrorCode(error) === "NO_WORKER_PROFILE") {
+    return (
+      <SafeAreaView style={styles.screen}>
+        {header}
+        {banner}
+        <View testID="salary-unavailable">
+          <EmptyView title={t("unavailable")} hint={errorMessage(error)} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const currentMonth = estimate.status === "loaded" ? estimate.estimate.yearMonth : null;
   const otherEstimates = (statements?.estimates ?? []).filter((s) => s.yearMonth !== currentMonth).sort(newestMonthFirst);
   const finalized = [...(statements?.statements ?? [])].sort(newestMonthFirst);
   const nothing = statements !== null && estimate.status !== "loaded" && otherEstimates.length === 0 && finalized.length === 0;
+  const currentEmpty = estimate.status === "loaded" && isEmptyMonth(estimate.estimate);
+  // Nothing this month and no other month yet: one plain sentence, nothing else.
+  const nothingYet = statements !== null && currentEmpty && otherEstimates.length === 0 && finalized.length === 0;
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -118,12 +153,25 @@ export function SalaryScreen({ navigation, route }: Props) {
       >
         {error ? <ErrorView message={`${t("loadError")}\n${errorMessage(error)}`} onRetry={onRefresh} /> : null}
 
-        {estimate.status === "loaded" || estimate.status === "finalized" || (estimate.status === "failed" && statements) ? (
+        {nothingYet ? (
+          <View testID="salary-nothing-yet">
+            <EmptyView title={t("noSalaryYet")} hint={t("emptyHint")} />
+          </View>
+        ) : null}
+
+        {!nothingYet && (estimate.status === "loaded" || estimate.status === "finalized" || (estimate.status === "failed" && statements)) ? (
           <AppText accessibilityRole="header" weight="bold" size="large">
             {t("currentMonth")}
           </AppText>
         ) : null}
-        {estimate.status === "loaded" ? <MonthCard statement={estimate.estimate} highlighted={focusMonth === estimate.estimate.yearMonth} onHighlightedLayout={scrollTo} /> : null}
+        {estimate.status === "loaded" && currentEmpty && !nothingYet ? (
+          <AppText testID="salary-current-empty" color={colors.muted}>
+            {t("noSalaryYet")}
+          </AppText>
+        ) : null}
+        {estimate.status === "loaded" && !currentEmpty ? (
+          <MonthCard statement={estimate.estimate} highlighted={focusMonth === estimate.estimate.yearMonth} onHighlightedLayout={scrollTo} />
+        ) : null}
         {estimate.status === "finalized" ? <AppText color={colors.muted}>{t("currentFinalized")}</AppText> : null}
         {estimate.status === "failed" && statements ? <ErrorView message={`${t("estimateLoadError")}\n${errorMessage(estimate.cause)}`} onRetry={onRefresh} /> : null}
 
@@ -138,7 +186,7 @@ export function SalaryScreen({ navigation, route }: Props) {
           </>
         ) : null}
 
-        {statements ? (
+        {statements && !nothingYet ? (
           <>
             <AppText accessibilityRole="header" weight="bold" size="large">
               {t("finalizedMonths")}

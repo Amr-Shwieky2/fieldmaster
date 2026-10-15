@@ -526,6 +526,7 @@
       "description": "ستظهر هنا إشعارات بدء الدوام وإنهائه والموافقات واستدعاءات الطوارئ."
     },
     "someWorker": "أحد العمال",
+    "someManager": "أحد المديرين",
     "genericTitle": "إشعار جديد",
     "genericBody": "لديك إشعار جديد.",
     "turanTypes": {
@@ -629,6 +630,11 @@
         "title": "بلاغ من مشرف مؤقت",
         "body": "بلاغ من {workerName}، المشرف المؤقت لوردية «{shiftTitle}»: {issueText}",
         "fallbackBody": "أرسل مشرف مؤقت بلاغًا عن إحدى الورديات."
+      },
+      "TEMPORARY_SUPERVISOR_ISSUE_RESOLVED": {
+        "title": "تم حل بلاغك",
+        "body": "تم حل بلاغك عن وردية «{shiftTitle}» بواسطة {resolverName}. الملاحظة: {note}",
+        "fallbackBody": "تم حل بلاغ أرسلته بصفتك مشرفًا مؤقتًا."
       }
     },
     "emergencyCalloutShiftTitle": "استدعاء طوارئ"

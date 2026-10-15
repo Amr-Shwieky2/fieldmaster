@@ -1,25 +1,26 @@
 import { evaluateForgottenStampInfraction, forgottenStampInfractionMonth } from "../forgotten-stamp";
+import { RULES } from "./rules";
 
 describe("evaluateForgottenStampInfraction (two-strike rule, scenario 5)", () => {
   it("first infraction: no deduction", () => {
-    expect(evaluateForgottenStampInfraction(1).deductionAgorot).toBe(0);
+    expect(evaluateForgottenStampInfraction(1, RULES).deductionAgorot).toBe(0);
   });
 
   it("second infraction: no deduction", () => {
-    expect(evaluateForgottenStampInfraction(2).deductionAgorot).toBe(0);
+    expect(evaluateForgottenStampInfraction(2, RULES).deductionAgorot).toBe(0);
   });
 
   it("third infraction: 1000 agorot (10 ILS) deduction", () => {
-    expect(evaluateForgottenStampInfraction(3).deductionAgorot).toBe(1000);
+    expect(evaluateForgottenStampInfraction(3, RULES).deductionAgorot).toBe(1000);
   });
 
   it("fourth and later infractions: 1000 agorot each", () => {
-    expect(evaluateForgottenStampInfraction(4).deductionAgorot).toBe(1000);
-    expect(evaluateForgottenStampInfraction(10).deductionAgorot).toBe(1000);
+    expect(evaluateForgottenStampInfraction(4, RULES).deductionAgorot).toBe(1000);
+    expect(evaluateForgottenStampInfraction(10, RULES).deductionAgorot).toBe(1000);
   });
 
   it("rejects a sequence number below 1", () => {
-    expect(() => evaluateForgottenStampInfraction(0)).toThrow();
+    expect(() => evaluateForgottenStampInfraction(0, RULES)).toThrow();
   });
 });
 

@@ -81,6 +81,16 @@ import type {
   CurrentSalaryEstimate,
   MyNotificationPreferences,
   MyTimeEntryDetail,
+  OperationsSummary,
+  NotificationSubject,
+  SupervisorIssue,
+  OnboardingSummary,
+  WorkLocationDefaults,
+  WorkLocation,
+  CreateWorkLocationInput,
+  UpdateWorkLocationInput,
+  AssignableWorker,
+  CreateShiftWithWorkersInput,
 } from "./types";
 import type { NotificationType, OnboardingFilePurpose, OrgRole } from "@fieldmaster/shared-types";
 
@@ -340,6 +350,47 @@ export class FieldMasterClient {
   getOperationsLive() {
     return this.request<OperationsSnapshot>("GET", "/operations/live");
   }
+
+  // ── Mobile manager mode (2026-10-15) ────────────────────────────────
+  /** The manager home's counters, each only with its permission (scoped). */
+  getOperationsSummary() {
+    return this.request<OperationsSummary>("GET", "/operations/summary");
+  }
+  getSupervisorIssue(id: string) {
+    return this.request<SupervisorIssue>("GET", `/supervisor-issues/${id}`);
+  }
+  /** "تم الحل": settles the report with a note (audited; the supervisor is notified). */
+  resolveSupervisorIssue(id: string, note: string) {
+    return this.request<SupervisorIssue>("POST", `/supervisor-issues/${id}/resolve`, { note });
+  }
+  /** An application without decrypted values (APPROVE_ONBOARDING). */
+  getOnboardingSummary(workerProfileId: string) {
+    return this.request<OnboardingSummary>("GET", `/workers/${workerProfileId}/onboarding-summary`);
+  }
+  getWorkLocationDefaults() {
+    return this.request<WorkLocationDefaults>("GET", "/work-locations/defaults");
+  }
+  getWorkLocation(siteId: string) {
+    return this.request<WorkLocation>("GET", `/work-locations/${siteId}`);
+  }
+  /** The site, its first geofence and (when asked) a new project, in one transaction. */
+  createWorkLocation(input: CreateWorkLocationInput) {
+    return this.request<WorkLocation>("POST", "/work-locations", input);
+  }
+  updateWorkLocation(siteId: string, input: UpdateWorkLocationInput) {
+    return this.request<WorkLocation>("PATCH", `/work-locations/${siteId}`, input);
+  }
+  listAssignableWorkers(scheduledStart: string, scheduledEnd: string) {
+    return this.request<AssignableWorker[]>("GET", `/shifts/assignable-workers${queryString({ start: scheduledStart, end: scheduledEnd })}`);
+  }
+  /** The shift and its workers in one transaction (409 SHIFT_ASSIGNMENT_CONFLICT: nothing created). */
+  createShiftWithWorkers(input: CreateShiftWithWorkersInput) {
+    return this.request<Shift>("POST", "/shifts", input);
+  }
+  /** A short-lived URL to one attendance photo of an entry (VIEW_ATTENDANCE, audited). */
+  getEntryPhotoViewUrl(timeEntryId: string, photoId: string) {
+    return this.request<FileViewUrl>("GET", `/time-entries/${timeEntryId}/photos/${photoId}/view-url`);
+  }
   /**
    * URL of the notifications SSE stream for `EventSource`, which cannot send
    * an Authorization header: the access token travels as a query parameter.
@@ -521,6 +572,10 @@ export class FieldMasterClient {
   listOfflineSyncBatches() {
     return this.request<OfflineSyncBatchRecord[]>("GET", "/offline-sync/batches");
   }
+  /** Mobile manager mode: one worker's latest offline batches (VIEW_ATTENDANCE, within the reader's projects). */
+  listWorkerOfflineSyncBatches(workerProfileId: string) {
+    return this.request<OfflineSyncBatchRecord[]>("GET", `/offline-sync/batches${queryString({ workerProfileId })}`);
+  }
 
   // ── Payroll (Owner only, except the caller's own statements) ────────
   listPayrollPeriods() {
@@ -569,6 +624,14 @@ export class FieldMasterClient {
   // ── Notifications ───────────────────────────────────────────────────
   listNotifications() {
     return this.request<NotificationItem[]>("GET", "/notifications");
+  }
+  /** Mobile manager mode: who settled what a notification is about (shared by every manager's copy). */
+  getNotificationSubject(subjectId: string) {
+    return this.request<NotificationSubject>("GET", `/notification-subjects/${subjectId}`);
+  }
+  /** Marks a subject handled when no other action settles it (an entry's or a worker's offline records review), with an optional note. */
+  handleNotificationSubject(subjectId: string, note?: string) {
+    return this.request<NotificationSubject>("POST", `/notification-subjects/${subjectId}/handle`, note ? { note } : {});
   }
   markNotificationRead(id: string) {
     return this.request("PATCH", `/notifications/${id}/read`);

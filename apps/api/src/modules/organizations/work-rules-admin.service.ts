@@ -1,12 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import {
-  DEFAULT_WORK_RULES,
   FINANCIAL_WORK_RULE_KEYS,
   PayrollPeriodStatus,
   WORK_RULE_KEYS,
   WORK_RULE_LIMITS,
-  WORK_RULES_FIRST_EFFECTIVE_DATE,
   checkWorkRules,
   pickWorkRules,
   type WorkRuleKey,
@@ -32,10 +30,8 @@ export interface WorkRulesView {
   canSeeMoney: boolean;
   /** The rules in force today. */
   current: Partial<WorkRules>;
-  /** The values an organization that never changes a rule has. */
-  defaults: Partial<WorkRules>;
   limits: Partial<Record<WorkRuleKey, { min: number; max: number }>>;
-  /** Every version, oldest first (the first is the starting values; a version with an effective date after today has not started yet). */
+  /** Every version, oldest first (the first holds the starting values; a version with an effective date after today has not started yet). */
   versions: WorkRuleVersionView[];
   today: string;
 }
@@ -47,8 +43,6 @@ export interface WorkRulesImpact {
   /** Finalized months from the effective date on: they keep their snapshot, whatever is added here. */
   finalizedMonths: { yearMonth: string; version: number }[];
 }
-
-const FIRST_VERSION_REASON = "القيم الأصلية";
 
 /**
  * The organization's work rules as effective-dated versions (flexible
@@ -68,15 +62,13 @@ export class WorkRulesAdminService {
   ) {}
 
   async view(organizationId: string, viewer: AuthenticatedUser): Promise<WorkRulesView> {
-    const stored = await this.workRules.versions(organizationId);
-    const versions = stored.length > 0 ? stored : [baseline()];
+    const versions = await this.workRules.versions(organizationId);
     const seeMoney = canViewFinancials(viewer);
     const today = toBusinessDate(new Date());
     return {
       canEdit: hasPermission(viewer, Permission.MANAGE_ORG_SETTINGS),
       canSeeMoney: seeMoney,
       current: shown(pickWorkRules(versions, today), seeMoney),
-      defaults: shown({ ...DEFAULT_WORK_RULES }, seeMoney),
       // The money rule's limits are money too: left out for a member who may not see it.
       limits: Object.fromEntries(Object.entries(WORK_RULE_LIMITS).filter(([key]) => seeMoney || !FINANCIAL_WORK_RULE_KEYS.includes(key as WorkRuleKey))) as WorkRulesView["limits"],
       versions: versions.map((version) => ({ ...version, rules: shown(version.rules, seeMoney) })),
@@ -125,7 +117,7 @@ export class WorkRulesAdminService {
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`work_rules:${organizationId}`}, 0))`;
       const stored = await this.workRules.versions(organizationId, tx);
-      const base = pickWorkRules(stored.length > 0 ? stored : [baseline()], dto.effectiveFrom);
+      const base = pickWorkRules(stored, dto.effectiveFrom);
       const merged: WorkRules = { ...base };
       for (const key of sent) merged[key] = dto[key] as number;
 
@@ -134,12 +126,8 @@ export class WorkRulesAdminService {
       const changed = WORK_RULE_KEYS.filter((key) => merged[key] !== base[key]);
       if (changed.length === 0) throw new AppException(400, ErrorCodes.VALIDATION_FAILED, "Nothing changes: these are the rules already in force on that date.");
 
-      // The first change keeps the starting values as version 1, so the history is whole.
-      let nextVersion = stored.length > 0 ? Math.max(...stored.map((version) => version.version)) + 1 : 1;
-      if (stored.length === 0) {
-        await tx.workRuleVersion.create({ data: rowOf(organizationId, nextVersion, WORK_RULES_FIRST_EFFECTIVE_DATE, { ...DEFAULT_WORK_RULES }, FIRST_VERSION_REASON, null) });
-        nextVersion += 1;
-      }
+      // The first version (the starting values) always exists, so the history is whole.
+      const nextVersion = Math.max(...stored.map((version) => version.version)) + 1;
       const created = await tx.workRuleVersion.create({ data: rowOf(organizationId, nextVersion, dto.effectiveFrom, merged, dto.reason, actor.sub) });
       for (const key of changed) {
         await this.auditService.record(
@@ -162,18 +150,6 @@ export class WorkRulesAdminService {
     });
     return this.view(organizationId, actor);
   }
-}
-
-function baseline(): WorkRuleVersion {
-  return {
-    id: "baseline",
-    version: 0,
-    effectiveFrom: WORK_RULES_FIRST_EFFECTIVE_DATE,
-    rules: { ...DEFAULT_WORK_RULES },
-    reason: null,
-    createdByUserId: null,
-    createdAt: new Date(0).toISOString(),
-  };
 }
 
 function shown(rules: WorkRules, seeMoney: boolean): Partial<WorkRules> {

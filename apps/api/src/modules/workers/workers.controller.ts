@@ -38,6 +38,13 @@ export class WorkersController {
     return this.workersService.getById(user.organizationId, id, user);
   }
 
+  /** Mobile manager mode: the application without decrypted values (masked bank digits only with bank access). */
+  @Get(":id/onboarding-summary")
+  @RequirePermissions(Permission.APPROVE_ONBOARDING)
+  async onboardingSummary(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.onboardingReviewService.getSummary(user.organizationId, id, user);
+  }
+
   /** Owner only (a financial permission): the application with its ID number and bank details decrypted; every view is audited. */
   @Get(":id/onboarding-review")
   @RequirePermissions(Permission.VIEW_BANK_INFO)

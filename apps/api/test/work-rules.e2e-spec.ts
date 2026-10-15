@@ -1,9 +1,10 @@
 import type { INestApplication } from "@nestjs/common";
 import { v7 as uuidv7 } from "uuid";
-import { CheckInMethod, CorrectionReason, DEFAULT_WORK_RULES, TimeEntryStatus } from "@fieldmaster/shared-types";
-import { toBusinessDate } from "@fieldmaster/shared-validation";
+import { CheckInMethod, CompensationType, CorrectionReason, DEFAULT_WORK_RULES, TimeEntryStatus } from "@fieldmaster/shared-types";
+import { calculateShiftCompensation, toBusinessDate } from "@fieldmaster/shared-validation";
 import { createTestApp, resetDatabase, request, loginAs } from "./test-app";
 import { PrismaService } from "../src/common/prisma/prisma.service";
+import { LongOpenEntriesService } from "../src/modules/operations/long-open-entries.service";
 import { addFieldManager, addWorker, assignWorkerToShift, createOrgWithOwner, createProject, createSiteWithGeofence, createStandardShift } from "./fixtures";
 import { calculatePayroll } from "./payroll-helpers";
 
@@ -20,6 +21,7 @@ const OWNER_PHONE = "+972500000001";
 const MANAGER_PHONE = "+972500000011";
 const DAILY_WORKER_PHONE = "+972500010001";
 const SECOND_WORKER_PHONE = "+972500010002";
+const THIRD_WORKER_PHONE = "+972500010003";
 const SITE = { lat: 32.0853, lng: 34.7818 };
 
 /** YYYY-MM-DD, `days` after the business date of `from`. */
@@ -105,13 +107,16 @@ describe("Work rules (flexible organization model)", () => {
   const newRules = (ctx: Ctx, effectiveFrom: string, rules: Record<string, number>, reason = "Agreed with the employees") =>
     post(ctx.tokens.owner, "/organizations/me/work-rules", { effectiveFrom, reason, ...rules });
 
-  it("starts with the default rules and no stored version; a member who may not see money gets no penalty key; only the right members change rules", async () => {
+  it("starts with its first version (the original values), stored the first time the rules are read; a member who may not see money gets no penalty key; only the right members change rules", async () => {
     const ctx = await setup();
     const view = await get(ctx.tokens.owner, "/organizations/me/work-rules").expect(200);
-    expect(view.body).toMatchObject({ canEdit: true, canSeeMoney: true, current: DEFAULT_WORK_RULES, defaults: DEFAULT_WORK_RULES, today: ctx.today });
+    expect(view.body).toMatchObject({ canEdit: true, canSeeMoney: true, current: DEFAULT_WORK_RULES, today: ctx.today });
+    // Nothing is priced with default values any more: no "defaults" to fall back on, only stored versions.
+    expect(view.body).not.toHaveProperty("defaults");
     expect(view.body.versions).toHaveLength(1);
-    expect(view.body.versions[0]).toMatchObject({ id: "baseline", version: 0, effectiveFrom: "2000-01-01", rules: DEFAULT_WORK_RULES });
-    expect(await prisma.workRuleVersion.count()).toBe(0);
+    expect(view.body.versions[0]).toMatchObject({ version: 1, effectiveFrom: "2000-01-01", reason: "القيم الأصلية", rules: DEFAULT_WORK_RULES });
+    await get(ctx.tokens.owner, "/organizations/me/work-rules").expect(200);
+    expect(await prisma.workRuleVersion.count()).toBe(1);
 
     const managerView = await get(ctx.tokens.manager, "/organizations/me/work-rules").expect(200);
     expect(managerView.body).toMatchObject({ canEdit: false, canSeeMoney: false });
@@ -258,6 +263,97 @@ describe("Work rules (flexible organization model)", () => {
     expect(line((await get(ctx.tokens.owner, `/payroll-periods/${nextMonth}`).expect(200)).body, "Eli Worker")).toMatchObject({ netPayableAgorot: 54_000 });
   });
 
+  it("an eight-hour day set from next month: once that month has come, an emergency ended and a nine-hour shift clocked out are estimated, notified and previewed with 480", async () => {
+    const ctx = await setup();
+    const nadia = await addWorker(prisma, ctx.organizationId, THIRD_WORKER_PHONE, "Nadia Worker", { type: "DAILY", dailyRateAgorot: 48_000, overtimeRateAgorot: 6_000 });
+    const rules480 = { standardDayMinutes: 480, overtimeThresholdMinutes: 480 };
+    // The Owner sets it from the first of next month (the only kind of date the API takes)...
+    await newRules(ctx, firstOfNextMonth(ctx.today), rules480, "From next month: an eight-hour day").expect(201);
+    expect((await get(ctx.tokens.worker, "/auth/me").expect(200)).body.workRules).toMatchObject({ standardDayMinutes: 540 });
+    // ...and that month has now come: the same version, in force since the first of the month the work below falls in
+    // (stored directly: the API refuses a date that is not after today).
+    const monthStart = `${toBusinessDate(new Date(Date.now() - 2 * 3_600_000)).slice(0, 7)}-01`;
+    await prisma.workRuleVersion.create({
+      data: { id: uuidv7(), organizationId: ctx.organizationId, version: 3, effectiveFrom: monthStart, reason: "From next month: an eight-hour day", createdBy: ctx.owner.user.id, ...DEFAULT_WORK_RULES, ...rules480 },
+    });
+    // What the phone shows (minutes only).
+    expect((await get(ctx.tokens.worker, "/auth/me").expect(200)).body.workRules).toMatchObject({ ...rules480, emergencyMinutesBefore: 60, emergencyMinutesAfter: 15 });
+
+    const rows = async (token: string) => (await get(token, "/notifications").expect(200)).body as { type: string; title: string; body: string; dataJson: Record<string, unknown> }[];
+    const one = (list: Awaited<ReturnType<typeof rows>>, type: string) => {
+      const matches = list.filter((row) => row.type === type);
+      expect({ type, count: matches.length }).toEqual({ type, count: 1 });
+      return matches[0];
+    };
+    const place = { latitude: SITE.lat, longitude: SITE.lng, accuracyMeters: 10 };
+
+    // 1. A daily worker's emergency call-out, ended: the Owner's estimate prorates the day over 480 minutes.
+    const callout = { deviceId: "d3", clientEventId: uuidv7(), deviceTimestamp: new Date().toISOString(), ...place };
+    const started = await post(ctx.tokens.manager, "/emergency-callouts/start", { ...callout, workerProfileId: nadia.workerProfile.id }).set("Idempotency-Key", uuidv7()).expect(201);
+    const nadiaToken = (await loginAs(app, THIRD_WORKER_PHONE)).accessToken;
+    const ended = await post(nadiaToken, "/emergency-callouts/end", { ...callout, clientEventId: uuidv7(), summaryText: "Reset the controller.", taskCategory: "EMERGENCY_REPAIR" })
+      .set("Idempotency-Key", uuidv7())
+      .expect(201);
+    const calloutMinutes: number = ended.body.compensatedDurationMinutes;
+    const daily = { compensationType: CompensationType.DAILY, fullDayCredit: false, dailyBaseRateAgorot: 48_000, overtimeHourlyRateAgorot: 6_000 };
+    const calloutEstimate = calculateShiftCompensation({ ...daily, approvedMinutes: calloutMinutes }, rules480).totalCompensationAgorot;
+    expect(calloutEstimate).toBe(Math.round((48_000 * calloutMinutes) / 480));
+    expect(calloutEstimate).not.toBe(Math.round((48_000 * calloutMinutes) / 540)); // the test tells the two days apart
+    const ownerEnd = one(await rows(ctx.tokens.owner), "EMERGENCY_SHIFT_ENDED");
+    expect(ownerEnd.dataJson).toMatchObject({ compensatedDurationMinutes: calloutMinutes, estimatedCostAgorot: calloutEstimate });
+    expect(ownerEnd.body).toContain(`Estimated cost: ₪${(calloutEstimate / 100).toFixed(2)}`);
+    expect((await get(ctx.tokens.owner, `/time-entries/${started.body.timeEntryId}/estimated-cost`).expect(200)).body).toMatchObject({
+      basis: "ESTIMATED",
+      estimatedCostAgorot: calloutEstimate,
+    });
+
+    // 2. A nine-hour shift: the alert after eight hours, then the clock-out split 480 + 60 for the manager and priced for the Owner.
+    const clockIn = await post(ctx.tokens.worker, "/clock-events/clock-in", { shiftId: ctx.shift.id, deviceId: "d1", clientEventId: uuidv7(), deviceTimestamp: new Date().toISOString(), ...place })
+      .set("Idempotency-Key", uuidv7())
+      .expect(201);
+    const entryId: string = clockIn.body.timeEntry.id;
+    // Clocked in nine hours ago (the entry keeps its business date).
+    await prisma.timeEntry.update({ where: { id: entryId }, data: { clockInAt: new Date(Date.now() - 9 * 3_600_000) } });
+    await app.get(LongOpenEntriesService).sweep();
+    expect(one(await rows(ctx.tokens.manager), "OVERTIME_THRESHOLD_CROSSED").title).toBe("Shift open for more than 8 hours");
+    const out = await post(ctx.tokens.worker, "/clock-events/clock-out", {
+      deviceId: "d1",
+      clientEventId: uuidv7(),
+      deviceTimestamp: new Date().toISOString(),
+      ...place,
+      summaryText: "Lane closure all day.",
+      taskCategory: "TRAFFIC_CONTROL",
+    })
+      .set("Idempotency-Key", uuidv7())
+      .expect(201);
+    expect(out.body.id).toBe(entryId);
+    const split = { durationMinutes: 540, regularMinutes: 480, overtimeMinutes: 60 };
+    const managerOut = one(await rows(ctx.tokens.manager), "WORKER_CLOCKED_OUT");
+    expect(managerOut.dataJson).toMatchObject(split);
+    expect(managerOut.body).toContain("Total: 9h 0m\nRegular: 8h 0m\nOvertime: 1h 0m");
+    // A day and an hour of overtime: 480.00 + 60.00.
+    expect(one(await rows(ctx.tokens.owner), "WORKER_CLOCKED_OUT").dataJson).toMatchObject({ ...split, estimatedCostAgorot: 54_000 });
+
+    // 3. What the review screens preview with: the list and the evidence carry the rules of each entry's day.
+    const list = (await get(ctx.tokens.manager, "/attendance/entries?tab=PENDING").expect(200)).body.items as { id: string; dayRules: unknown }[];
+    for (const id of [entryId, started.body.timeEntryId as string]) {
+      expect(list.find((item) => item.id === id)?.dayRules).toEqual(rules480);
+      expect((await get(ctx.tokens.manager, `/time-entries/${id}/evidence`).expect(200)).body.dayRules).toEqual(rules480);
+    }
+    expect((await get(ctx.tokens.owner, `/time-entries/${entryId}/estimated-cost`).expect(200)).body).toMatchObject({
+      basis: "ESTIMATED",
+      regularMinutes: 480,
+      overtimeMinutes: 60,
+      estimatedCostAgorot: 54_000,
+    });
+    expect((await get(ctx.tokens.worker, `/time-entries/${entryId}/my-pay`).expect(200)).body).toMatchObject({ approved: false, regularMinutes: 480, overtimeMinutes: 60, totalAgorot: null });
+
+    // 4. Approved: the same split is stored, and the worker's own pay and month estimate agree.
+    await post(ctx.tokens.manager, `/time-entries/${entryId}/approve`).expect(201);
+    expect(await prisma.timeEntry.findUniqueOrThrow({ where: { id: entryId } })).toMatchObject({ approvedRegularMinutes: 480, approvedOvertimeMinutes: 60 });
+    expect((await get(ctx.tokens.worker, `/time-entries/${entryId}/my-pay`).expect(200)).body).toMatchObject({ approved: true, regularMinutes: 480, overtimeMinutes: 60, totalAgorot: 54_000 });
+  });
+
   it("a penalty change never touches the adjustments already recorded, and applies to infractions from its date on", async () => {
     const ctx = await setup();
     const thisMonth = ctx.today.slice(0, 7);
@@ -319,9 +415,9 @@ describe("Work rules (flexible organization model)", () => {
     expect(new Date(refused.body.details.opensAt).getTime()).toBe(future.scheduledStart.getTime() - 60 * 60_000);
     expect(await prisma.rejectedClockAttempt.count({ where: { code: "CLOCK_IN_TOO_EARLY", shiftId: future.id } })).toBe(1);
 
-    // A window of four hours (a version in force today) lets the same clock-in through.
+    // A window of four hours (a version in force today; the first one was stored when the rules were first read) lets the same clock-in through.
     await prisma.workRuleVersion.create({
-      data: { id: uuidv7(), organizationId: ctx.organizationId, version: 1, effectiveFrom: ctx.today, reason: "Test", createdBy: null, ...DEFAULT_WORK_RULES, clockInEarlyWindowMinutes: 240 },
+      data: { id: uuidv7(), organizationId: ctx.organizationId, version: 2, effectiveFrom: ctx.today, reason: "Test", createdBy: null, ...DEFAULT_WORK_RULES, clockInEarlyWindowMinutes: 240 },
     });
     await clockIn().expect(201);
   });

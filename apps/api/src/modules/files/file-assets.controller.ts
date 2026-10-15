@@ -21,3 +21,18 @@ export class FileAssetsController {
     return this.fileAssetsService.getViewUrl(user.organizationId, id, user, correlationId);
   }
 }
+
+/** Mobile manager mode: an entry's attendance photo, opened from the review screen (VIEW_ATTENDANCE, within the reader's projects; audited per view). */
+@ApiBearerAuth()
+@ApiTags("file-assets")
+@Controller("time-entries")
+export class EntryPhotosController {
+  constructor(private readonly fileAssetsService: FileAssetsService) {}
+
+  @Get(":id/photos/:photoId/view-url")
+  @RequirePermissions(Permission.VIEW_ATTENDANCE)
+  @Header("Cache-Control", "no-store")
+  async getPhotoViewUrl(@Param("id") id: string, @Param("photoId") photoId: string, @CurrentUser() user: AuthenticatedUser, @CorrelationId() correlationId: string) {
+    return this.fileAssetsService.getEntryPhotoViewUrl(user.organizationId, id, photoId, user, correlationId);
+  }
+}

@@ -24,7 +24,8 @@ import messages from "../i18n/messages";
  *
  * The API stores the token with the device registration (PUT /devices/me)
  * and sends pushes through Expo's push service. Each push carries
- * `{ notificationId, type, timeEntryId?, shiftId?, calloutId?, assignmentId?, yearMonth? }`;
+ * `{ notificationId, type, timeEntryId?, shiftId?, calloutId?, assignmentId?, turanAssignmentId?, yearMonth? }`,
+ * and a manager's also `subjectId?` and `issueId?` (mobile manager mode; never a worker's id);
  * linking.ts turns that into the screen a tap opens.
  */
 

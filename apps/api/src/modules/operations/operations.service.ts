@@ -5,11 +5,16 @@ import {
   ShiftStatus,
   TemporaryPointStatus,
   TimeEntryStatus,
+  AccountStatus,
+  OrgRole,
+  Permission,
 } from "@fieldmaster/shared-types";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { WorkRulesService } from "../../common/settings/work-rules.service";
 import { scopeOf, shiftScopeWhere, timeEntryScopeWhere, workerScopeWhere } from "../../common/scope/scope-filters";
+import { hasPermission } from "../../common/auth/permissions";
+import { PENDING_TAB_STATUSES } from "../attendance/attendance-records.service";
 
 /** How far back the "recent" lists look. */
 const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -36,6 +41,32 @@ export class OperationsService {
     private readonly prisma: PrismaService,
     private readonly workRules: WorkRulesService,
   ) {}
+
+  /** The manager home's counters (see the controller): each only with its permission, scoped like the lists they open. */
+  async summary(organizationId: string, viewer: AuthenticatedUser) {
+    const scope = scopeOf(viewer);
+    const result: { generatedAt: string; pendingApprovals?: number; onShift?: number; late?: number; siteAlerts?: number; onboardingRequests?: number } = {
+      generatedAt: new Date().toISOString(),
+    };
+    const [pending, live, applications] = await Promise.all([
+      hasPermission(viewer, Permission.APPROVE_ATTENDANCE)
+        ? this.prisma.timeEntry.count({ where: { organizationId, status: { in: PENDING_TAB_STATUSES }, ...(timeEntryScopeWhere(scope) ?? {}) } })
+        : null,
+      hasPermission(viewer, Permission.VIEW_OPERATIONS) ? this.snapshot(organizationId, viewer) : null,
+      // Applications belong to the whole organization (APPROVE_ONBOARDING is organization-wide: a restricted member does not hold it).
+      hasPermission(viewer, Permission.APPROVE_ONBOARDING)
+        ? this.prisma.organizationMembership.count({ where: { organizationId, role: OrgRole.WORKER, status: AccountStatus.PENDING_APPROVAL, archivedAt: null } })
+        : null,
+    ]);
+    if (pending !== null) result.pendingApprovals = pending;
+    if (live) {
+      result.onShift = live.workersOnShift.length;
+      result.late = live.lateWorkers.length;
+      result.siteAlerts = live.recentRejectedAttempts.length + live.suspiciousLocations.length;
+    }
+    if (applications !== null) result.onboardingRequests = applications;
+    return result;
+  }
 
   async snapshot(organizationId: string, viewer?: AuthenticatedUser, now = new Date()) {
     const recentSince = new Date(now.getTime() - RECENT_WINDOW_MS);

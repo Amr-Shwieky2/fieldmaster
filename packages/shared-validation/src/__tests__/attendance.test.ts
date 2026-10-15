@@ -1,4 +1,5 @@
 import { rawDurationMinutes, splitWorkedMinutes } from "../attendance";
+import { RULES } from "./rules";
 
 describe("rawDurationMinutes", () => {
   const clockIn = new Date("2026-10-05T04:00:00.000Z");
@@ -19,7 +20,7 @@ describe("rawDurationMinutes", () => {
 
 describe("splitWorkedMinutes (the split approval stores)", () => {
   it("9 hours: 540 regular, 0 overtime", () => {
-    expect(splitWorkedMinutes({ rawDurationMinutes: 540, unpaidBreakMinutes: 0, fullDayCredit: false })).toEqual({
+    expect(splitWorkedMinutes({ rawDurationMinutes: 540, unpaidBreakMinutes: 0, fullDayCredit: false }, RULES)).toEqual({
       workedMinutes: 540,
       regularMinutes: 540,
       overtimeMinutes: 0,
@@ -28,7 +29,7 @@ describe("splitWorkedMinutes (the split approval stores)", () => {
   });
 
   it("10 h 30 m: 540 regular, 90 overtime", () => {
-    expect(splitWorkedMinutes({ rawDurationMinutes: 630, unpaidBreakMinutes: 0, fullDayCredit: false })).toEqual({
+    expect(splitWorkedMinutes({ rawDurationMinutes: 630, unpaidBreakMinutes: 0, fullDayCredit: false }, RULES)).toEqual({
       workedMinutes: 630,
       regularMinutes: 540,
       overtimeMinutes: 90,
@@ -37,7 +38,7 @@ describe("splitWorkedMinutes (the split approval stores)", () => {
   });
 
   it("subtracts unpaid breaks before splitting", () => {
-    expect(splitWorkedMinutes({ rawDurationMinutes: 630, unpaidBreakMinutes: 30, fullDayCredit: false })).toEqual({
+    expect(splitWorkedMinutes({ rawDurationMinutes: 630, unpaidBreakMinutes: 30, fullDayCredit: false }, RULES)).toEqual({
       workedMinutes: 600,
       regularMinutes: 540,
       overtimeMinutes: 60,
@@ -46,7 +47,7 @@ describe("splitWorkedMinutes (the split approval stores)", () => {
   });
 
   it("never goes below zero when breaks exceed the duration", () => {
-    expect(splitWorkedMinutes({ rawDurationMinutes: 20, unpaidBreakMinutes: 45, fullDayCredit: false })).toEqual({
+    expect(splitWorkedMinutes({ rawDurationMinutes: 20, unpaidBreakMinutes: 45, fullDayCredit: false }, RULES)).toEqual({
       workedMinutes: 0,
       regularMinutes: 0,
       overtimeMinutes: 0,
@@ -55,7 +56,7 @@ describe("splitWorkedMinutes (the split approval stores)", () => {
   });
 
   it("full-day credit lifts a short day to 540 regular minutes", () => {
-    expect(splitWorkedMinutes({ rawDurationMinutes: 300, unpaidBreakMinutes: 0, fullDayCredit: true })).toEqual({
+    expect(splitWorkedMinutes({ rawDurationMinutes: 300, unpaidBreakMinutes: 0, fullDayCredit: true }, RULES)).toEqual({
       workedMinutes: 300,
       regularMinutes: 540,
       overtimeMinutes: 0,
@@ -64,7 +65,7 @@ describe("splitWorkedMinutes (the split approval stores)", () => {
   });
 
   it("full-day credit changes nothing on a day of 540 worked minutes or more", () => {
-    expect(splitWorkedMinutes({ rawDurationMinutes: 600, unpaidBreakMinutes: 0, fullDayCredit: true })).toEqual({
+    expect(splitWorkedMinutes({ rawDurationMinutes: 600, unpaidBreakMinutes: 0, fullDayCredit: true }, RULES)).toEqual({
       workedMinutes: 600,
       regularMinutes: 540,
       overtimeMinutes: 60,

@@ -60,11 +60,11 @@ export class PayrollCalculationService {
     @InjectQueue(QUEUE_NAMES.PAYROLL_CALCULATION) private readonly queue: Queue,
   ) {}
 
-  /** `rules`: the work rules in force on the entry's business date (the defaults when not given). */
+  /** `rules`: the work rules in force on the entry's business date (required: never a default). */
   computeEntryCompensation(
     entry: Pick<TimeEntry, "approvedRegularMinutes" | "approvedOvertimeMinutes" | "fullDayCredit">,
     profile: CompensationProfile,
-    rules?: Pick<WorkRules, "standardDayMinutes" | "overtimeThresholdMinutes">,
+    rules: Pick<WorkRules, "standardDayMinutes" | "overtimeThresholdMinutes">,
   ): EntryCompensationResult {
     return computeEntryPay(entry, toEngineProfile(profile), rules);
   }

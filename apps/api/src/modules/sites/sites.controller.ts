@@ -3,7 +3,8 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CorrelationId } from "../../common/decorators/correlation-id.decorator";
 import { RequirePermissions } from "../../common/decorators/require-permissions.decorator";
-import { Permission } from "../../common/auth/permissions";
+import { hasPermission, Permission } from "../../common/auth/permissions";
+import { AppException, ErrorCodes } from "../../common/errors/app-exception";
 import type { AuthenticatedUser } from "../../common/auth/auth-context";
 import { SitesService } from "./sites.service";
 import { CreateProjectDto } from "./dto/create-project.dto";
@@ -41,9 +42,12 @@ export class SitesController {
     return this.sitesService.createSite(user.organizationId, dto, user, correlationId);
   }
 
+  /** MANAGE_SITES, or MANAGE_SHIFTS: whoever plans a shift picks its site (the phone's «وردية جديدة»); within the member's projects. */
   @Get("sites")
-  @RequirePermissions(Permission.MANAGE_SITES)
   listSites(@CurrentUser() user: AuthenticatedUser, @Query("projectId") projectId?: string, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    if (!hasPermission(user, Permission.MANAGE_SITES) && !hasPermission(user, Permission.MANAGE_SHIFTS)) {
+      throw new AppException(403, ErrorCodes.FORBIDDEN, "Missing required permission(s): MANAGE_SITES or MANAGE_SHIFTS");
+    }
     return this.sitesService.listSites(user.organizationId, user, projectId, pageWindow({ page, pageSize }));
   }
 

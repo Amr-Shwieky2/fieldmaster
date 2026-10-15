@@ -29,7 +29,8 @@ title/body text stay in English.
 ### Custom roles (flexible organization model)
 
 Two roles an Owner could have built on Settings → الأدوار والصلاحيات, to try
-what a member sees from their permissions rather than a role name:
+what a member sees from their permissions rather than a role name (the
+phone's quick login lists them under «أدوار مخصّصة»):
 
 | Name | Phone | Role | What they see |
 |---|---|---|---|

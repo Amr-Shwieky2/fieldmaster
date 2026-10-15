@@ -1791,8 +1791,9 @@ each permission needs (`PERMISSION_REQUIRES`).
 
 The membership keeps its `role` column as the role's kind (OWNER,
 FIELD_MANAGER, WORKER or the new CUSTOM): the Owner limit, the token's `role`
-claim, the mobile app and the notification toggles ("notify Owners" /
-"notify Field Managers") read it. A trigger fills `role_id` from the kind
+claim and the notification toggles ("notify Owners" / "notify Field
+Managers") read it (the mobile app decides from permissions since mobile
+manager mode). A trigger fills `role_id` from the kind
 for built-in kinds, so code that still creates memberships by kind (seed,
 onboarding, fixtures) keeps working.
 
@@ -1891,3 +1892,94 @@ the admin web's pending-approvals count reads one row and the total.
   Node library, so the test is a TypeScript script in the repository with
   no extra runtime (k6 is a separate binary). Results and how to read them:
   `docs/scalability.md`.
+
+## Mobile manager mode: one app decided by permissions, actionable notifications
+
+### The app decides from `GET /auth/me`, never from a role's name
+
+`AccessProvider` (`apps/mobile/src/lib/access-context.tsx`) reads the
+member's permissions, project scope, worker profile and the work rules in
+force (minutes only) from `GET /auth/me`, again after sign-in and whenever
+the app returns to the foreground. Until it answers (or offline), a
+built-in role's fixed permissions stand in; a custom role waits for it. A
+member with any permission beyond a worker's own gets the manager tabs
+(«الإدارة»، «دوامي» when they clock in themselves, «الإشعارات»); every
+counter, quick action, notification action and screen is gated by its
+permission, and the API refuses the same calls anyway. Manager screens are
+mounted only for members who manage, so a deep link to one from a worker's
+phone falls back to the notifications list.
+
+### Notification subjects instead of per-notification state
+
+Each manager gets their own notification row (their own read state), but a
+decision is about the record, not the row. A subject (`kind`, `refId`) is
+shared by every notification about the same entry, worker's offline
+records, application or supervisor report: the list groups by it, and the
+action that solves the record settles it once for every manager (the first
+one wins: an atomic `updateMany ... where handledAt is null`; audited). The
+existing decisions settle it themselves right after they are saved
+(approve, reject, ask for a correction, approve or reject an application;
+resolving a report in the same transaction); only what has no decision of its
+own (an open entry followed up, offline records reviewed) has the explicit
+`POST /notification-subjects/:id/handle`. A new notification about a settled
+subject reopens it, because it is new news (e.g. the clock-out after an
+overtime alert was followed up). Full-day credit and a manual correction do
+not settle an entry's subject: the entry still waits for its approval.
+
+### Notifications from before subjects
+
+Notifications stored before this release have no subject, so nothing can
+settle them. Rather than a data migration that would have to reconstruct
+who decided what, the list offers their action only while the record still
+waits for it (an entry pending approval or still open, an application
+pending): once it is decided, by anyone, the old notification is
+information. Old offline-record notifications have no state to read and
+are information only. The development seed stores its notifications with
+subjects (the emergency entry it approves is shown as handled).
+
+### Supervisor reports are stored
+
+A temporary supervisor's report used to exist only as notifications. To be
+resolvable (and to tell the supervisor who resolved it), it is now a row
+(`supervisor_issue_reports`) with its own subject; the report endpoint's
+answer is unchanged.
+
+### Work rules are always stored; the functions require them
+
+Defaults used to be the fallback of every pure function, so a forgotten
+argument silently priced with 540 minutes (the emergency estimate in PR
+#18 did). The rules argument is now required everywhere, every organization
+has a stored version 1 (migration backfill, then seeded the first time a
+new organization's rules are read), and the API sends each entry's
+`dayRules` with every item the screens preview, so neither the server nor a
+client guesses. `DEFAULT_WORK_RULES` only seeds version 1;
+`LEGACY_FIXED_WORK_RULES` reads payroll snapshots stored before rules
+existed.
+
+### Sensitive application data on the phone
+
+The application summary decrypts nothing for display (the bank account is
+masked to its last four digits from the decrypted record, only for
+`VIEW_BANK_INFO`). The full details and the ID image are fetched only on an
+explicit tap, through the existing audited review and short-lived URL; they
+live only in the screen's state, the image is shown with
+`cachePolicy="none"`, and everything is dropped when the screen loses
+focus, when the app leaves the foreground (the app switcher keeps a
+picture of the screen) and after a decision.
+
+### A work location is one transaction
+
+Creating a site from the phone may also create its project and always
+creates its geofence. Through the separate web routes a failure between the
+calls could leave a project without a site or a site without a geofence;
+`POST /work-locations` saves them together or not at all, and
+`PATCH /work-locations/:id` writes a new geofence version only when the
+center or radius changes (shifts keep the version they were created with).
+
+### The floating gear on the iPhone
+
+The blue gear the Owner saw over «رجوع» is Expo's developer-menu button
+(`expo-dev-menu`, `DevMenuFABView`, the system image `gearshape.fill`),
+shown in development builds and Expo Go only. It is not in the app's code
+and never appears in a release build; it can be hidden from the developer
+menu itself («Tools button»).
